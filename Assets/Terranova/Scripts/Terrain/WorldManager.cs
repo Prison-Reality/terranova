@@ -113,15 +113,15 @@ namespace Terranova.Terrain
             // If you can see this cube but not the terrain, the shader is the problem
             var debugCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             debugCube.name = "DEBUG_TerrainHeightMarker";
-            float cx = WorldBlocksX * 0.5f;
-            float cz = WorldBlocksZ * 0.5f;
-            int h = GetHeightAtWorldPos((int)cx, (int)cz);
-            debugCube.transform.position = new Vector3(cx, h + 2, cz);
+            float centerWorldX = WorldBlocksX * 0.5f;
+            float centerWorldZ = WorldBlocksZ * 0.5f;
+            int h = GetHeightAtWorldPos((int)centerWorldX, (int)centerWorldZ);
+            debugCube.transform.position = new Vector3(centerWorldX, h + 2, centerWorldZ);
             debugCube.transform.localScale = new Vector3(5, 5, 5);
             var debugMat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
             debugMat.color = Color.red;
             debugCube.GetComponent<MeshRenderer>().material = debugMat;
-            Debug.Log($"DEBUG cube placed at ({cx}, {h + 2}, {cz})");
+            Debug.Log($"DEBUG cube placed at ({centerWorldX}, {h + 2}, {centerWorldZ})");
 
             // DEBUG: Also log first chunk mesh bounds
             var firstChunk = _chunks[new Vector2Int(0, 0)];
