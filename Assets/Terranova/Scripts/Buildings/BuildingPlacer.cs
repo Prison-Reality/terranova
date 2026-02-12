@@ -62,11 +62,10 @@ namespace Terranova.Buildings
 
             _buildingPropBlock ??= new MaterialPropertyBlock();
 
-            Shader litShader = Shader.Find("Universal Render Pipeline/Lit")
-                            ?? Shader.Find("Universal Render Pipeline/Simple Lit")
-                            ?? Shader.Find("Universal Render Pipeline/Unlit");
+            Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
+            Shader particleShader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
 
-            if (litShader == null)
+            if (litShader == null && particleShader == null)
             {
                 Debug.LogError("BuildingPlacer: No URP shader found.");
                 return false;
@@ -74,13 +73,16 @@ namespace Terranova.Buildings
 
             if (_buildingMaterial == null)
             {
-                _buildingMaterial = new Material(litShader);
+                _buildingMaterial = new Material(litShader != null ? litShader : particleShader);
                 _buildingMaterial.name = "Building_Shared (Auto)";
             }
 
+            // Use Particles/Unlit for preview – it handles transparency
+            // reliably without needing URP shader keywords
             if (_previewMaterial == null)
             {
-                _previewMaterial = new Material(litShader);
+                Shader previewShader = particleShader != null ? particleShader : litShader;
+                _previewMaterial = new Material(previewShader);
                 _previewMaterial.name = "BuildingPreview (Auto)";
                 _previewMaterial.SetFloat("_Surface", 1f);
                 _previewMaterial.SetFloat("_Blend", 0f);
@@ -88,6 +90,7 @@ namespace Terranova.Buildings
                 _previewMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
                 _previewMaterial.SetInt("_ZWrite", 0);
                 _previewMaterial.renderQueue = 3000;
+                _previewMaterial.color = _validColor;
             }
 
             Debug.Log("BuildingPlacer: Materials created successfully.");
