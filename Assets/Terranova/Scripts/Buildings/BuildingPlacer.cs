@@ -51,30 +51,47 @@ namespace Terranova.Buildings
         // Is the placement mode active?
         private bool _isPlacing;
 
-        private void Awake()
+        /// <summary>
+        /// Lazily create materials on first use. Shader.Find can fail when called
+        /// too early (e.g. from RuntimeInitializeOnLoadMethod), so we defer it.
+        /// </summary>
+        private bool EnsureMaterials()
         {
-            // Cache materials once at startup – Shader.Find is expensive and
-            // can return null in builds if the shader isn't in "Always Included Shaders".
-            Shader litShader = Shader.Find("Universal Render Pipeline/Lit");
+            if (_buildingMaterial != null && _previewMaterial != null)
+                return true;
+
+            _buildingPropBlock ??= new MaterialPropertyBlock();
+
+            Shader litShader = Shader.Find("Universal Render Pipeline/Lit")
+                            ?? Shader.Find("Universal Render Pipeline/Simple Lit")
+                            ?? Shader.Find("Universal Render Pipeline/Unlit");
+
             if (litShader == null)
             {
-                Debug.LogError("BuildingPlacer: Could not find URP/Lit shader. Assign materials manually.");
-                return;
+                Debug.LogError("BuildingPlacer: No URP shader found.");
+                return false;
             }
 
-            _buildingMaterial = new Material(litShader);
-            _buildingMaterial.name = "Building_Shared (Auto)";
+            if (_buildingMaterial == null)
+            {
+                _buildingMaterial = new Material(litShader);
+                _buildingMaterial.name = "Building_Shared (Auto)";
+            }
 
-            _previewMaterial = new Material(litShader);
-            _previewMaterial.name = "BuildingPreview (Auto)";
-            _previewMaterial.SetFloat("_Surface", 1f);  // Transparent mode
-            _previewMaterial.SetFloat("_Blend", 0f);    // Alpha blend
-            _previewMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            _previewMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            _previewMaterial.SetInt("_ZWrite", 0);
-            _previewMaterial.renderQueue = 3000;
+            if (_previewMaterial == null)
+            {
+                _previewMaterial = new Material(litShader);
+                _previewMaterial.name = "BuildingPreview (Auto)";
+                _previewMaterial.SetFloat("_Surface", 1f);
+                _previewMaterial.SetFloat("_Blend", 0f);
+                _previewMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _previewMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _previewMaterial.SetInt("_ZWrite", 0);
+                _previewMaterial.renderQueue = 3000;
+            }
 
-            _buildingPropBlock = new MaterialPropertyBlock();
+            Debug.Log("BuildingPlacer: Materials created successfully.");
+            return true;
         }
 
         private void Start()
@@ -176,7 +193,8 @@ namespace Terranova.Buildings
                 );
 
                 // Color indicates valid/invalid
-                _previewMaterial.color = _isValidPosition ? _validColor : _invalidColor;
+                if (_previewMaterial != null)
+                    _previewMaterial.color = _isValidPosition ? _validColor : _invalidColor;
             }
             else
             {
@@ -207,6 +225,9 @@ namespace Terranova.Buildings
         /// </summary>
         private void PlaceBuilding()
         {
+            if (!EnsureMaterials())
+                return;
+
             Vector3 position = _preview.transform.position;
 
             // Create the actual building (placeholder cube for MS1)
@@ -247,6 +268,9 @@ namespace Terranova.Buildings
             if (_preview != null)
                 Destroy(_preview);
 
+            if (!EnsureMaterials())
+                return;
+
             _preview = GameObject.CreatePrimitive(PrimitiveType.Cube);
             _preview.name = "BuildingPreview";
             _preview.transform.localScale = new Vector3(
@@ -260,7 +284,7 @@ namespace Terranova.Buildings
             if (collider != null)
                 collider.enabled = false;
 
-            // Reuse the cached preview material (created once in Awake)
+            // Apply the transparent preview material
             _previewRenderer = _preview.GetComponent<MeshRenderer>();
             _previewMaterial.color = _validColor;
             _previewRenderer.material = _previewMaterial;
