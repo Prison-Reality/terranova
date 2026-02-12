@@ -87,4 +87,12 @@ namespace Terranova.Core
         public string BuildingName;
         public UnityEngine.Vector3 Position;
     }
+
+    /// <summary>
+    /// Fired when the settler population changes (spawn, death, birth).
+    /// </summary>
+    public struct PopulationChangedEvent
+    {
+        public int CurrentPopulation;
+    }
 }

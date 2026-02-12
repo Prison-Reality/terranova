@@ -38,6 +38,8 @@ namespace Terranova.UI
         private static readonly string[] SPEED_LABELS = { "❚❚", "1x", "2x", "3x" };
         private int _currentSpeedIndex = 1; // Start at 1x
 
+        private int _settlers;
+
         private Text _resourceText;
         private Text _eventText;
         private Text _epochText;
@@ -52,6 +54,9 @@ namespace Terranova.UI
 
             // Listen for building placements to update resource counts
             EventBus.Subscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+
+            // Listen for population changes
+            EventBus.Subscribe<PopulationChangedEvent>(OnPopulationChanged);
         }
 
         private void Update()
@@ -63,6 +68,12 @@ namespace Terranova.UI
                 if (_eventDisplayTimer <= 0 && _eventText != null)
                     _eventText.text = "";
             }
+        }
+
+        private void OnPopulationChanged(PopulationChangedEvent evt)
+        {
+            _settlers = evt.CurrentPopulation;
+            UpdateDisplay();
         }
 
         private void OnBuildingPlaced(BuildingPlacedEvent evt)
@@ -85,7 +96,7 @@ namespace Terranova.UI
         private void UpdateDisplay()
         {
             if (_resourceText != null)
-                _resourceText.text = $"Wood: {_wood}    Stone: {_stone}";
+                _resourceText.text = $"Wood: {_wood}    Stone: {_stone}    Settlers: {_settlers}";
         }
 
         /// <summary>
@@ -283,6 +294,7 @@ namespace Terranova.UI
         private void OnDestroy()
         {
             EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+            EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
 
             // Clean up button listeners to prevent memory leaks
             if (_speedButtons != null)
