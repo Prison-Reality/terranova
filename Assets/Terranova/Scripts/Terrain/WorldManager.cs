@@ -93,8 +93,21 @@ namespace Terranova.Terrain
                 chunk.RebuildMesh(GetBlockAtWorldPos);
             }
 
+            // Diagnostics: verify mesh generation
+            int totalVerts = 0;
+            foreach (var c in _chunks.Values)
+            {
+                var mf = c.GetComponent<MeshFilter>();
+                int verts = mf != null && mf.mesh != null ? mf.mesh.vertexCount : 0;
+                totalVerts += verts;
+                if (verts == 0)
+                    Debug.LogWarning($"{c.gameObject.name} has 0 vertices!");
+            }
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
-                      $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={_seed}");
+                      $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={_seed}, " +
+                      $"total vertices={totalVerts}");
+            Debug.Log($"Materials: solid={_solidMaterial?.shader?.name ?? "NULL"}, " +
+                      $"water={_waterMaterial?.shader?.name ?? "NULL"}");
         }
 
         /// <summary>
