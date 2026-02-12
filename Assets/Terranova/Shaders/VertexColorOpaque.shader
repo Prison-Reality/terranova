@@ -87,8 +87,13 @@ Shader "Terranova/VertexColorOpaque"
             #pragma vertex ShadowVert
             #pragma fragment ShadowFrag
 
+            // Need both Core and Lighting for shadow bias + light direction
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+            // _LightDirection is set by URP during shadow pass rendering
+            float3 _LightDirection;
 
             struct Attributes
             {
@@ -106,7 +111,7 @@ Shader "Terranova/VertexColorOpaque"
                 Varyings output;
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
-                output.positionCS = TransformWorldToHClip(ApplyShadowBias(posWS, normalWS, GetMainLight().direction));
+                output.positionCS = TransformWorldToHClip(ApplyShadowBias(posWS, normalWS, _LightDirection));
                 return output;
             }
 

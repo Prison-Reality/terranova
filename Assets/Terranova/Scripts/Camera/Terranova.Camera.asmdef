@@ -2,7 +2,8 @@
     "name": "Terranova.Camera",
     "rootNamespace": "Terranova.Camera",
     "references": [
-        "Terranova.Core"
+        "Terranova.Core",
+        "Terranova.Terrain"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
