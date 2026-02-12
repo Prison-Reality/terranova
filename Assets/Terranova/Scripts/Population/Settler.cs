@@ -22,6 +22,7 @@ namespace Terranova.Population
         private const float MIN_PAUSE = 1f;
         private const float MAX_PAUSE = 3.5f;
         private const float ARRIVAL_THRESHOLD = 0.3f;
+        private const float CAMPFIRE_AVOID_RADIUS = 1.2f; // Stay this far from campfire center
 
         // ─── Visual Settings ─────────────────────────────────────
 
@@ -283,6 +284,26 @@ namespace Terranova.Population
 
             Vector3 newPos = pos + step;
 
+            // Avoid walking through the campfire block
+            Vector3 toCampfire = newPos - _campfirePosition;
+            toCampfire.y = 0f;
+            if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
+            {
+                // Deflect away from campfire instead of walking through it
+                if (_currentTask == null)
+                {
+                    _state = SettlerState.IdlePausing;
+                    _stateTimer = Random.Range(0.5f, 1f);
+                    return false;
+                }
+                // On a task: nudge around the campfire
+                Vector3 deflect = toCampfire.magnitude > 0.01f
+                    ? toCampfire.normalized * CAMPFIRE_AVOID_RADIUS
+                    : Vector3.right * CAMPFIRE_AVOID_RADIUS;
+                newPos = _campfirePosition + deflect;
+                newPos.y = pos.y;
+            }
+
             // Snap Y to terrain
             var world = WorldManager.Instance;
             if (world != null)
@@ -339,7 +360,14 @@ namespace Terranova.Population
 
                 if (height >= 0 && surface.IsSolid())
                 {
-                    _walkTarget = new Vector3(x, height + 1f, z);
+                    // Don't pick a target on top of the campfire
+                    Vector3 candidate = new Vector3(x, height + 1f, z);
+                    Vector3 toCampfire = candidate - _campfirePosition;
+                    toCampfire.y = 0f;
+                    if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
+                        continue;
+
+                    _walkTarget = candidate;
                     return true;
                 }
             }

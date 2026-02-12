@@ -35,6 +35,7 @@ namespace Terranova.Core
             EnsureUI();
             EnsureEventSystem();
             EnsureSettlerSpawner();
+            EnsureDebugTaskAssigner();
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
@@ -122,6 +123,20 @@ namespace Terranova.Core
             var go = new GameObject("SettlerSpawner");
             go.AddComponent<SettlerSpawner>();
             Debug.Log("GameBootstrapper: Created SettlerSpawner.");
+        }
+
+        /// <summary>
+        /// DEBUG ONLY - Creates the debug task assigner (press T to assign tasks).
+        /// Remove this when building-driven task assignment exists (Story 4.4).
+        /// </summary>
+        private static void EnsureDebugTaskAssigner()
+        {
+            if (Object.FindFirstObjectByType<DebugTaskAssigner>() != null)
+                return;
+
+            var go = new GameObject("DebugTaskAssigner");
+            go.AddComponent<DebugTaskAssigner>();
+            Debug.Log("GameBootstrapper: Created DebugTaskAssigner (press T to assign tasks).");
         }
     }
 }

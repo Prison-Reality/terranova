@@ -25,13 +25,6 @@ namespace Terranova.Population
         [Tooltip("Radius (in blocks) around the campfire where settlers spawn.")]
         [SerializeField] private float _spawnRadius = 3f;
 
-        [Header("Demo Tasks (Story 1.4)")]
-        [Tooltip("How many settlers get demo gather tasks at start.")]
-        [SerializeField] private int _demoTaskCount = 2;
-
-        [Tooltip("How far from campfire demo task targets are placed.")]
-        [SerializeField] private float _demoTaskRadius = 15f;
-
         // Track whether we've already spawned (to avoid double-spawning)
         private bool _hasSpawned;
 
@@ -63,12 +56,9 @@ namespace Terranova.Population
             Vector3 campfirePos = PlaceCampfire(world);
 
             // Spawn settlers in a circle around the campfire
-            var settlers = SpawnSettlers(world, campfirePos);
+            SpawnSettlers(world, campfirePos);
 
-            // Assign demo tasks to first N settlers (Story 1.4)
-            AssignDemoTasks(world, settlers, campfirePos);
-
-            Debug.Log($"SettlerSpawner: Placed campfire and {settlers.Count} settlers " +
+            Debug.Log($"SettlerSpawner: Placed campfire and {_initialSettlerCount} settlers " +
                       $"at world center ({campfirePos.x:F0}, {campfirePos.z:F0}).");
         }
 
@@ -120,9 +110,8 @@ namespace Terranova.Population
         /// Spawn settlers evenly distributed in a circle around the campfire.
         /// Each settler snaps to the terrain surface independently.
         /// </summary>
-        private System.Collections.Generic.List<Settler> SpawnSettlers(WorldManager world, Vector3 campfirePos)
+        private void SpawnSettlers(WorldManager world, Vector3 campfirePos)
         {
-            var settlers = new System.Collections.Generic.List<Settler>();
             int count = _initialSettlerCount;
             float angleStep = 360f / count;
 
@@ -147,64 +136,12 @@ namespace Terranova.Population
 
                 var settler = settlerObj.AddComponent<Settler>();
                 settler.Initialize(i, campfirePos);
-                settlers.Add(settler);
             }
 
             EventBus.Publish(new PopulationChangedEvent
             {
-                CurrentPopulation = settlers.Count
+                CurrentPopulation = count
             });
-
-            return settlers;
-        }
-
-        /// <summary>
-        /// Assign demo gather tasks to the first N settlers (Story 1.4).
-        /// This demonstrates the work cycle with placeholder targets.
-        /// Will be replaced by building-driven task assignment in Story 4.4.
-        /// </summary>
-        private void AssignDemoTasks(WorldManager world, System.Collections.Generic.List<Settler> settlers, Vector3 campfirePos)
-        {
-            SettlerTaskType[] demoTypes = { SettlerTaskType.GatherWood, SettlerTaskType.GatherStone };
-
-            for (int i = 0; i < _demoTaskCount && i < settlers.Count; i++)
-            {
-                // Find a valid target position at demoTaskRadius from campfire
-                Vector3 target = FindValidTargetPosition(world, campfirePos, _demoTaskRadius);
-                if (target == Vector3.zero)
-                    continue;
-
-                var taskType = demoTypes[i % demoTypes.Length];
-                float duration = SettlerTask.GetDefaultDuration(taskType);
-                var task = new SettlerTask(taskType, target, campfirePos, duration);
-
-                settlers[i].AssignTask(task);
-                Debug.Log($"SettlerSpawner: Assigned {taskType} demo task to Settler_{i}.");
-            }
-        }
-
-        /// <summary>
-        /// Find a valid terrain position at approximately the given distance from center.
-        /// </summary>
-        private Vector3 FindValidTargetPosition(WorldManager world, Vector3 center, float radius)
-        {
-            for (int attempt = 0; attempt < 10; attempt++)
-            {
-                float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
-                float r = Random.Range(radius * 0.8f, radius * 1.2f);
-                float x = center.x + Mathf.Cos(angle) * r;
-                float z = center.z + Mathf.Sin(angle) * r;
-
-                int blockX = Mathf.FloorToInt(x);
-                int blockZ = Mathf.FloorToInt(z);
-                int height = world.GetHeightAtWorldPos(blockX, blockZ);
-
-                if (height >= 0 && world.GetSurfaceTypeAtWorldPos(blockX, blockZ).IsSolid())
-                    return new Vector3(x, height + 1f, z);
-            }
-
-            Debug.LogWarning("SettlerSpawner: Could not find valid target for demo task.");
-            return Vector3.zero;
         }
 
         /// <summary>
