@@ -221,7 +221,9 @@ namespace Terranova.Camera
         }
 
         /// <summary>
-        /// Keep the camera pivot within world boundaries.
+        /// Keep the camera pivot within world boundaries and follow terrain height.
+        /// The pivot Y smoothly tracks the terrain surface so the camera doesn't
+        /// sink into hills or float above valleys when panning.
         /// </summary>
         private void ClampToWorldBounds()
         {
@@ -232,6 +234,16 @@ namespace Terranova.Camera
             float padding = 10f;
             _pivotPosition.x = Mathf.Clamp(_pivotPosition.x, -padding, world.WorldBlocksX + padding);
             _pivotPosition.z = Mathf.Clamp(_pivotPosition.z, -padding, world.WorldBlocksZ + padding);
+
+            // Follow terrain height so the camera stays grounded when panning
+            int terrainHeight = world.GetHeightAtWorldPos(
+                Mathf.FloorToInt(_pivotPosition.x),
+                Mathf.FloorToInt(_pivotPosition.z));
+            if (terrainHeight >= 0)
+            {
+                _pivotPosition.y = Mathf.Lerp(_pivotPosition.y, terrainHeight,
+                    Time.deltaTime * _zoomSmoothing);
+            }
         }
 
         /// <summary>
