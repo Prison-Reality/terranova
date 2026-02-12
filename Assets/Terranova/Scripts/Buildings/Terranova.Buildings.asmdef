@@ -3,7 +3,8 @@
     "rootNamespace": "Terranova.Buildings",
     "references": [
         "Terranova.Core",
-        "Terranova.Terrain"
+        "Terranova.Terrain",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -3,7 +3,8 @@
     "rootNamespace": "Terranova.Camera",
     "references": [
         "Terranova.Core",
-        "Terranova.Terrain"
+        "Terranova.Terrain",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
