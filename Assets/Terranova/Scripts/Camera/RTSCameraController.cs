@@ -41,6 +41,13 @@ namespace Terranova.Camera
         [Tooltip("Mouse rotation speed (degrees per pixel of mouse movement).")]
         [SerializeField] private float _rotateSpeed = 0.3f;
 
+        [Tooltip("Smoothing speed for snap-to-90° when releasing MMB.")]
+        [SerializeField] private float _snapSmoothing = 10f;
+
+        [Header("Touch Preparation (MS4)")]
+        [Tooltip("Safe zone in points from screen edges. Touch input inside this zone is ignored to prevent accidental gestures. GDD spec: 20pt.")]
+        [SerializeField] private float _safeZonePoints = 20f;
+
         [Header("Initial Position")]
         [Tooltip("Starting camera angle (degrees from horizontal). 60 = steep top-down, 30 = more side view.")]
         [SerializeField] private float _defaultPitch = 50f;
@@ -56,6 +63,9 @@ namespace Terranova.Camera
         // the actual camera is offset from this point.
         private Vector3 _pivotPosition;
         private float _yaw;
+        private float _targetYaw;
+        private bool _isRotatingWithMouse;
+        private bool _isSnapping;
         private bool _initialized;
 
         private void Start()
@@ -154,23 +164,66 @@ namespace Terranova.Camera
         }
 
         /// <summary>
-        /// Q/E keys to rotate the camera around the pivot.
+        /// Rotate the camera via MMB drag or Q/E keys.
+        /// MMB drag: free rotation while held, snaps to nearest 90° on release.
+        /// Q/E keys: instant snap to next 90° step.
+        /// Ref: Gesture Lexicon v0.4, CAM-03.
         /// </summary>
         private void HandleRotation()
         {
+            var mouse = Mouse.current;
             var kb = Keyboard.current;
-            if (kb == null) return;
 
-            float rotateInput = 0f;
-            if (kb.eKey.isPressed) rotateInput += 1f;
-            if (kb.qKey.isPressed) rotateInput -= 1f;
+            // MMB drag rotation (free rotation while held, snap on release)
+            if (mouse != null)
+            {
+                if (mouse.middleButton.isPressed)
+                {
+                    float mouseDelta = mouse.delta.ReadValue().x;
+                    _yaw += mouseDelta * _rotateSpeed;
+                    _isRotatingWithMouse = true;
+                    _isSnapping = false;
+                }
+                else if (_isRotatingWithMouse)
+                {
+                    // MMB released – start snapping to nearest 90°
+                    _isRotatingWithMouse = false;
+                    _targetYaw = Mathf.Round(_yaw / 90f) * 90f;
+                    _isSnapping = true;
+                }
+            }
 
-            if (!Mathf.Approximately(rotateInput, 0f))
-                _yaw += rotateInput * _rotateSpeed * 100f * Time.deltaTime;
+            // Q/E keys: instant snap to next 90° step
+            if (kb != null && !_isRotatingWithMouse)
+            {
+                if (kb.eKey.wasPressedThisFrame)
+                {
+                    _targetYaw = Mathf.Ceil((_yaw + 1f) / 90f) * 90f;
+                    _isSnapping = true;
+                }
+                else if (kb.qKey.wasPressedThisFrame)
+                {
+                    _targetYaw = Mathf.Floor((_yaw - 1f) / 90f) * 90f;
+                    _isSnapping = true;
+                }
+            }
+
+            // Smoothly interpolate to snap target
+            if (_isSnapping)
+            {
+                _yaw = Mathf.Lerp(_yaw, _targetYaw, Time.deltaTime * _snapSmoothing);
+                if (Mathf.Abs(_yaw - _targetYaw) < 0.5f)
+                {
+                    _yaw = _targetYaw;
+                    _isSnapping = false;
+                }
+            }
         }
 
         /// <summary>
-        /// Keep the camera pivot within world boundaries.
+        /// Keep the camera pivot within world boundaries and follow terrain height.
+        /// The pivot Y smoothly tracks the terrain surface so the camera doesn't
+        /// sink into hills or float above valleys when panning.
         /// </summary>
         private void ClampToWorldBounds()
         {
@@ -181,6 +234,32 @@ namespace Terranova.Camera
             float padding = 10f;
             _pivotPosition.x = Mathf.Clamp(_pivotPosition.x, -padding, world.WorldBlocksX + padding);
             _pivotPosition.z = Mathf.Clamp(_pivotPosition.z, -padding, world.WorldBlocksZ + padding);
+
+            // Follow terrain height so the camera stays grounded when panning
+            int terrainHeight = world.GetHeightAtWorldPos(
+                Mathf.FloorToInt(_pivotPosition.x),
+                Mathf.FloorToInt(_pivotPosition.z));
+            if (terrainHeight >= 0)
+            {
+                _pivotPosition.y = Mathf.Lerp(_pivotPosition.y, terrainHeight,
+                    Time.deltaTime * _zoomSmoothing);
+            }
+        }
+
+        /// <summary>
+        /// Check if a screen position falls within the safe zone (too close to edges).
+        /// Touch input in the safe zone should be ignored to prevent accidental gestures.
+        /// In MS1 this is not used (mouse input), but prepared for MS4 touch integration.
+        /// </summary>
+        public bool IsInSafeZone(Vector2 screenPosition)
+        {
+            // Convert points to pixels (on iPad, 1pt ≈ 2px at 2x scale)
+            float safePixels = _safeZonePoints * (Screen.dpi > 0 ? Screen.dpi / 163f : 1f);
+
+            return screenPosition.x < safePixels
+                || screenPosition.x > Screen.width - safePixels
+                || screenPosition.y < safePixels
+                || screenPosition.y > Screen.height - safePixels;
         }
 
         /// <summary>
