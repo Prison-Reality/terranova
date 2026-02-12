@@ -301,3 +301,10 @@ The human producer is learning C# and Unity. When writing code:
 | `docs/research.md` | Research system, discoveries per epoch |
 | `docs/terraforming.md` | Unified terraforming mechanics, build cost coupling |
 | `docs/terranova-gesture-lexicon-v04.md` | Complete touch control specification |
+
+---
+
+## QA Rule
+After completing each feature, perform a self-review before moving on.
+Check for: GC allocations in Update loops, null safety, memory leaks, 
+magic numbers, and event-bus architecture compliance.
