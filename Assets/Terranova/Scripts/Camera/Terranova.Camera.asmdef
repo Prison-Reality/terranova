@@ -1,0 +1,16 @@
+{
+    "name": "Terranova.Camera",
+    "rootNamespace": "Terranova.Camera",
+    "references": [
+        "Terranova.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
