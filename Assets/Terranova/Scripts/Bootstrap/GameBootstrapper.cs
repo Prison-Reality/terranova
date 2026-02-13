@@ -138,7 +138,9 @@ namespace Terranova.Core
 
             var go = new GameObject("HUD");
             go.AddComponent<ResourceDisplay>();
-            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay.");
+            // Story 4.5: Build menu lives on the same Canvas
+            go.AddComponent<BuildMenu>();
+            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay and BuildMenu.");
         }
 
         private static void EnsureEventSystem()
