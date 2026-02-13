@@ -21,6 +21,7 @@ namespace Terranova.Terrain
     /// representation changes. Pathfinding and game logic still use block data.
     ///
     /// Story 0.1: Mesh-Generierung aus Voxel-Daten
+    /// Story 0.2: Seamless chunk boundaries via custom normals
     /// </summary>
     public static class SmoothTerrainBuilder
     {
@@ -59,11 +60,12 @@ namespace Terranova.Terrain
 
             FillVertexGrids(chunk, getHeight, getSurface, heightGrid, colorGrid);
 
-            // Step 2: Generate terrain surface mesh
+            // Step 2: Generate terrain surface mesh with custom normals
             var terrain = new MeshData();
             BuildTerrainSurface(heightGrid, colorGrid, terrain);
+            ComputeTerrainNormals(heightGrid, chunk, getHeight, terrain);
 
-            // Step 3: Generate water surface mesh
+            // Step 3: Generate water surface mesh (flat normals pointing up)
             var water = new MeshData();
             BuildWaterSurface(heightGrid, water);
 
@@ -238,6 +240,12 @@ namespace Terranova.Terrain
                     mesh.Colors.Add(waterColor);
                     mesh.Colors.Add(waterColor);
 
+                    // Water is flat – all normals point straight up
+                    mesh.Normals.Add(Vector3.up);
+                    mesh.Normals.Add(Vector3.up);
+                    mesh.Normals.Add(Vector3.up);
+                    mesh.Normals.Add(Vector3.up);
+
                     // Two triangles forming a quad
                     mesh.Triangles.Add(vertStart);
                     mesh.Triangles.Add(vertStart + 1);
@@ -247,6 +255,116 @@ namespace Terranova.Terrain
                     mesh.Triangles.Add(vertStart + 3);
                 }
             }
+        }
+
+        // ─── Normal Computation ───────────────────────────────────
+
+        /// <summary>
+        /// Compute per-vertex normals from the height grid using central differences.
+        ///
+        /// Unlike RecalculateNormals() which only considers triangles within this mesh,
+        /// this method computes normals analytically from terrain heights. For boundary
+        /// vertices (vx=0/16, vz=0/16) where neighbors fall outside the 17×17 grid,
+        /// heights are fetched via the HeightLookup delegate. This guarantees that
+        /// adjacent chunks produce identical normals at shared boundary vertices,
+        /// eliminating visible lighting seams.
+        ///
+        /// Story 0.2: Chunk-Grenzen nahtlos
+        /// </summary>
+        private static void ComputeTerrainNormals(
+            float[,] heightGrid,
+            ChunkData chunk,
+            HeightLookup getHeight,
+            MeshData terrain)
+        {
+            for (int vx = 0; vx < VERTS_PER_SIDE; vx++)
+            {
+                for (int vz = 0; vz < VERTS_PER_SIDE; vz++)
+                {
+                    // Central differences: sample heights one step in each direction
+                    float hLeft  = GetHeightForNormal(vx - 1, vz, heightGrid, chunk, getHeight);
+                    float hRight = GetHeightForNormal(vx + 1, vz, heightGrid, chunk, getHeight);
+                    float hDown  = GetHeightForNormal(vx, vz - 1, heightGrid, chunk, getHeight);
+                    float hUp    = GetHeightForNormal(vx, vz + 1, heightGrid, chunk, getHeight);
+
+                    // Heightmap normal: cross product of tangent vectors along X and Z
+                    // Tangent X = (2, hRight - hLeft, 0), Tangent Z = (0, hUp - hDown, 2)
+                    // Normal = cross(tangentZ, tangentX) = (hLeft - hRight, 2, hDown - hUp)
+                    Vector3 normal = new Vector3(hLeft - hRight, 2f, hDown - hUp).normalized;
+                    terrain.Normals.Add(normal);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get the averaged vertex height at position (vx, vz) for normal computation.
+        /// Returns the cached value from heightGrid if within bounds, otherwise
+        /// computes the averaged height using the same 4-column averaging logic.
+        /// </summary>
+        private static float GetHeightForNormal(
+            int vx, int vz,
+            float[,] heightGrid,
+            ChunkData chunk,
+            HeightLookup getHeight)
+        {
+            // Within the 17×17 grid – use cached value
+            if (vx >= 0 && vx < VERTS_PER_SIDE && vz >= 0 && vz < VERTS_PER_SIDE)
+                return heightGrid[vx, vz];
+
+            // Outside the grid – compute the averaged height for this vertex position.
+            // This happens for boundary normals where we need heights one step beyond
+            // the grid edge (e.g. vx=-1 or vx=17).
+            return ComputeAveragedHeight(vx, vz, chunk, getHeight);
+        }
+
+        /// <summary>
+        /// Compute the averaged vertex height at an arbitrary vertex position.
+        /// Replicates the same 4-column averaging logic as FillVertexGrids but for
+        /// positions outside the 17×17 grid. Used only for boundary normal computation.
+        /// </summary>
+        private static float ComputeAveragedHeight(
+            int vx, int vz,
+            ChunkData chunk,
+            HeightLookup getHeight)
+        {
+            int originX = chunk.ChunkX * ChunkData.WIDTH;
+            int originZ = chunk.ChunkZ * ChunkData.DEPTH;
+
+            float totalHeight = 0f;
+            int count = 0;
+
+            // Average the 4 surrounding columns (same offsets as FillVertexGrids)
+            for (int dx = -1; dx <= 0; dx++)
+            {
+                for (int dz = -1; dz <= 0; dz++)
+                {
+                    int localX = vx + dx;
+                    int localZ = vz + dz;
+                    int h;
+
+                    if (localX >= 0 && localX < ChunkData.WIDTH &&
+                        localZ >= 0 && localZ < ChunkData.DEPTH)
+                    {
+                        h = chunk.GetHeightAt(localX, localZ);
+                    }
+                    else if (getHeight != null)
+                    {
+                        h = getHeight(originX + localX, originZ + localZ);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    if (h < 0)
+                        continue;
+
+                    totalHeight += h;
+                    count++;
+                }
+            }
+
+            return count > 0 ? (totalHeight / count) + 1f : SEA_LEVEL + 1f;
         }
 
         // ─── Color Mapping ──────────────────────────────────────
@@ -288,6 +406,10 @@ namespace Terranova.Terrain
             var allColors = new List<Color>(terrain.Colors);
             allColors.AddRange(water.Colors);
 
+            // Merge normals: terrain has custom normals, water has flat up normals
+            var allNormals = new List<Vector3>(terrain.Normals);
+            allNormals.AddRange(water.Normals);
+
             // Offset water triangle indices
             var waterTris = new List<int>(water.Triangles.Count);
             for (int i = 0; i < water.Triangles.Count; i++)
@@ -296,10 +418,11 @@ namespace Terranova.Terrain
             mesh.subMeshCount = 2;
             mesh.SetVertices(allVerts);
             mesh.SetColors(allColors);
+            mesh.SetNormals(allNormals);
             mesh.SetTriangles(terrain.Triangles, 0);
             mesh.SetTriangles(waterTris, 1);
 
-            mesh.RecalculateNormals();
+            // No RecalculateNormals() – we use custom normals for seamless chunk boundaries
             mesh.RecalculateBounds();
 
             return mesh;
@@ -313,6 +436,7 @@ namespace Terranova.Terrain
             public readonly List<Vector3> Vertices = new();
             public readonly List<int> Triangles = new();
             public readonly List<Color> Colors = new();
+            public readonly List<Vector3> Normals = new();
         }
     }
 }
