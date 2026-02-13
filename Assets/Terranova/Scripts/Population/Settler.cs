@@ -33,14 +33,9 @@ namespace Terranova.Population
 
         // ─── Visual Settings ─────────────────────────────────────
 
-        private static readonly Color[] SETTLER_COLORS =
-        {
-            new Color(0.85f, 0.25f, 0.25f), // Red
-            new Color(0.25f, 0.55f, 0.85f), // Blue
-            new Color(0.25f, 0.75f, 0.35f), // Green
-            new Color(0.85f, 0.65f, 0.15f), // Orange
-            new Color(0.70f, 0.30f, 0.75f), // Purple
-        };
+        private static readonly Color DEFAULT_COLOR = Color.white;
+        private static readonly Color WOODCUTTER_COLOR = new Color(0.55f, 0.33f, 0.14f); // Brown
+        private static readonly Color HUNTER_COLOR = new Color(0.20f, 0.65f, 0.20f);     // Green
 
         private static Material _sharedMaterial;
         private static readonly int ColorID = Shader.PropertyToID("_BaseColor");
@@ -102,9 +97,7 @@ namespace Terranova.Population
         // ─── Instance Data ───────────────────────────────────────
 
         private MaterialPropertyBlock _propBlock;
-        private int _colorIndex;
-
-        public int ColorIndex => _colorIndex;
+        private MeshRenderer _visualRenderer;
 
         // ─── Initialization ──────────────────────────────────────
 
@@ -113,7 +106,6 @@ namespace Terranova.Population
         /// </summary>
         public void Initialize(int colorIndex, Vector3 campfirePosition)
         {
-            _colorIndex = colorIndex;
             _campfirePosition = campfirePosition;
 
             CreateVisual();
@@ -174,6 +166,7 @@ namespace Terranova.Population
 
             _state = SettlerState.WalkingToTarget;
             _agent.speed = TASK_WALK_SPEED * task.SpeedMultiplier;
+            UpdateRoleColor();
             Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target (speed x{task.SpeedMultiplier})");
             return true;
         }
@@ -200,6 +193,7 @@ namespace Terranova.Population
             _state = SettlerState.IdlePausing;
             _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
             DestroyCargo();
+            UpdateRoleColor();
             Debug.Log($"[{name}] Task ended ({wasTask}) - returning to IDLE");
         }
 
@@ -313,6 +307,7 @@ namespace Terranova.Population
                 _agent.speed = WALK_SPEED;
                 _state = SettlerState.IdlePausing;
                 _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
+                UpdateRoleColor();
                 return;
             }
 
@@ -591,13 +586,35 @@ namespace Terranova.Population
 
             EnsureSharedMaterial();
 
-            var meshRenderer = visual.GetComponent<MeshRenderer>();
-            meshRenderer.sharedMaterial = _sharedMaterial;
+            _visualRenderer = visual.GetComponent<MeshRenderer>();
+            _visualRenderer.sharedMaterial = _sharedMaterial;
 
             _propBlock = new MaterialPropertyBlock();
-            Color color = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
+            _propBlock.SetColor(ColorID, DEFAULT_COLOR);
+            _visualRenderer.SetPropertyBlock(_propBlock);
+        }
+
+        /// <summary>
+        /// Update the settler's capsule color to reflect their current role.
+        /// White = idle, Brown = woodcutter, Green = hunter.
+        /// </summary>
+        private void UpdateRoleColor()
+        {
+            if (_visualRenderer == null || _propBlock == null) return;
+
+            Color color = DEFAULT_COLOR;
+            if (_currentTask != null)
+            {
+                color = _currentTask.TaskType switch
+                {
+                    SettlerTaskType.GatherWood => WOODCUTTER_COLOR,
+                    SettlerTaskType.Hunt => HUNTER_COLOR,
+                    _ => DEFAULT_COLOR
+                };
+            }
+
             _propBlock.SetColor(ColorID, color);
-            meshRenderer.SetPropertyBlock(_propBlock);
+            _visualRenderer.SetPropertyBlock(_propBlock);
         }
 
         private static void EnsureSharedMaterial()

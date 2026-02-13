@@ -17,15 +17,15 @@ namespace Terranova.Terrain
         public const int SEA_LEVEL = 64;
 
         // How far above sea level hills can rise
-        private const int MAX_HILL_HEIGHT = 20;
+        private const int MAX_HILL_HEIGHT = 4;
 
         // How far below sea level valleys can go (creates water pools)
-        private const int MAX_VALLEY_DEPTH = 8;
+        private const int MAX_VALLEY_DEPTH = 1;
 
         // Noise frequencies – smaller values = smoother, larger hills
-        private const float PRIMARY_SCALE = 0.02f;
-        private const float DETAIL_SCALE = 0.08f;
-        private const float DETAIL_WEIGHT = 0.3f;
+        private const float PRIMARY_SCALE = 0.01f;
+        private const float DETAIL_SCALE = 0.04f;
+        private const float DETAIL_WEIGHT = 0.15f;
 
         // Dirt layer thickness before stone
         private const int DIRT_DEPTH = 4;
