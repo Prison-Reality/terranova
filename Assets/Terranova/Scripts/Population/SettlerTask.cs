@@ -80,13 +80,14 @@ namespace Terranova.Population
 
         /// <summary>
         /// Default work durations per task type (in game-time seconds).
+        /// Epoch I.1: Twigs and stones are picked up instantly (0s).
         /// </summary>
         public static float GetDefaultDuration(SettlerTaskType type)
         {
             return type switch
             {
-                SettlerTaskType.GatherWood => 4f,
-                SettlerTaskType.GatherStone => 5f,
+                SettlerTaskType.GatherWood => 0f,   // Pick up twig instantly
+                SettlerTaskType.GatherStone => 0f,   // Pick up stone instantly
                 SettlerTaskType.Hunt => 6f,
                 SettlerTaskType.Build => 8f,
                 _ => 3f
