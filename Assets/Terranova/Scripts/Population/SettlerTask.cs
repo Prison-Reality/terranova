@@ -44,6 +44,12 @@ namespace Terranova.Population
         public Building TargetBuilding { get; set; }
 
         /// <summary>
+        /// Walk speed multiplier. Specialized workers (building-assigned) move faster.
+        /// Default 1.0, building workers get 2.0.
+        /// </summary>
+        public float SpeedMultiplier { get; set; } = 1f;
+
+        /// <summary>
         /// Whether the target still exists (tree not yet felled, etc.).
         /// Checks ResourceNode for gather tasks, Building for build tasks.
         /// </summary>

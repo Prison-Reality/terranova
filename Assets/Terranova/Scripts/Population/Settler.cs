@@ -173,8 +173,8 @@ namespace Terranova.Population
             }
 
             _state = SettlerState.WalkingToTarget;
-            _agent.speed = TASK_WALK_SPEED;
-            Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target");
+            _agent.speed = TASK_WALK_SPEED * task.SpeedMultiplier;
+            Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target (speed x{task.SpeedMultiplier})");
             return true;
         }
 
@@ -330,7 +330,7 @@ namespace Terranova.Population
                 return;
             }
             _state = SettlerState.ReturningToBase;
-            _agent.speed = TASK_WALK_SPEED;
+            _agent.speed = TASK_WALK_SPEED * _currentTask.SpeedMultiplier;
             Debug.Log($"[{name}] Work done - RETURNING to base");
         }
 
@@ -414,7 +414,7 @@ namespace Terranova.Population
                     return;
                 }
                 _state = SettlerState.WalkingToTarget;
-                _agent.speed = TASK_WALK_SPEED;
+                _agent.speed = TASK_WALK_SPEED * _currentTask.SpeedMultiplier;
                 Debug.Log($"[{name}] REPEATING cycle ({_currentTask.TaskType})");
             }
             else

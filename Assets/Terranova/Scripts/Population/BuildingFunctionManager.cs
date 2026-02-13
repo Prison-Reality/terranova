@@ -93,10 +93,6 @@ namespace Terranova.Population
         /// </summary>
         private void AssignWorkersToBuildings()
         {
-            var campfire = GameObject.Find("Campfire");
-            if (campfire == null) return;
-            Vector3 basePos = campfire.transform.position;
-
             var buildings = FindObjectsByType<Building>(FindObjectsSortMode.None);
             var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
 
@@ -163,8 +159,10 @@ namespace Terranova.Population
                 if (!nearestNode.TryReserve()) continue;
 
                 float duration = SettlerTask.GetDefaultDuration(taskType);
-                var task = new SettlerTask(taskType, nearestNode.transform.position, basePos, duration);
+                var task = new SettlerTask(taskType, nearestNode.transform.position,
+                    building.EntrancePosition, duration);
                 task.TargetResource = nearestNode;
+                task.SpeedMultiplier = 2f;
 
                 if (nearest.AssignTask(task))
                 {
