@@ -287,7 +287,7 @@ The human producer is learning C# and Unity. When writing code:
 6. **Reference the GDD.** The design documents in `docs/` are the source of truth. If a design decision is unclear, ask rather than assume.
 7. **Flag scope creep.** If implementing something "right" would take significantly longer than a simpler version, say so and suggest the simpler version for now.
 8. Remember that the human producer is using **GitHub Desktop** for all push/merge/pull activities
-9. Use the fine-grained token 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 to push to the GitHub project https://github.com/Prison-Reality/terranova
+9. Push directly to https://github.com/Prison-Reality/terranova (credentials are stored in the git credential store at ~/.git-credentials)
 
 
 ---
