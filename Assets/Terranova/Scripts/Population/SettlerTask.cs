@@ -1,5 +1,6 @@
 using UnityEngine;
 using Terranova.Core;
+using Terranova.Buildings;
 using Terranova.Resources;
 
 namespace Terranova.Population
@@ -12,6 +13,7 @@ namespace Terranova.Population
     ///
     /// Story 1.3/1.4: Basic task system with placeholder positions.
     /// Story 3.2: Tasks can reference a ResourceNode for gathering.
+    /// Story 4.2: Tasks can reference a Building for construction.
     ///
     /// Note: SettlerTaskType enum is defined in Terranova.Core (EventBus.cs)
     /// to avoid circular assembly dependencies.
@@ -36,16 +38,22 @@ namespace Terranova.Population
         public ResourceNode TargetResource { get; set; }
 
         /// <summary>
+        /// The building being constructed, or null for non-build tasks.
+        /// Story 4.2: Links task to a construction site.
+        /// </summary>
+        public Building TargetBuilding { get; set; }
+
+        /// <summary>
         /// Whether the target still exists (tree not yet felled, etc.).
-        /// Automatically checks the ResourceNode if one is linked.
+        /// Checks ResourceNode for gather tasks, Building for build tasks.
         /// </summary>
         public bool IsTargetValid
         {
             get
             {
                 if (!_isTargetValid) return false;
-                // If linked to a resource, check if it's depleted
                 if (TargetResource != null && TargetResource.IsDepleted) return false;
+                if (TargetBuilding != null && TargetBuilding.IsConstructed) return false;
                 return true;
             }
             set => _isTargetValid = value;

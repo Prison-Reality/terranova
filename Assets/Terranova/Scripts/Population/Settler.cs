@@ -187,6 +187,10 @@ namespace Terranova.Population
             if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
                 _currentTask.TargetResource.Release();
 
+            // Release construction reservation if we had one (Story 4.2)
+            if (_currentTask?.TargetBuilding != null && _currentTask.TargetBuilding.IsBeingBuilt)
+                _currentTask.TargetBuilding.ReleaseConstruction();
+
             var wasTask = _currentTask?.TaskType;
             _currentTask = null;
             _isMoving = false;
@@ -287,12 +291,29 @@ namespace Terranova.Population
         /// <summary>
         /// Perform work at the target location.
         /// Story 3.2: On completion, calls ResourceNode.CompleteGathering().
+        /// Story 4.2: Build tasks complete construction and go idle (no delivery).
         /// </summary>
         private void UpdateWorking()
         {
             _stateTimer -= Time.deltaTime;
             if (_stateTimer > 0f)
                 return;
+
+            // Story 4.2: Build tasks complete the construction and return to idle
+            if (_currentTask?.TaskType == SettlerTaskType.Build)
+            {
+                if (_currentTask.TargetBuilding != null)
+                    _currentTask.TargetBuilding.CompleteConstruction();
+
+                Debug.Log($"[{name}] Construction complete - going idle");
+                _currentTask = null; // Don't call ClearTask – construction is already released
+                _isMoving = false;
+                _agent.ResetPath();
+                _agent.speed = WALK_SPEED;
+                _state = SettlerState.IdlePausing;
+                _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
+                return;
+            }
 
             // Complete gathering on the resource node (Story 3.2)
             if (_currentTask?.TargetResource != null)

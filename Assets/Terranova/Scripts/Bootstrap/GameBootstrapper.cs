@@ -39,6 +39,7 @@ namespace Terranova.Core
             EnsureSettlerSpawner();
             EnsureResourceSpawner();
             EnsureResourceTaskAssigner();
+            EnsureConstructionTaskAssigner();
             EnsureDebugTerrainModifier();
             EnsureDebugTaskAssigner();
 
@@ -181,6 +182,20 @@ namespace Terranova.Core
             var go = new GameObject("ResourceTaskAssigner");
             go.AddComponent<ResourceTaskAssigner>();
             Debug.Log("GameBootstrapper: Created ResourceTaskAssigner.");
+        }
+
+        /// <summary>
+        /// Assigns idle settlers to unfinished construction sites.
+        /// Story 4.2: Baufortschritt
+        /// </summary>
+        private static void EnsureConstructionTaskAssigner()
+        {
+            if (Object.FindFirstObjectByType<ConstructionTaskAssigner>() != null)
+                return;
+
+            var go = new GameObject("ConstructionTaskAssigner");
+            go.AddComponent<ConstructionTaskAssigner>();
+            Debug.Log("GameBootstrapper: Created ConstructionTaskAssigner.");
         }
 
         /// <summary>

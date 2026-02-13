@@ -50,6 +50,7 @@ namespace Terranova.UI
 
             // Listen for events that affect the display
             EventBus.Subscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+            EventBus.Subscribe<BuildingCompletedEvent>(OnBuildingCompleted);
             EventBus.Subscribe<PopulationChangedEvent>(OnPopulationChanged);
             EventBus.Subscribe<ResourceChangedEvent>(OnResourceChanged);
         }
@@ -81,13 +82,21 @@ namespace Terranova.UI
 
         private void OnBuildingPlaced(BuildingPlacedEvent evt)
         {
-            // Story 4.1: Resources are now deducted by BuildingPlacer via ResourceManager.
-            // We only need to refresh the display and show a notification.
             UpdateDisplay();
 
             if (_eventText != null)
             {
-                _eventText.text = $"Built {evt.BuildingName}!";
+                _eventText.text = $"Building {evt.BuildingName}...";
+                _eventDisplayTimer = 3f;
+            }
+        }
+
+        /// <summary>Story 4.2: Notification when construction completes.</summary>
+        private void OnBuildingCompleted(BuildingCompletedEvent evt)
+        {
+            if (_eventText != null)
+            {
+                _eventText.text = $"{evt.BuildingName} complete!";
                 _eventDisplayTimer = 3f;
             }
         }
@@ -302,6 +311,7 @@ namespace Terranova.UI
         private void OnDestroy()
         {
             EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+            EventBus.Unsubscribe<BuildingCompletedEvent>(OnBuildingCompleted);
             EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
             EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
 
