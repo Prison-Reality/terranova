@@ -140,6 +140,7 @@ namespace Terranova.Core
     public enum ResourceType
     {
         Wood,
-        Stone
+        Stone,
+        Food
     }
 }

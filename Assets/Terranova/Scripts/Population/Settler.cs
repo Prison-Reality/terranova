@@ -523,7 +523,7 @@ namespace Terranova.Population
             {
                 SettlerTaskType.GatherWood => new Color(0.45f, 0.28f, 0.10f),  // Brown
                 SettlerTaskType.GatherStone => new Color(0.55f, 0.55f, 0.55f), // Gray
-                SettlerTaskType.Hunt => new Color(0.85f, 0.35f, 0.35f),        // Red
+                SettlerTaskType.Hunt => new Color(0.20f, 0.65f, 0.20f),        // Green (berries)
                 _ => Color.white
             };
 

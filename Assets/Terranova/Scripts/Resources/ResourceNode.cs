@@ -4,7 +4,7 @@ using Terranova.Core;
 namespace Terranova.Resources
 {
     /// <summary>
-    /// A gatherable resource in the world (tree or rock).
+    /// A gatherable resource in the world (tree, rock, or berry bush).
     ///
     /// Settlers reserve a node, gather from it (one gather per work cycle),
     /// and the node scales down with each gather until depleted.
@@ -20,9 +20,11 @@ namespace Terranova.Resources
 
         private const float RESPAWN_TIME_WOOD = 60f;   // Game-time seconds
         private const float RESPAWN_TIME_STONE = 90f;
+        private const float RESPAWN_TIME_FOOD = 45f;
 
         private const int DEFAULT_GATHERS_WOOD = 3;
         private const int DEFAULT_GATHERS_STONE = 3;
+        private const int DEFAULT_GATHERS_FOOD = 2;
 
         // ─── State ─────────────────────────────────────────────
 
@@ -35,7 +37,6 @@ namespace Terranova.Resources
         public bool IsAvailable => !IsDepleted && !IsReserved;
 
         private Vector3 _originalScale;
-        private MeshRenderer _renderer;
         private float _respawnTimer;
         private bool _respawning;
 
@@ -47,10 +48,15 @@ namespace Terranova.Resources
         public void Initialize(ResourceType type)
         {
             Type = type;
-            MaxGathers = type == ResourceType.Wood ? DEFAULT_GATHERS_WOOD : DEFAULT_GATHERS_STONE;
+            MaxGathers = type switch
+            {
+                ResourceType.Wood => DEFAULT_GATHERS_WOOD,
+                ResourceType.Stone => DEFAULT_GATHERS_STONE,
+                ResourceType.Food => DEFAULT_GATHERS_FOOD,
+                _ => 3
+            };
             RemainingGathers = MaxGathers;
             _originalScale = transform.localScale;
-            _renderer = GetComponent<MeshRenderer>();
         }
 
         // ─── Gathering API ─────────────────────────────────────
@@ -84,15 +90,18 @@ namespace Terranova.Resources
             IsReserved = false;
             RemainingGathers--;
 
+            Debug.Log($"[ResourceNode] {Type} gathered at ({transform.position.x:F0}, {transform.position.z:F0})" +
+                      $" - {RemainingGathers}/{MaxGathers} remaining");
+
             if (IsDepleted)
             {
                 Deplete();
             }
             else
             {
-                // Scale down proportionally (min 50% of original size)
+                // Scale down aggressively so the change is clearly visible
                 float t = (float)RemainingGathers / MaxGathers;
-                transform.localScale = _originalScale * Mathf.Lerp(0.5f, 1f, t);
+                transform.localScale = _originalScale * Mathf.Lerp(0.2f, 1f, t);
             }
         }
 
@@ -100,12 +109,18 @@ namespace Terranova.Resources
 
         private void Deplete()
         {
-            // Hide the object
-            if (_renderer != null)
-                _renderer.enabled = false;
+            // Hide ALL renderers (handles compound objects like berry bushes)
+            foreach (var r in GetComponentsInChildren<MeshRenderer>())
+                r.enabled = false;
 
             // Start respawn timer
-            _respawnTimer = Type == ResourceType.Wood ? RESPAWN_TIME_WOOD : RESPAWN_TIME_STONE;
+            _respawnTimer = Type switch
+            {
+                ResourceType.Wood => RESPAWN_TIME_WOOD,
+                ResourceType.Stone => RESPAWN_TIME_STONE,
+                ResourceType.Food => RESPAWN_TIME_FOOD,
+                _ => RESPAWN_TIME_WOOD
+            };
             _respawning = true;
 
             EventBus.Publish(new ResourceDepletedEvent
@@ -114,7 +129,7 @@ namespace Terranova.Resources
                 Position = transform.position
             });
 
-            Debug.Log($"[ResourceNode] {Type} depleted at ({transform.position.x:F0}, {transform.position.z:F0})" +
+            Debug.Log($"[ResourceNode] {Type} DEPLETED at ({transform.position.x:F0}, {transform.position.z:F0})" +
                       $" - respawns in {_respawnTimer:F0}s");
         }
 
@@ -141,8 +156,9 @@ namespace Terranova.Resources
             transform.localScale = _originalScale;
             _respawning = false;
 
-            if (_renderer != null)
-                _renderer.enabled = true;
+            // Show ALL renderers again
+            foreach (var r in GetComponentsInChildren<MeshRenderer>())
+                r.enabled = true;
 
             Debug.Log($"[ResourceNode] {Type} respawned at ({transform.position.x:F0}, {transform.position.z:F0})");
         }
@@ -169,6 +185,7 @@ namespace Terranova.Resources
             {
                 ResourceType.Wood => SettlerTaskType.GatherWood,
                 ResourceType.Stone => SettlerTaskType.GatherStone,
+                ResourceType.Food => SettlerTaskType.Hunt,
                 _ => SettlerTaskType.None
             };
         }
