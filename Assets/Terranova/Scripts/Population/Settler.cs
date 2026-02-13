@@ -64,6 +64,11 @@ namespace Terranova.Population
 
         // ─── Task System (Story 1.3) ─────────────────────────────
 
+        // Simple delivery counter (placeholder until economy system in Feature 3.x)
+        private static int _totalWoodDelivered;
+        private static int _totalStoneDelivered;
+        private static int _totalFoodDelivered;
+
         private SettlerTask _currentTask;
 
         /// <summary>The settler's current task, or null if idle.</summary>
@@ -245,26 +250,52 @@ namespace Terranova.Population
             if (_stateTimer > 0f)
                 return;
 
-            // Fire delivery event so UI and economy systems can react
+            // Deliver resources and log to console
             if (_currentTask != null)
             {
+                string resourceName = TrackDelivery(_currentTask.TaskType);
+
                 EventBus.Publish(new ResourceDeliveredEvent
                 {
                     TaskType = _currentTask.TaskType,
                     Position = transform.position
                 });
+
+                Debug.Log($"[{name}] DELIVERED {resourceName} " +
+                          $"(totals: Wood={_totalWoodDelivered}, Stone={_totalStoneDelivered}, Food={_totalFoodDelivered})");
             }
 
             if (_currentTask != null && _currentTask.IsTargetValid)
             {
                 _state = SettlerState.WalkingToTarget;
                 _walkTarget = _currentTask.TargetPosition;
-                Debug.Log($"[{name}] Delivery complete - REPEATING cycle ({_currentTask.TaskType})");
+                Debug.Log($"[{name}] REPEATING cycle ({_currentTask.TaskType})");
             }
             else
             {
                 Debug.Log($"[{name}] Target no longer valid - going idle");
                 ClearTask();
+            }
+        }
+
+        /// <summary>
+        /// Increment delivery counters. Placeholder until economy system (Feature 3.x).
+        /// </summary>
+        private static string TrackDelivery(SettlerTaskType taskType)
+        {
+            switch (taskType)
+            {
+                case SettlerTaskType.GatherWood:
+                    _totalWoodDelivered++;
+                    return "1x Wood";
+                case SettlerTaskType.GatherStone:
+                    _totalStoneDelivered++;
+                    return "1x Stone";
+                case SettlerTaskType.Hunt:
+                    _totalFoodDelivered++;
+                    return "1x Food";
+                default:
+                    return $"1x {taskType}";
             }
         }
 
@@ -291,24 +322,29 @@ namespace Terranova.Population
 
             Vector3 newPos = pos + step;
 
-            // Avoid walking through the campfire block
-            Vector3 toCampfire = newPos - _campfirePosition;
-            toCampfire.y = 0f;
-            if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
+            // Avoid walking through the campfire block,
+            // but NOT when returning to base (the base IS the campfire)
+            bool isReturning = _state == SettlerState.ReturningToBase
+                            || _state == SettlerState.Delivering;
+            if (!isReturning)
             {
-                // Deflect away from campfire instead of walking through it
-                if (_currentTask == null)
+                Vector3 toCampfire = newPos - _campfirePosition;
+                toCampfire.y = 0f;
+                if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
                 {
-                    _state = SettlerState.IdlePausing;
-                    _stateTimer = Random.Range(0.5f, 1f);
-                    return false;
+                    if (_currentTask == null)
+                    {
+                        _state = SettlerState.IdlePausing;
+                        _stateTimer = Random.Range(0.5f, 1f);
+                        return false;
+                    }
+                    // On a task going outbound: nudge around the campfire
+                    Vector3 deflect = toCampfire.magnitude > 0.01f
+                        ? toCampfire.normalized * CAMPFIRE_AVOID_RADIUS
+                        : Vector3.right * CAMPFIRE_AVOID_RADIUS;
+                    newPos = _campfirePosition + deflect;
+                    newPos.y = pos.y;
                 }
-                // On a task: nudge around the campfire
-                Vector3 deflect = toCampfire.magnitude > 0.01f
-                    ? toCampfire.normalized * CAMPFIRE_AVOID_RADIUS
-                    : Vector3.right * CAMPFIRE_AVOID_RADIUS;
-                newPos = _campfirePosition + deflect;
-                newPos.y = pos.y;
             }
 
             // Snap Y to terrain
