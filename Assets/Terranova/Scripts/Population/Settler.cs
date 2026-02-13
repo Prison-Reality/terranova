@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
 using Terranova.Terrain;
@@ -22,7 +23,6 @@ namespace Terranova.Population
         private const float MIN_PAUSE = 1f;
         private const float MAX_PAUSE = 3.5f;
         private const float ARRIVAL_THRESHOLD = 0.3f;
-        private const float CAMPFIRE_AVOID_RADIUS = 1.2f; // Stay this far from campfire center
 
         // ─── Visual Settings ─────────────────────────────────────
 
@@ -59,8 +59,12 @@ namespace Terranova.Population
 
         private SettlerState _state = SettlerState.IdlePausing;
         private Vector3 _campfirePosition;
-        private Vector3 _walkTarget;
         private float _stateTimer;
+
+        // ─── Pathfinding (Story 2.1) ───────────────────────────
+
+        private List<Vector3> _currentPath = new List<Vector3>();
+        private int _pathIndex;
 
         // ─── Task System (Story 1.3) ─────────────────────────────
 
@@ -121,8 +125,15 @@ namespace Terranova.Population
             }
 
             _currentTask = task;
+
+            if (!ComputePath(task.TargetPosition))
+            {
+                Debug.Log($"[{name}] REJECTED {task.TaskType} - no path to target");
+                _currentTask = null;
+                return false;
+            }
+
             _state = SettlerState.WalkingToTarget;
-            _walkTarget = task.TargetPosition;
             Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target");
             return true;
         }
@@ -183,7 +194,7 @@ namespace Terranova.Population
 
         private void UpdateIdleWalking()
         {
-            if (MoveToward(_walkTarget, WALK_SPEED))
+            if (FollowPath(WALK_SPEED))
             {
                 _state = SettlerState.IdlePausing;
                 _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
@@ -204,7 +215,7 @@ namespace Terranova.Population
                 return;
             }
 
-            if (MoveToward(_currentTask.TargetPosition, TASK_WALK_SPEED))
+            if (FollowPath(TASK_WALK_SPEED))
             {
                 _state = SettlerState.Working;
                 _stateTimer = _currentTask.WorkDuration;
@@ -222,8 +233,13 @@ namespace Terranova.Population
             if (_stateTimer > 0f)
                 return;
 
+            if (!ComputePath(_currentTask.BasePosition))
+            {
+                Debug.LogWarning($"[{name}] No path back to base - going idle");
+                ClearTask();
+                return;
+            }
             _state = SettlerState.ReturningToBase;
-            _walkTarget = _currentTask.BasePosition;
             Debug.Log($"[{name}] Work done - RETURNING to base");
         }
 
@@ -232,7 +248,7 @@ namespace Terranova.Population
         /// </summary>
         private void UpdateReturningToBase()
         {
-            if (MoveToward(_currentTask.BasePosition, TASK_WALK_SPEED))
+            if (FollowPath(TASK_WALK_SPEED))
             {
                 _state = SettlerState.Delivering;
                 _stateTimer = 0.5f;
@@ -267,8 +283,13 @@ namespace Terranova.Population
 
             if (_currentTask != null && _currentTask.IsTargetValid)
             {
+                if (!ComputePath(_currentTask.TargetPosition))
+                {
+                    Debug.LogWarning($"[{name}] No path to target for repeat - going idle");
+                    ClearTask();
+                    return;
+                }
                 _state = SettlerState.WalkingToTarget;
-                _walkTarget = _currentTask.TargetPosition;
                 Debug.Log($"[{name}] REPEATING cycle ({_currentTask.TaskType})");
             }
             else
@@ -299,11 +320,61 @@ namespace Terranova.Population
             }
         }
 
+        // ─── Pathfinding (Story 2.1) ───────────────────────────
+
+        /// <summary>
+        /// Compute an A* path from the current position to the destination.
+        /// Stores result in _currentPath/_pathIndex.
+        /// Returns false if no path exists.
+        /// </summary>
+        private bool ComputePath(Vector3 destination)
+        {
+            var world = WorldManager.Instance;
+            if (world == null) return false;
+
+            Vector2Int start = new Vector2Int(
+                Mathf.FloorToInt(transform.position.x),
+                Mathf.FloorToInt(transform.position.z));
+            Vector2Int end = new Vector2Int(
+                Mathf.FloorToInt(destination.x),
+                Mathf.FloorToInt(destination.z));
+
+            _currentPath = VoxelPathfinder.FindPath(world, start, end);
+            _pathIndex = 0;
+
+            if (_currentPath.Count == 0 && start != end)
+            {
+                Debug.Log($"[{name}] No path from ({start.x},{start.y}) to ({end.x},{end.y})");
+                return false;
+            }
+
+            Debug.Log($"[{name}] Path: {_currentPath.Count} waypoints to ({end.x},{end.y})");
+            return true;
+        }
+
+        /// <summary>
+        /// Advance along the computed path. Returns true when final
+        /// waypoint has been reached (or path is empty = already there).
+        /// </summary>
+        private bool FollowPath(float speed)
+        {
+            if (_pathIndex >= _currentPath.Count)
+                return true; // Already at destination
+
+            if (MoveToward(_currentPath[_pathIndex], speed))
+            {
+                _pathIndex++;
+                if (_pathIndex >= _currentPath.Count)
+                    return true; // Reached final waypoint
+            }
+            return false;
+        }
+
         // ─── Shared Movement ─────────────────────────────────────
 
         /// <summary>
-        /// Move toward a target position with terrain snapping.
-        /// Returns true when the target is reached.
+        /// Move toward a single waypoint with terrain snapping.
+        /// Returns true when the waypoint is reached.
         /// </summary>
         private bool MoveToward(Vector3 target, float speed)
         {
@@ -322,55 +393,18 @@ namespace Terranova.Population
 
             Vector3 newPos = pos + step;
 
-            // Avoid walking through the campfire block,
-            // but NOT when returning to base (the base IS the campfire)
-            bool isReturning = _state == SettlerState.ReturningToBase
-                            || _state == SettlerState.Delivering;
-            if (!isReturning)
-            {
-                Vector3 toCampfire = newPos - _campfirePosition;
-                toCampfire.y = 0f;
-                if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
-                {
-                    if (_currentTask == null)
-                    {
-                        _state = SettlerState.IdlePausing;
-                        _stateTimer = Random.Range(0.5f, 1f);
-                        return false;
-                    }
-                    // On a task going outbound: nudge around the campfire
-                    Vector3 deflect = toCampfire.magnitude > 0.01f
-                        ? toCampfire.normalized * CAMPFIRE_AVOID_RADIUS
-                        : Vector3.right * CAMPFIRE_AVOID_RADIUS;
-                    newPos = _campfirePosition + deflect;
-                    newPos.y = pos.y;
-                }
-            }
-
-            // Snap Y to terrain
+            // Snap Y to terrain (safety net – pathfinder already avoids bad cells)
             var world = WorldManager.Instance;
             if (world != null)
             {
                 int blockX = Mathf.FloorToInt(newPos.x);
                 int blockZ = Mathf.FloorToInt(newPos.z);
                 int height = world.GetHeightAtWorldPos(blockX, blockZ);
-                VoxelType surface = world.GetSurfaceTypeAtWorldPos(blockX, blockZ);
 
-                if (height < 0 || !surface.IsSolid())
+                if (height < 0)
                 {
-                    // Hit impassable terrain
-                    if (_currentTask != null)
-                    {
-                        // On a task: target may be unreachable, go idle
-                        ClearTask();
-                    }
-                    else
-                    {
-                        // Idle: just pick a new target
-                        _state = SettlerState.IdlePausing;
-                        _stateTimer = Random.Range(0.5f, 1f);
-                    }
-                    return false;
+                    // Out of world – skip this waypoint
+                    return true;
                 }
 
                 newPos.y = height + 1f;
@@ -398,21 +432,19 @@ namespace Terranova.Population
 
                 int blockX = Mathf.FloorToInt(x);
                 int blockZ = Mathf.FloorToInt(z);
-                int height = world.GetHeightAtWorldPos(blockX, blockZ);
-                VoxelType surface = world.GetSurfaceTypeAtWorldPos(blockX, blockZ);
 
-                if (height >= 0 && surface.IsSolid())
-                {
-                    // Don't pick a target on top of the campfire
-                    Vector3 candidate = new Vector3(x, height + 1f, z);
-                    Vector3 toCampfire = candidate - _campfirePosition;
-                    toCampfire.y = 0f;
-                    if (toCampfire.magnitude < CAMPFIRE_AVOID_RADIUS)
-                        continue;
+                if (!VoxelPathfinder.IsWalkable(world, blockX, blockZ))
+                    continue;
 
-                    _walkTarget = candidate;
+                // Don't pick a target right on the campfire block
+                Vector3 candidate = new Vector3(x, 0f, z);
+                Vector3 toCampfire = candidate - _campfirePosition;
+                toCampfire.y = 0f;
+                if (toCampfire.magnitude < 1.2f)
+                    continue;
+
+                if (ComputePath(candidate))
                     return true;
-                }
             }
 
             return false;
