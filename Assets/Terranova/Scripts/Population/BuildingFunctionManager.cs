@@ -60,42 +60,31 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Clear HasWorker on buildings whose worker has gone idle or was reassigned.
+        /// Clear HasWorker on buildings whose assigned worker is gone or idle.
+        /// Uses the building's AssignedWorker reference for exact matching
+        /// (avoids false positives when multiple buildings share the same type).
         /// </summary>
         private void RefreshWorkerStatus()
         {
             var buildings = FindObjectsByType<Building>(FindObjectsSortMode.None);
-            var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
 
             foreach (var building in buildings)
             {
                 if (!building.HasWorker) continue;
 
-                // Check if any settler is currently working for this building
-                // (i.e., has a gather task targeting resources near this building)
-                bool hasActiveWorker = false;
-                foreach (var settler in settlers)
+                // Check if the specific assigned worker is still active
+                if (building.AssignedWorker == null)
                 {
-                    if (!settler.HasTask) continue;
-                    var task = settler.CurrentTask;
-                    if (task == null) continue;
-
-                    // Match by building type to task type
-                    var bType = building.Definition?.Type;
-                    if (bType == BuildingType.WoodcutterHut && task.TaskType == SettlerTaskType.GatherWood)
-                    {
-                        hasActiveWorker = true;
-                        break;
-                    }
-                    if (bType == BuildingType.HunterHut && task.TaskType == SettlerTaskType.Hunt)
-                    {
-                        hasActiveWorker = true;
-                        break;
-                    }
+                    building.HasWorker = false;
+                    continue;
                 }
 
-                if (!hasActiveWorker)
+                var settler = building.AssignedWorker.GetComponent<Settler>();
+                if (settler == null || !settler.HasTask)
+                {
                     building.HasWorker = false;
+                    building.AssignedWorker = null;
+                }
             }
         }
 
@@ -180,6 +169,7 @@ namespace Terranova.Population
                 if (nearest.AssignTask(task))
                 {
                     building.HasWorker = true;
+                    building.AssignedWorker = nearest.gameObject;
                     Debug.Log($"[BuildingFunction] Assigned {nearest.name} to {building.name}");
                 }
                 else

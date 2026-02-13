@@ -51,6 +51,9 @@ namespace Terranova.Buildings
         /// <summary>Whether this building currently has an assigned worker.</summary>
         public bool HasWorker { get; set; }
 
+        /// <summary>Reference to the settler currently assigned to work here.</summary>
+        public GameObject AssignedWorker { get; set; }
+
         /// <summary>
         /// World-space position of the building entrance.
         /// Settlers navigate here instead of the building center.
