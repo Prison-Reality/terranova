@@ -71,12 +71,15 @@ namespace Terranova.Population
             int centerX = world.WorldBlocksX / 2;
             int centerZ = world.WorldBlocksZ / 2;
 
-            // Find a flat, solid position near the world center.
-            // Buildings must stand on level terrain – no Y-offset hacks.
-            FindFlatSolidGround(world, ref centerX, ref centerZ);
+            // Find solid ground near the world center, then flatten terrain
+            // so campfire and settlers all stand on level ground.
+            FindSolidGround(world, ref centerX, ref centerZ);
 
-            // On flat terrain all 4 surrounding columns share the same height,
-            // so the smooth mesh surface is perfectly level at height + 1.
+            // Flatten terrain in a radius that covers the campfire + settler area.
+            // Settlers spawn at _spawnRadius (~3 blocks), so radius 4 covers everything.
+            world.FlattenTerrain(centerX, centerZ, Mathf.CeilToInt(_spawnRadius) + 1);
+
+            // Position on smooth mesh surface (re-query after flattening)
             float y = world.GetSmoothedHeightAtWorldPos(centerX + 0.5f, centerZ + 0.5f);
             Vector3 position = new Vector3(centerX + 0.5f, y, centerZ + 0.5f);
 
@@ -147,15 +150,13 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Search outward from the given position for a flat, solid spot where
-        /// the block at (x,z) and its 3 direct neighbours all share the same
-        /// height. Buildings must stand on level terrain.
-        /// Falls back to "any solid ground" if no perfectly flat spot is found.
+        /// Search outward from the given position for solid ground.
+        /// The terrain will be flattened afterwards, so we only need solid surface.
         /// </summary>
-        private void FindFlatSolidGround(WorldManager world, ref int x, ref int z)
+        private static void FindSolidGround(WorldManager world, ref int x, ref int z)
         {
             // Check the starting position first
-            if (IsFlatSolid(world, x, z))
+            if (IsSolid(world, x, z))
                 return;
 
             // Search in expanding rings up to 32 blocks away
@@ -171,7 +172,7 @@ namespace Terranova.Population
                         int testX = x + dx;
                         int testZ = z + dz;
 
-                        if (IsFlatSolid(world, testX, testZ))
+                        if (IsSolid(world, testX, testZ))
                         {
                             x = testX;
                             z = testZ;
@@ -181,36 +182,16 @@ namespace Terranova.Population
                 }
             }
 
-            Debug.LogWarning("SettlerSpawner: Could not find flat solid ground near world center!");
+            Debug.LogWarning("SettlerSpawner: Could not find solid ground near world center!");
         }
 
         /// <summary>
-        /// Check if a 1×1 footprint at (x,z) is flat (all 4 surrounding columns
-        /// share the same height) and the surface is solid ground.
+        /// Check if the surface at (x,z) is solid ground.
         /// </summary>
-        private static bool IsFlatSolid(WorldManager world, int x, int z)
+        private static bool IsSolid(WorldManager world, int x, int z)
         {
             int h = world.GetHeightAtWorldPos(x, z);
-            if (h < 0 || !world.GetSurfaceTypeAtWorldPos(x, z).IsSolid())
-                return false;
-
-            // Check the 3 neighbours that share vertices with this block
-            for (int dx = 0; dx <= 1; dx++)
-            {
-                for (int dz = 0; dz <= 1; dz++)
-                {
-                    if (dx == 0 && dz == 0)
-                        continue;
-
-                    int nh = world.GetHeightAtWorldPos(x + dx, z + dz);
-                    if (nh != h)
-                        return false;
-                    if (!world.GetSurfaceTypeAtWorldPos(x + dx, z + dz).IsSolid())
-                        return false;
-                }
-            }
-
-            return true;
+            return h >= 0 && world.GetSurfaceTypeAtWorldPos(x, z).IsSolid();
         }
 
         /// <summary>

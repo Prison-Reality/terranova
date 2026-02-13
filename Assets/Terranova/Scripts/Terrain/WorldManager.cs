@@ -307,6 +307,86 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
+        /// Flatten terrain in a square area around (centerX, centerZ) so all columns
+        /// match the height of the center column. Columns that are too high get their
+        /// upper blocks removed (set to Air); columns that are too low get filled up
+        /// with the surface type of the center column.
+        ///
+        /// Rebuilds affected chunk meshes once at the end (not per block).
+        ///
+        /// Story 0.6: Flatten terrain before placing objects
+        /// </summary>
+        public void FlattenTerrain(int centerX, int centerZ, int radius)
+        {
+            int targetHeight = GetHeightAtWorldPos(centerX, centerZ);
+            if (targetHeight < 0)
+                return;
+
+            VoxelType surfaceType = GetSurfaceTypeAtWorldPos(centerX, centerZ);
+            if (!surfaceType.IsSolid())
+                surfaceType = VoxelType.Grass;
+
+            var affectedChunks = new HashSet<Vector2Int>();
+
+            for (int x = centerX - radius; x <= centerX + radius; x++)
+            {
+                for (int z = centerZ - radius; z <= centerZ + radius; z++)
+                {
+                    int currentHeight = GetHeightAtWorldPos(x, z);
+                    if (currentHeight < 0)
+                        continue;
+
+                    if (currentHeight > targetHeight)
+                    {
+                        // Remove blocks above target height
+                        for (int y = targetHeight + 1; y <= currentHeight; y++)
+                            SetBlockInternal(x, y, z, VoxelType.Air, affectedChunks);
+                    }
+                    else if (currentHeight < targetHeight)
+                    {
+                        // Fill blocks up to target height
+                        for (int y = currentHeight + 1; y <= targetHeight; y++)
+                            SetBlockInternal(x, y, z, surfaceType, affectedChunks);
+                    }
+                }
+            }
+
+            // Rebuild all affected chunks once
+            foreach (var key in affectedChunks)
+            {
+                if (_chunks.TryGetValue(key, out var chunk))
+                    chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos, chunk.CurrentLod);
+            }
+        }
+
+        /// <summary>
+        /// Set a block without rebuilding the mesh. Tracks which chunks are affected.
+        /// Used by FlattenTerrain for batch modifications.
+        /// </summary>
+        private void SetBlockInternal(int worldX, int worldY, int worldZ, VoxelType type,
+            HashSet<Vector2Int> affectedChunks)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            chunk.Data.SetBlock(localX, worldY, localZ, type);
+            affectedChunks.Add(key);
+
+            // Also mark neighbor chunks if at boundary (smooth mesh averaging crosses boundaries)
+            if (localX <= 0) affectedChunks.Add(new Vector2Int(chunkX - 1, chunkZ));
+            if (localX >= ChunkData.WIDTH - 1) affectedChunks.Add(new Vector2Int(chunkX + 1, chunkZ));
+            if (localZ <= 0) affectedChunks.Add(new Vector2Int(chunkX, chunkZ - 1));
+            if (localZ >= ChunkData.DEPTH - 1) affectedChunks.Add(new Vector2Int(chunkX, chunkZ + 1));
+        }
+
+        /// <summary>
         /// Modify a block at a world position and rebuild the affected chunk mesh.
         /// Also rebuilds neighbor chunks if the modification is at a boundary.
         ///
