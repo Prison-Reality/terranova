@@ -101,7 +101,7 @@ namespace Terranova.Terrain
             // across chunk boundaries – all data must exist first)
             foreach (var chunk in _chunks.Values)
             {
-                chunk.RebuildMesh(GetBlockAtWorldPos);
+                chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos);
             }
 
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
