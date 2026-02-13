@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Terranova.Terrain
 {
@@ -16,11 +17,21 @@ namespace Terranova.Terrain
     /// </summary>
     public class DebugTerrainModifier : MonoBehaviour
     {
+        private Mouse _mouse;
+
+        private void OnEnable()
+        {
+            _mouse = Mouse.current;
+        }
+
         private void Update()
         {
-            if (Input.GetMouseButtonDown(0))
+            if (_mouse == null)
+                return;
+
+            if (_mouse.leftButton.wasPressedThisFrame)
                 TryModify(remove: true);
-            else if (Input.GetMouseButtonDown(1))
+            else if (_mouse.rightButton.wasPressedThisFrame)
                 TryModify(remove: false);
         }
 
@@ -34,7 +45,7 @@ namespace Terranova.Terrain
             if (cam == null)
                 return;
 
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            Ray ray = cam.ScreenPointToRay(_mouse.position.ReadValue());
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
                 return;
 
@@ -47,13 +58,11 @@ namespace Terranova.Terrain
 
             if (remove)
             {
-                // Remove the surface block
                 world.ModifyBlock(blockX, height, blockZ, VoxelType.Air);
                 Debug.Log($"DebugTerrainModifier: Removed block at ({blockX}, {height}, {blockZ})");
             }
             else
             {
-                // Add a stone block on top of the current surface
                 int newY = height + 1;
                 if (newY < ChunkData.HEIGHT)
                 {
