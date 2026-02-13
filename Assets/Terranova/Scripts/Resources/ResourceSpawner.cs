@@ -101,7 +101,10 @@ namespace Terranova.Resources
                 if (!surface.IsSolid())
                     continue;
 
-                // Position on smooth mesh surface
+                // Flatten terrain under the object so it stands on level ground
+                world.FlattenTerrain(blockX, blockZ, 1);
+
+                // Position on smooth mesh surface (re-query after flattening)
                 float y = world.GetSmoothedHeightAtWorldPos(x, z);
 
                 var obj = GameObject.CreatePrimitive(shape);
