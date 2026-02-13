@@ -81,11 +81,25 @@ namespace Terranova.Core
 
     /// <summary>
     /// Fired when a building is placed in the world.
+    /// Story 4.1: Now includes the building definition and GameObject reference.
     /// </summary>
     public struct BuildingPlacedEvent
     {
         public string BuildingName;
         public UnityEngine.Vector3 Position;
+        /// <summary>The placed building GameObject.</summary>
+        public UnityEngine.GameObject BuildingObject;
+    }
+
+    /// <summary>
+    /// Fired when a building's construction is complete.
+    /// Story 4.2: Triggers building function activation.
+    /// </summary>
+    public struct BuildingCompletedEvent
+    {
+        public string BuildingName;
+        public UnityEngine.Vector3 Position;
+        public UnityEngine.GameObject BuildingObject;
     }
 
     /// <summary>

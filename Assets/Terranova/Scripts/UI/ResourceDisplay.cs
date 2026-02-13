@@ -22,11 +22,6 @@ namespace Terranova.UI
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
-        [Header("Starting Resources (MS1 test values)")]
-        [SerializeField] private int _wood = 50;
-        [SerializeField] private int _stone = 30;
-        [SerializeField] private int _food;
-
         [Header("UI Settings")]
         [Tooltip("Font size for resource text.")]
         [SerializeField] private int _fontSize = 24;
@@ -53,14 +48,10 @@ namespace Terranova.UI
             CreateUI();
             UpdateDisplay();
 
-            // Listen for building placements to update resource counts
+            // Listen for events that affect the display
             EventBus.Subscribe<BuildingPlacedEvent>(OnBuildingPlaced);
-
-            // Listen for population changes
             EventBus.Subscribe<PopulationChangedEvent>(OnPopulationChanged);
-
-            // Listen for resource deliveries from settlers
-            EventBus.Subscribe<ResourceDeliveredEvent>(OnResourceDelivered);
+            EventBus.Subscribe<ResourceChangedEvent>(OnResourceChanged);
         }
 
         private void Update()
@@ -80,32 +71,20 @@ namespace Terranova.UI
             UpdateDisplay();
         }
 
-        private void OnResourceDelivered(ResourceDeliveredEvent evt)
+        /// <summary>
+        /// Story 4.1: ResourceManager publishes this when resources change.
+        /// </summary>
+        private void OnResourceChanged(ResourceChangedEvent evt)
         {
-            switch (evt.TaskType)
-            {
-                case SettlerTaskType.GatherWood:
-                    _wood++;
-                    break;
-                case SettlerTaskType.GatherStone:
-                    _stone++;
-                    break;
-                case SettlerTaskType.Hunt:
-                    _food++;
-                    break;
-            }
             UpdateDisplay();
         }
 
         private void OnBuildingPlaced(BuildingPlacedEvent evt)
         {
-            // Deduct resources (placeholder – actual costs come from BuildingDefinition in Feature 4)
-            _wood = Mathf.Max(0, _wood - 5);
-            _stone = Mathf.Max(0, _stone);
-            _food = Mathf.Max(0, _food);
+            // Story 4.1: Resources are now deducted by BuildingPlacer via ResourceManager.
+            // We only need to refresh the display and show a notification.
             UpdateDisplay();
 
-            // Show notification
             if (_eventText != null)
             {
                 _eventText.text = $"Built {evt.BuildingName}!";
@@ -114,12 +93,18 @@ namespace Terranova.UI
         }
 
         /// <summary>
-        /// Refresh the resource text.
+        /// Refresh the resource text from ResourceManager.
+        /// Story 4.1: Now reads from central ResourceManager instead of local counters.
         /// </summary>
         private void UpdateDisplay()
         {
-            if (_resourceText != null)
-                _resourceText.text = $"Wood: {_wood}    Stone: {_stone}    Food: {_food}    Settlers: {_settlers}";
+            if (_resourceText == null) return;
+
+            var rm = ResourceManager.Instance;
+            if (rm != null)
+                _resourceText.text = $"Wood: {rm.Wood}    Stone: {rm.Stone}    Food: {rm.Food}    Settlers: {_settlers}";
+            else
+                _resourceText.text = $"Settlers: {_settlers}";
         }
 
         /// <summary>
@@ -318,7 +303,7 @@ namespace Terranova.UI
         {
             EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
             EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
-            EventBus.Unsubscribe<ResourceDeliveredEvent>(OnResourceDelivered);
+            EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
 
             // Clean up button listeners to prevent memory leaks
             if (_speedButtons != null)

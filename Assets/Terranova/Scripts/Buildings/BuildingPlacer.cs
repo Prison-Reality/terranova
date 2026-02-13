@@ -51,6 +51,10 @@ namespace Terranova.Buildings
         // Is the placement mode active?
         private bool _isPlacing;
 
+        // Story 4.1: Red flash feedback when resources insufficient
+        private const float FEEDBACK_DURATION = 0.4f;
+        private float _feedbackTimer;
+
         /// <summary>
         /// Lazily create materials on first use. Shader.Find can fail when called
         /// too early (e.g. from RuntimeInitializeOnLoadMethod), so we defer it.
@@ -110,6 +114,7 @@ namespace Terranova.Buildings
                 return;
 
             UpdatePreviewPosition();
+            UpdateFeedbackTimer();
 
             var mouse = Mouse.current;
             var kb = Keyboard.current;
@@ -227,16 +232,56 @@ namespace Terranova.Buildings
 
         /// <summary>
         /// Place the building at the preview's current position.
-        /// Creates a permanent building object and fires an event.
+        /// Story 4.1: Checks resource costs before placing. Deducts on confirm.
         /// </summary>
         private void PlaceBuilding()
         {
             if (!EnsureMaterials())
                 return;
 
+            // Story 4.1: Check if player can afford this building
+            var rm = ResourceManager.Instance;
+            if (rm != null && !rm.CanAfford(_selectedBuilding.WoodCost, _selectedBuilding.StoneCost))
+            {
+                Debug.Log($"Cannot afford {_selectedBuilding.DisplayName} " +
+                          $"(need {_selectedBuilding.WoodCost}W/{_selectedBuilding.StoneCost}S, " +
+                          $"have {rm.Wood}W/{rm.Stone}S)");
+                ShowCostFeedback();
+                return;
+            }
+
+            // Deduct resources
+            rm?.Spend(_selectedBuilding.WoodCost, _selectedBuilding.StoneCost);
+
             Vector3 position = _preview.transform.position;
 
-            // Create the actual building (placeholder cube for MS1)
+            // Create the actual building (placeholder cube)
+            var building = CreateBuildingObject(position);
+
+            // Story 2.3: Add Building component with NavMeshObstacle and entrance point
+            var buildingComponent = building.AddComponent<Building>();
+            buildingComponent.Initialize(_selectedBuilding);
+
+            // Notify other systems via event bus
+            EventBus.Publish(new BuildingPlacedEvent
+            {
+                BuildingName = _selectedBuilding.DisplayName,
+                Position = position,
+                BuildingObject = building
+            });
+
+            Debug.Log($"Placed {_selectedBuilding.DisplayName} at {position} " +
+                      $"(cost: {_selectedBuilding.WoodCost}W, {_selectedBuilding.StoneCost}S)");
+
+            // Continue placement mode (build loop – player can keep placing)
+            // As per GDD gesture lexicon: "build loop for serial construction"
+        }
+
+        /// <summary>
+        /// Create the physical building GameObject at the given position.
+        /// </summary>
+        private GameObject CreateBuildingObject(Vector3 position)
+        {
             var building = GameObject.CreatePrimitive(PrimitiveType.Cube);
             building.name = _selectedBuilding.DisplayName;
             building.transform.position = position;
@@ -247,27 +292,25 @@ namespace Terranova.Buildings
             );
 
             // Apply building color via shared material + per-instance PropertyBlock
-            // (avoids creating a new Material per placement → no material leak)
             var renderer = building.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = _buildingMaterial;
             _buildingPropBlock.SetColor(ColorID, _selectedBuilding.PreviewColor);
             renderer.SetPropertyBlock(_buildingPropBlock);
 
-            // Story 2.3: Add Building component with NavMeshObstacle and entrance point
-            var buildingComponent = building.AddComponent<Building>();
-            buildingComponent.Initialize(_selectedBuilding);
+            return building;
+        }
 
-            // Notify other systems via event bus
-            EventBus.Publish(new BuildingPlacedEvent
+        /// <summary>
+        /// Visual feedback when placement is rejected due to insufficient resources.
+        /// Story 4.1: Brief red flash on the preview ghost.
+        /// </summary>
+        private void ShowCostFeedback()
+        {
+            if (_previewMaterial != null)
             {
-                BuildingName = _selectedBuilding.DisplayName,
-                Position = position
-            });
-
-            Debug.Log($"Placed {_selectedBuilding.DisplayName} at {position}");
-
-            // Continue placement mode (build loop – player can keep placing)
-            // As per GDD gesture lexicon: "build loop for serial construction"
+                _previewMaterial.color = _invalidColor;
+                _feedbackTimer = FEEDBACK_DURATION;
+            }
         }
 
         /// <summary>
@@ -298,6 +341,17 @@ namespace Terranova.Buildings
             _previewRenderer = _preview.GetComponent<MeshRenderer>();
             _previewMaterial.color = _validColor;
             _previewRenderer.material = _previewMaterial;
+        }
+
+        /// <summary>
+        /// Reset preview color after cost-feedback flash.
+        /// </summary>
+        private void UpdateFeedbackTimer()
+        {
+            if (_feedbackTimer <= 0f) return;
+            _feedbackTimer -= Time.deltaTime;
+            if (_feedbackTimer <= 0f && _previewMaterial != null)
+                _previewMaterial.color = _isValidPosition ? _validColor : _invalidColor;
         }
 
         private void OnDestroy()

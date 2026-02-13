@@ -31,6 +31,7 @@ namespace Terranova.Core
         private static void BootstrapAfterScene()
         {
             EnsureWorldManager();
+            EnsureResourceManager();
             EnsureCamera();
             EnsureBuildingPlacer();
             EnsureUI();
@@ -52,6 +53,20 @@ namespace Terranova.Core
             var go = new GameObject("World");
             go.AddComponent<WorldManager>();
             Debug.Log("GameBootstrapper: Created WorldManager.");
+        }
+
+        /// <summary>
+        /// Central resource storage. Must exist before UI and BuildingPlacer.
+        /// Story 4.1: Baukosten-System
+        /// </summary>
+        private static void EnsureResourceManager()
+        {
+            if (ResourceManager.Instance != null)
+                return;
+
+            var go = new GameObject("ResourceManager");
+            go.AddComponent<ResourceManager>();
+            Debug.Log("GameBootstrapper: Created ResourceManager.");
         }
 
         private static void EnsureCamera()
