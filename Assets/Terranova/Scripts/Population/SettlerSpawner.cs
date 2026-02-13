@@ -1,4 +1,5 @@
 using UnityEngine;
+using Terranova.Buildings;
 using Terranova.Core;
 using Terranova.Terrain;
 
@@ -104,9 +105,20 @@ namespace Terranova.Population
                 meshRenderer.material = material;
             }
 
-            // Note: No BuildingPlacedEvent here. The starting campfire is free
-            // (Story 4.3: "Lagerfeuer existiert bei Spielstart bereits").
-            // Future player-built campfires will go through BuildingPlacer with costs.
+            // Attach Building component so campfire is a real building in the system
+            var campfireDef = BuildingRegistry.Instance?.CampfireDefinition;
+            if (campfireDef != null)
+            {
+                var building = campfire.AddComponent<Building>();
+                building.Initialize(campfireDef, skipConstruction: true);
+            }
+
+            EventBus.Publish(new BuildingPlacedEvent
+            {
+                BuildingName = "Campfire",
+                Position = position,
+                BuildingObject = campfire
+            });
 
             return position;
         }

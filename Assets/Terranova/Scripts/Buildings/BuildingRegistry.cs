@@ -14,9 +14,13 @@ namespace Terranova.Buildings
         public static BuildingRegistry Instance { get; private set; }
 
         private BuildingDefinition[] _definitions;
+        private BuildingDefinition _campfireDefinition;
 
-        /// <summary>All available building definitions (except Campfire).</summary>
+        /// <summary>All buildable building definitions (shown in build menu).</summary>
         public BuildingDefinition[] Definitions => _definitions;
+
+        /// <summary>The campfire definition (not buildable, placed at game start).</summary>
+        public BuildingDefinition CampfireDefinition => _campfireDefinition;
 
         private void Awake()
         {
@@ -32,10 +36,16 @@ namespace Terranova.Buildings
 
         /// <summary>
         /// Create all Epoch I.1 building definitions from GDD values.
-        /// Campfire is excluded – it exists at game start, not buildable.
+        /// Campfire is created separately – it exists at game start, not buildable.
         /// </summary>
         private void CreateDefinitions()
         {
+            _campfireDefinition = CreateDef("Campfire",
+                "Gathering point, center of the settlement.",
+                BuildingType.Campfire, 0, 0,
+                new Vector2Int(1, 1), 1.2f,
+                new Color(0.9f, 0.45f, 0.1f));
+
             _definitions = new[]
             {
                 CreateDef("Woodcutter's Hut", "Assigns a settler to chop wood nearby.",
@@ -81,9 +91,12 @@ namespace Terranova.Buildings
             return def;
         }
 
-        /// <summary>Find a definition by type.</summary>
+        /// <summary>Find a definition by type (includes campfire).</summary>
         public BuildingDefinition GetByType(BuildingType type)
         {
+            if (type == BuildingType.Campfire)
+                return _campfireDefinition;
+
             foreach (var def in _definitions)
             {
                 if (def.Type == type) return def;
