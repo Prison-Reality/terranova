@@ -1,5 +1,6 @@
 using UnityEngine;
 using Terranova.Core;
+using Terranova.Buildings;
 using Terranova.Resources;
 
 namespace Terranova.Population
@@ -41,12 +42,32 @@ namespace Terranova.Population
             if (campfire == null) return;
             Vector3 basePos = campfire.transform.position;
 
+            // Priority: construction > gathering.
+            // If unreserved construction sites exist, leave idle settlers
+            // for ConstructionTaskAssigner to pick up first.
+            if (HasUnreservedConstructionSites())
+                return;
+
             var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
             foreach (var settler in settlers)
             {
                 if (settler.HasTask) continue;
                 TryAssignResource(settler, basePos);
             }
+        }
+
+        /// <summary>
+        /// Check if any construction sites are waiting for a builder.
+        /// </summary>
+        private bool HasUnreservedConstructionSites()
+        {
+            var buildings = FindObjectsByType<Building>(FindObjectsSortMode.None);
+            foreach (var building in buildings)
+            {
+                if (!building.IsConstructed && !building.IsBeingBuilt)
+                    return true;
+            }
+            return false;
         }
 
         private void TryAssignResource(Settler settler, Vector3 basePos)

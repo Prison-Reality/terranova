@@ -22,11 +22,6 @@ namespace Terranova.UI
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
-        [Header("Starting Resources (MS1 test values)")]
-        [SerializeField] private int _wood = 50;
-        [SerializeField] private int _stone = 30;
-        [SerializeField] private int _food;
-
         [Header("UI Settings")]
         [Tooltip("Font size for resource text.")]
         [SerializeField] private int _fontSize = 24;
@@ -40,10 +35,12 @@ namespace Terranova.UI
         private int _currentSpeedIndex = 1; // Start at 1x
 
         private int _settlers;
+        private bool _foodWarning;
 
         private Text _resourceText;
         private Text _eventText;
         private Text _epochText;
+        private Text _warningText;
         private Button[] _speedButtons;
         private Text[] _speedButtonTexts;
         private float _eventDisplayTimer;
@@ -53,14 +50,13 @@ namespace Terranova.UI
             CreateUI();
             UpdateDisplay();
 
-            // Listen for building placements to update resource counts
+            // Listen for events that affect the display
             EventBus.Subscribe<BuildingPlacedEvent>(OnBuildingPlaced);
-
-            // Listen for population changes
+            EventBus.Subscribe<BuildingCompletedEvent>(OnBuildingCompleted);
             EventBus.Subscribe<PopulationChangedEvent>(OnPopulationChanged);
-
-            // Listen for resource deliveries from settlers
-            EventBus.Subscribe<ResourceDeliveredEvent>(OnResourceDelivered);
+            EventBus.Subscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Subscribe<SettlerDiedEvent>(OnSettlerDied);
+            EventBus.Subscribe<FoodWarningEvent>(OnFoodWarning);
         }
 
         private void Update()
@@ -72,6 +68,26 @@ namespace Terranova.UI
                 if (_eventDisplayTimer <= 0 && _eventText != null)
                     _eventText.text = "";
             }
+
+            // Check food supply for warning (Story 5.4)
+            CheckFoodWarning();
+        }
+
+        /// <summary>
+        /// Publish food warning when supply drops below threshold.
+        /// Story 5.4: Warning when food < 5 or < 1 per settler.
+        /// </summary>
+        private void CheckFoodWarning()
+        {
+            var rm = ResourceManager.Instance;
+            if (rm == null) return;
+
+            bool shouldWarn = rm.Food < 5 || (_settlers > 0 && rm.Food < _settlers);
+            if (shouldWarn != _foodWarning)
+            {
+                _foodWarning = shouldWarn;
+                EventBus.Publish(new FoodWarningEvent { IsWarning = shouldWarn });
+            }
         }
 
         private void OnPopulationChanged(PopulationChangedEvent evt)
@@ -80,46 +96,66 @@ namespace Terranova.UI
             UpdateDisplay();
         }
 
-        private void OnResourceDelivered(ResourceDeliveredEvent evt)
+        /// <summary>
+        /// Story 4.1: ResourceManager publishes this when resources change.
+        /// </summary>
+        private void OnResourceChanged(ResourceChangedEvent evt)
         {
-            switch (evt.TaskType)
-            {
-                case SettlerTaskType.GatherWood:
-                    _wood++;
-                    break;
-                case SettlerTaskType.GatherStone:
-                    _stone++;
-                    break;
-                case SettlerTaskType.Hunt:
-                    _food++;
-                    break;
-            }
             UpdateDisplay();
         }
 
         private void OnBuildingPlaced(BuildingPlacedEvent evt)
         {
-            // Deduct resources (placeholder – actual costs come from BuildingDefinition in Feature 4)
-            _wood = Mathf.Max(0, _wood - 5);
-            _stone = Mathf.Max(0, _stone);
-            _food = Mathf.Max(0, _food);
             UpdateDisplay();
 
-            // Show notification
             if (_eventText != null)
             {
-                _eventText.text = $"Built {evt.BuildingName}!";
+                _eventText.text = $"Building {evt.BuildingName}...";
+                _eventDisplayTimer = 3f;
+            }
+        }
+
+        /// <summary>Story 5.4: Notification when settler dies.</summary>
+        private void OnSettlerDied(SettlerDiedEvent evt)
+        {
+            if (_eventText != null)
+            {
+                _eventText.text = $"{evt.SettlerName} died ({evt.CauseOfDeath})";
+                _eventDisplayTimer = 4f;
+            }
+        }
+
+        /// <summary>Story 5.4: Food warning.</summary>
+        private void OnFoodWarning(FoodWarningEvent evt)
+        {
+            _foodWarning = evt.IsWarning;
+            if (_warningText != null)
+                _warningText.text = _foodWarning ? "Food is running low!" : "";
+        }
+
+        /// <summary>Story 4.2: Notification when construction completes.</summary>
+        private void OnBuildingCompleted(BuildingCompletedEvent evt)
+        {
+            if (_eventText != null)
+            {
+                _eventText.text = $"{evt.BuildingName} complete!";
                 _eventDisplayTimer = 3f;
             }
         }
 
         /// <summary>
-        /// Refresh the resource text.
+        /// Refresh the resource text from ResourceManager.
+        /// Story 4.1: Now reads from central ResourceManager instead of local counters.
         /// </summary>
         private void UpdateDisplay()
         {
-            if (_resourceText != null)
-                _resourceText.text = $"Wood: {_wood}    Stone: {_stone}    Food: {_food}    Settlers: {_settlers}";
+            if (_resourceText == null) return;
+
+            var rm = ResourceManager.Instance;
+            if (rm != null)
+                _resourceText.text = $"Wood: {rm.Wood}    Stone: {rm.Stone}    Food: {rm.Food}    Settlers: {_settlers}";
+            else
+                _resourceText.text = $"Settlers: {_settlers}";
         }
 
         /// <summary>
@@ -145,6 +181,10 @@ namespace Terranova.UI
                 scaler.referenceResolution = new Vector2(1920, 1080);
             }
 
+            // GraphicRaycaster required for button clicks and IsPointerOverGameObject()
+            if (GetComponent<GraphicRaycaster>() == null)
+                gameObject.AddComponent<GraphicRaycaster>();
+
             // Resource counter (top-left)
             _resourceText = CreateText("ResourceText",
                 new Vector2(20, -20),    // Offset from top-left
@@ -164,6 +204,15 @@ namespace Terranova.UI
                 new Vector2(200, 40),
                 TextAnchor.UpperRight);
             _epochText.text = "Epoch I.1";
+
+            // Food warning (below resource text)
+            _warningText = CreateText("WarningText",
+                new Vector2(20, -50),
+                new Vector2(400, 30),
+                TextAnchor.UpperLeft);
+            _warningText.color = new Color(1f, 0.3f, 0.3f); // Red warning
+            _warningText.fontSize = _fontSize - 2;
+            _warningText.text = "";
 
             // Speed widget (top-right, below epoch)
             CreateSpeedWidget();
@@ -191,7 +240,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.2.0-visual";
+            versionText.text = "v0.2.0";
         }
 
         /// <summary>
@@ -342,8 +391,11 @@ namespace Terranova.UI
         private void OnDestroy()
         {
             EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+            EventBus.Unsubscribe<BuildingCompletedEvent>(OnBuildingCompleted);
             EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
-            EventBus.Unsubscribe<ResourceDeliveredEvent>(OnResourceDelivered);
+            EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Unsubscribe<SettlerDiedEvent>(OnSettlerDied);
+            EventBus.Unsubscribe<FoodWarningEvent>(OnFoodWarning);
 
             // Clean up button listeners to prevent memory leaks
             if (_speedButtons != null)

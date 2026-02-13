@@ -1,5 +1,6 @@
 using UnityEngine;
 using Terranova.Core;
+using Terranova.Buildings;
 using Terranova.Resources;
 
 namespace Terranova.Population
@@ -12,6 +13,7 @@ namespace Terranova.Population
     ///
     /// Story 1.3/1.4: Basic task system with placeholder positions.
     /// Story 3.2: Tasks can reference a ResourceNode for gathering.
+    /// Story 4.2: Tasks can reference a Building for construction.
     ///
     /// Note: SettlerTaskType enum is defined in Terranova.Core (EventBus.cs)
     /// to avoid circular assembly dependencies.
@@ -36,16 +38,34 @@ namespace Terranova.Population
         public ResourceNode TargetResource { get; set; }
 
         /// <summary>
+        /// The building being constructed, or null for non-build tasks.
+        /// Story 4.2: Links task to a construction site.
+        /// </summary>
+        public Building TargetBuilding { get; set; }
+
+        /// <summary>
+        /// Walk speed multiplier. Specialized workers (building-assigned) move faster.
+        /// Default 1.0, building workers get 2.0.
+        /// </summary>
+        public float SpeedMultiplier { get; set; } = 1f;
+
+        /// <summary>
+        /// True when this task was assigned by a production building (WoodcutterHut, HunterHut).
+        /// Specialized workers deliver to their building and are visually distinct.
+        /// </summary>
+        public bool IsSpecialized { get; set; }
+
+        /// <summary>
         /// Whether the target still exists (tree not yet felled, etc.).
-        /// Automatically checks the ResourceNode if one is linked.
+        /// Checks ResourceNode for gather tasks, Building for build tasks.
         /// </summary>
         public bool IsTargetValid
         {
             get
             {
                 if (!_isTargetValid) return false;
-                // If linked to a resource, check if it's depleted
                 if (TargetResource != null && TargetResource.IsDepleted) return false;
+                if (TargetBuilding != null && TargetBuilding.IsConstructed) return false;
                 return true;
             }
             set => _isTargetValid = value;
@@ -72,13 +92,14 @@ namespace Terranova.Population
 
         /// <summary>
         /// Default work durations per task type (in game-time seconds).
+        /// Epoch I.1: Twigs and stones are picked up instantly (0s).
         /// </summary>
         public static float GetDefaultDuration(SettlerTaskType type)
         {
             return type switch
             {
-                SettlerTaskType.GatherWood => 4f,
-                SettlerTaskType.GatherStone => 5f,
+                SettlerTaskType.GatherWood => 0f,   // Pick up twig instantly
+                SettlerTaskType.GatherStone => 0f,   // Pick up stone instantly
                 SettlerTaskType.Hunt => 6f,
                 SettlerTaskType.Build => 8f,
                 _ => 3f

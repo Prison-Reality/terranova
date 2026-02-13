@@ -7,6 +7,7 @@ using Terranova.Camera;
 using Terranova.UI;
 using Terranova.Population;
 using Terranova.Resources;
+using Terranova.Input;
 
 namespace Terranova.Core
 {
@@ -31,6 +32,8 @@ namespace Terranova.Core
         private static void BootstrapAfterScene()
         {
             EnsureWorldManager();
+            EnsureResourceManager();
+            EnsureBuildingRegistry();
             EnsureCamera();
             EnsureBuildingPlacer();
             EnsureUI();
@@ -38,8 +41,10 @@ namespace Terranova.Core
             EnsureSettlerSpawner();
             EnsureResourceSpawner();
             EnsureResourceTaskAssigner();
+            EnsureConstructionTaskAssigner();
+            EnsureBuildingFunctionManager();
             EnsureDebugTerrainModifier();
-            EnsureDebugTaskAssigner();
+            EnsureSelectionManager();
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
@@ -52,6 +57,34 @@ namespace Terranova.Core
             var go = new GameObject("World");
             go.AddComponent<WorldManager>();
             Debug.Log("GameBootstrapper: Created WorldManager.");
+        }
+
+        /// <summary>
+        /// Registry of all buildable building types.
+        /// Story 4.3: Gebäude-Typen Epoche I.1
+        /// </summary>
+        private static void EnsureBuildingRegistry()
+        {
+            if (BuildingRegistry.Instance != null)
+                return;
+
+            var go = new GameObject("BuildingRegistry");
+            go.AddComponent<BuildingRegistry>();
+            Debug.Log("GameBootstrapper: Created BuildingRegistry.");
+        }
+
+        /// <summary>
+        /// Central resource storage. Must exist before UI and BuildingPlacer.
+        /// Story 4.1: Baukosten-System
+        /// </summary>
+        private static void EnsureResourceManager()
+        {
+            if (ResourceManager.Instance != null)
+                return;
+
+            var go = new GameObject("ResourceManager");
+            go.AddComponent<ResourceManager>();
+            Debug.Log("GameBootstrapper: Created ResourceManager.");
         }
 
         private static void EnsureCamera()
@@ -87,6 +120,7 @@ namespace Terranova.Core
                 var campfire = ScriptableObject.CreateInstance<BuildingDefinition>();
                 campfire.DisplayName = "Campfire";
                 campfire.Description = "A simple campfire. The heart of your settlement.";
+                campfire.Type = BuildingType.Campfire;
                 campfire.WoodCost = 5;
                 campfire.StoneCost = 0;
                 campfire.FootprintSize = Vector2Int.one;
@@ -105,7 +139,11 @@ namespace Terranova.Core
 
             var go = new GameObject("HUD");
             go.AddComponent<ResourceDisplay>();
-            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay.");
+            // Story 4.5: Build menu lives on the same Canvas
+            go.AddComponent<BuildMenu>();
+            // Story 6.1: Info panel for selection
+            go.AddComponent<InfoPanel>();
+            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, and InfoPanel.");
         }
 
         private static void EnsureEventSystem()
@@ -169,17 +207,45 @@ namespace Terranova.Core
         }
 
         /// <summary>
-        /// DEBUG ONLY - Creates the debug task assigner (press T to assign tasks).
-        /// Remove this when building-driven task assignment exists (Story 4.4).
+        /// Assigns idle settlers to unfinished construction sites.
+        /// Story 4.2: Baufortschritt
         /// </summary>
-        private static void EnsureDebugTaskAssigner()
+        private static void EnsureConstructionTaskAssigner()
         {
-            if (Object.FindFirstObjectByType<DebugTaskAssigner>() != null)
+            if (Object.FindFirstObjectByType<ConstructionTaskAssigner>() != null)
                 return;
 
-            var go = new GameObject("DebugTaskAssigner");
-            go.AddComponent<DebugTaskAssigner>();
-            Debug.Log("GameBootstrapper: Created DebugTaskAssigner (press T to assign tasks).");
+            var go = new GameObject("ConstructionTaskAssigner");
+            go.AddComponent<ConstructionTaskAssigner>();
+            Debug.Log("GameBootstrapper: Created ConstructionTaskAssigner.");
+        }
+
+        /// <summary>
+        /// Manages building functions (worker assignment, housing capacity).
+        /// Story 4.4: Gebäude-Funktion
+        /// </summary>
+        private static void EnsureBuildingFunctionManager()
+        {
+            if (Object.FindFirstObjectByType<BuildingFunctionManager>() != null)
+                return;
+
+            var go = new GameObject("BuildingFunctionManager");
+            go.AddComponent<BuildingFunctionManager>();
+            Debug.Log("GameBootstrapper: Created BuildingFunctionManager.");
+        }
+
+        /// <summary>
+        /// Selection manager for tap/long-press on settlers and buildings.
+        /// Story 6.1–6.4: Selektion & Info-Panel
+        /// </summary>
+        private static void EnsureSelectionManager()
+        {
+            if (Object.FindFirstObjectByType<SelectionManager>() != null)
+                return;
+
+            var go = new GameObject("SelectionManager");
+            go.AddComponent<SelectionManager>();
+            Debug.Log("GameBootstrapper: Created SelectionManager.");
         }
     }
 }

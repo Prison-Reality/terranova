@@ -3,12 +3,24 @@ using UnityEngine;
 namespace Terranova.Buildings
 {
     /// <summary>
+    /// The functional type of a building. Determines what it does when complete.
+    /// Story 4.3/4.4: Gebäude-Typen und Gebäude-Funktion.
+    /// </summary>
+    public enum BuildingType
+    {
+        Campfire,       // Gathering point, center of settlement
+        WoodcutterHut,  // Auto-assigns settler to gather wood
+        HunterHut,      // Auto-assigns settler to hunt (produce food)
+        SimpleHut       // Housing for 2 settlers
+    }
+
+    /// <summary>
     /// ScriptableObject defining a building type's properties.
     ///
     /// Create instances via: Assets → Create → Terranova → Building Definition.
     /// Each building type (Campfire, Hut, Woodcutter's Hut, etc.) gets its own asset.
     ///
-    /// For MS1, only the Campfire is needed. More buildings come in MS2.
+    /// Story 4.3: All 4 Epoch I.1 building types defined here.
     /// </summary>
     [CreateAssetMenu(fileName = "NewBuilding", menuName = "Terranova/Building Definition")]
     public class BuildingDefinition : ScriptableObject
@@ -20,6 +32,9 @@ namespace Terranova.Buildings
         [Tooltip("Short description for tooltips.")]
         [TextArea(2, 4)]
         public string Description = "";
+
+        [Tooltip("Functional type of this building.")]
+        public BuildingType Type;
 
         [Header("Costs")]
         [Tooltip("Wood required to build.")]
@@ -45,5 +60,12 @@ namespace Terranova.Buildings
 
         [Tooltip("Height of the placeholder cube in blocks.")]
         public float VisualHeight = 1f;
+
+        [Header("Function (Story 4.4)")]
+        [Tooltip("How many settlers this building can house (SimpleHut only).")]
+        public int HousingCapacity;
+
+        [Tooltip("How many worker slots this building has (WoodcutterHut/HunterHut).")]
+        public int WorkerSlots;
     }
 }

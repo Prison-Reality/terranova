@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 namespace Terranova.Terrain
@@ -24,16 +25,16 @@ namespace Terranova.Terrain
             _mouse = Mouse.current;
         }
 
-        private void Update()
-        {
-            if (_mouse == null)
-                return;
-
-            if (_mouse.leftButton.wasPressedThisFrame)
-                TryModify(remove: true);
-            else if (_mouse.rightButton.wasPressedThisFrame)
-                TryModify(remove: false);
-        }
+        // Story 6.2: Mouse-click terrain modification disabled.
+        // It conflicted with tap selection (left-click modified terrain AND selected).
+        // TryModify() is kept for programmatic use (e.g. future terraforming system).
+        // private void Update()
+        // {
+        //     if (_mouse == null) return;
+        //     if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+        //     if (_mouse.leftButton.wasPressedThisFrame) TryModify(remove: true);
+        //     else if (_mouse.rightButton.wasPressedThisFrame) TryModify(remove: false);
+        // }
 
         private void TryModify(bool remove)
         {

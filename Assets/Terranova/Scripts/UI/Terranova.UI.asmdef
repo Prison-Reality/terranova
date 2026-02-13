@@ -2,7 +2,10 @@
     "name": "Terranova.UI",
     "rootNamespace": "Terranova.UI",
     "references": [
-        "Terranova.Core"
+        "Terranova.Core",
+        "Terranova.Buildings",
+        "Terranova.Population",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

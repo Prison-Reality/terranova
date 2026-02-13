@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.AI;
 using Terranova.Core;
+using Terranova.Buildings;
 using Terranova.Resources;
 
 namespace Terranova.Population
@@ -30,17 +31,22 @@ namespace Terranova.Population
         // How far to search for a valid NavMesh point when sampling
         private const float NAV_SAMPLE_RADIUS = 5f;
 
+        // ─── Hunger Settings (Story 5.1) ────────────────────────
+
+        private const float MAX_HUNGER = 100f;                  // 0 = satt, 100 = am Verhungern
+        private const float HUNGER_RATE = 0.55f;            // Per second (~3 min to starve at 1x)
+        private const float HUNGER_EAT_THRESHOLD = 70f;     // Seek food above this
+        private const float HUNGER_SLOW_THRESHOLD = 75f;    // Speed penalty above this
+        private const float HUNGER_SPEED_PENALTY = 0.5f;    // Half speed when very hungry
+        private const float STARVATION_GRACE = 30f;          // Seconds at max before death
+        private const float EAT_DURATION = 1.5f;             // How long eating takes
+
         // ─── Visual Settings ─────────────────────────────────────
 
-        // Body colors: each settler gets a unique hue for visual distinction
-        private static readonly Color[] SETTLER_COLORS =
-        {
-            new Color(0.85f, 0.55f, 0.45f), // Warm skin tone
-            new Color(0.70f, 0.50f, 0.35f), // Tan
-            new Color(0.55f, 0.45f, 0.40f), // Olive
-            new Color(0.75f, 0.60f, 0.50f), // Light brown
-            new Color(0.60f, 0.42f, 0.35f), // Medium brown
-        };
+        private static readonly Color DEFAULT_COLOR = Color.white;
+        private static readonly Color WOODCUTTER_COLOR = new Color(0.55f, 0.33f, 0.14f); // Brown
+        private static readonly Color HUNTER_COLOR = new Color(0.20f, 0.65f, 0.20f);     // Green
+        private static readonly Color HUNGRY_COLOR = new Color(0.90f, 0.30f, 0.30f);     // Red (hungry)
 
         // Role accent colors (applied to head when assigned a specialized task)
         private static readonly Color WOODCUTTER_ACCENT = new Color(0.55f, 0.33f, 0.14f); // Brown cap
@@ -65,7 +71,11 @@ namespace Terranova.Population
             WalkingToTarget,    // Moving to work location (tree, rock, site)
             Working,            // At target, performing work (gathering, building)
             ReturningToBase,    // Walking back to campfire/storage
-            Delivering          // At base, dropping off resources
+            Delivering,         // At base, dropping off resources
+
+            // Hunger (Story 5.1/5.2)
+            WalkingToEat,       // Going to campfire because hungry
+            Eating              // At campfire, consuming food
         }
 
         private SettlerState _state = SettlerState.IdlePausing;
@@ -93,11 +103,25 @@ namespace Terranova.Population
         /// <summary>The settler's current task, or null if idle.</summary>
         public SettlerTask CurrentTask => _currentTask;
 
-        /// <summary>Whether the settler is currently busy with a task.</summary>
-        public bool HasTask => _currentTask != null;
+        /// <summary>Whether the settler is currently busy (has task or is eating with saved task).</summary>
+        public bool HasTask => _currentTask != null || _savedTask != null;
 
         /// <summary>Current state name (for UI/debug display).</summary>
         public string StateName => _state.ToString();
+
+        // ─── Hunger System (Story 5.1) ─────────────────────────
+
+        private float _hunger;  // Starts at 0 (satt)
+        private float _starvationTimer;
+        private bool _isStarving;
+        private SettlerTask _savedTask;       // Task saved while eating
+
+        /// <summary>Current hunger value (0 = satt, 100 = am Verhungern).</summary>
+        public float Hunger => _hunger;
+        /// <summary>Hunger as percentage (0.0 = satt, 1.0 = am Verhungern).</summary>
+        public float HungerPercent => _hunger / MAX_HUNGER;
+        /// <summary>True when hunger is at max and grace period is ticking.</summary>
+        public bool IsStarving => _isStarving;
 
         // ─── Cargo Visual (Story 3.3) ──────────────────────────
 
@@ -106,11 +130,7 @@ namespace Terranova.Population
         // ─── Instance Data ───────────────────────────────────────
 
         private MaterialPropertyBlock _propBlock;
-        private MaterialPropertyBlock _headPropBlock;
-        private MeshRenderer _headRenderer;
-        private int _colorIndex;
-
-        public int ColorIndex => _colorIndex;
+        private MeshRenderer _visualRenderer;
 
         // ─── Initialization ──────────────────────────────────────
 
@@ -119,7 +139,6 @@ namespace Terranova.Population
         /// </summary>
         public void Initialize(int colorIndex, Vector3 campfirePosition)
         {
-            _colorIndex = colorIndex;
             _campfirePosition = campfirePosition;
 
             CreateVisual();
@@ -179,8 +198,9 @@ namespace Terranova.Population
             }
 
             _state = SettlerState.WalkingToTarget;
-            _agent.speed = TASK_WALK_SPEED;
-            Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target");
+            _agent.speed = TASK_WALK_SPEED * task.SpeedMultiplier;
+            UpdateVisualColor();
+            Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target (speed x{task.SpeedMultiplier})");
             return true;
         }
 
@@ -194,6 +214,10 @@ namespace Terranova.Population
             if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
                 _currentTask.TargetResource.Release();
 
+            // Release construction reservation if we had one (Story 4.2)
+            if (_currentTask?.TargetBuilding != null && _currentTask.TargetBuilding.IsBeingBuilt)
+                _currentTask.TargetBuilding.ReleaseConstruction();
+
             var wasTask = _currentTask?.TaskType;
             _currentTask = null;
             _isMoving = false;
@@ -202,6 +226,7 @@ namespace Terranova.Population
             _state = SettlerState.IdlePausing;
             _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
             DestroyCargo();
+            UpdateVisualColor();
             Debug.Log($"[{name}] Task ended ({wasTask}) - returning to IDLE");
         }
 
@@ -209,6 +234,9 @@ namespace Terranova.Population
 
         private void Update()
         {
+            // Decrease hunger every frame (scales with Time.timeScale automatically)
+            UpdateHunger();
+
             switch (_state)
             {
                 case SettlerState.IdlePausing:
@@ -229,6 +257,12 @@ namespace Terranova.Population
                 case SettlerState.Delivering:
                     UpdateDelivering();
                     break;
+                case SettlerState.WalkingToEat:
+                    UpdateWalkingToEat();
+                    break;
+                case SettlerState.Eating:
+                    UpdateEating();
+                    break;
             }
         }
 
@@ -243,7 +277,8 @@ namespace Terranova.Population
             if (TryPickWalkTarget())
             {
                 _state = SettlerState.IdleWalking;
-                _agent.speed = WALK_SPEED;
+                _agent.speed = _hunger > HUNGER_SLOW_THRESHOLD
+                    ? WALK_SPEED * HUNGER_SPEED_PENALTY : WALK_SPEED;
             }
             else
                 _stateTimer = 0.5f;
@@ -294,12 +329,30 @@ namespace Terranova.Population
         /// <summary>
         /// Perform work at the target location.
         /// Story 3.2: On completion, calls ResourceNode.CompleteGathering().
+        /// Story 4.2: Build tasks complete construction and go idle (no delivery).
         /// </summary>
         private void UpdateWorking()
         {
             _stateTimer -= Time.deltaTime;
             if (_stateTimer > 0f)
                 return;
+
+            // Story 4.2: Build tasks complete the construction and return to idle
+            if (_currentTask?.TaskType == SettlerTaskType.Build)
+            {
+                if (_currentTask.TargetBuilding != null)
+                    _currentTask.TargetBuilding.CompleteConstruction();
+
+                Debug.Log($"[{name}] Construction complete - going idle");
+                _currentTask = null; // Don't call ClearTask – construction is already released
+                _isMoving = false;
+                _agent.ResetPath();
+                _agent.speed = WALK_SPEED;
+                _state = SettlerState.IdlePausing;
+                _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
+                UpdateVisualColor();
+                return;
+            }
 
             // Complete gathering on the resource node (Story 3.2)
             if (_currentTask?.TargetResource != null)
@@ -315,7 +368,7 @@ namespace Terranova.Population
                 return;
             }
             _state = SettlerState.ReturningToBase;
-            _agent.speed = TASK_WALK_SPEED;
+            _agent.speed = TASK_WALK_SPEED * _currentTask.SpeedMultiplier;
             Debug.Log($"[{name}] Work done - RETURNING to base");
         }
 
@@ -370,6 +423,17 @@ namespace Terranova.Population
                           $"(totals: Wood={_totalWoodDelivered}, Stone={_totalStoneDelivered}, Food={_totalFoodDelivered})");
             }
 
+            // Re-evaluate priorities: construction sites take precedence over gathering
+            // BUT specialized workers stay at their building — they don't get reassigned
+            if (_currentTask != null && !_currentTask.IsSpecialized
+                && _currentTask.TaskType != SettlerTaskType.Build
+                && HasPendingConstructionSite())
+            {
+                Debug.Log($"[{name}] Construction site waiting - dropping gather task");
+                ClearTask();
+                return;
+            }
+
             if (_currentTask != null && _currentTask.IsTargetValid)
             {
                 // Re-reserve the resource for the next cycle (Story 3.2)
@@ -377,6 +441,10 @@ namespace Terranova.Population
                 {
                     if (!_currentTask.TargetResource.TryReserve())
                     {
+                        // Specialized workers search for a new resource instead of going idle
+                        if (_currentTask.IsSpecialized && TryFindNewResource())
+                            return;
+
                         Debug.Log($"[{name}] Resource no longer available - going idle");
                         ClearTask();
                         return;
@@ -390,14 +458,224 @@ namespace Terranova.Population
                     return;
                 }
                 _state = SettlerState.WalkingToTarget;
-                _agent.speed = TASK_WALK_SPEED;
+                _agent.speed = TASK_WALK_SPEED * _currentTask.SpeedMultiplier;
                 Debug.Log($"[{name}] REPEATING cycle ({_currentTask.TaskType})");
             }
             else
             {
+                // Specialized workers search for a new resource instead of going idle
+                if (_currentTask != null && _currentTask.IsSpecialized && TryFindNewResource())
+                    return;
+
                 Debug.Log($"[{name}] Target no longer valid - going idle");
                 ClearTask();
             }
+        }
+
+        // ─── Hunger System (Story 5.1/5.2) ──────────────────────
+
+        /// <summary>
+        /// Tick hunger down, check for starvation, and trigger eating when hungry.
+        /// Called every frame before the state machine.
+        /// </summary>
+        private void UpdateHunger()
+        {
+            // Increase hunger over time (0 = satt, 100 = am Verhungern)
+            if (_hunger < MAX_HUNGER)
+            {
+                _hunger += HUNGER_RATE * Time.deltaTime;
+                if (_hunger > MAX_HUNGER) _hunger = MAX_HUNGER;
+            }
+
+            // Starvation: grace period before death
+            if (_hunger >= MAX_HUNGER)
+            {
+                if (!_isStarving)
+                {
+                    _isStarving = true;
+                    _starvationTimer = STARVATION_GRACE;
+                    UpdateVisualColor();
+                    Debug.Log($"[{name}] STARVING - grace period {STARVATION_GRACE}s");
+                }
+
+                _starvationTimer -= Time.deltaTime;
+                if (_starvationTimer <= 0f)
+                {
+                    Die();
+                    return;
+                }
+            }
+
+            // Check if should eat (only interrupt safe states)
+            if (_hunger > HUNGER_EAT_THRESHOLD
+                && _state != SettlerState.WalkingToEat
+                && _state != SettlerState.Eating
+                && _state != SettlerState.ReturningToBase
+                && _state != SettlerState.Delivering)
+            {
+                StartEating();
+            }
+        }
+
+        /// <summary>
+        /// Interrupt current activity and walk to campfire to eat.
+        /// Saves the current task so it can be resumed after eating.
+        /// Story 5.2: Nahrungsaufnahme
+        /// </summary>
+        private void StartEating()
+        {
+            // Save task for later (don't release reservations)
+            if (_currentTask != null && _savedTask == null)
+            {
+                _savedTask = _currentTask;
+                _currentTask = null;
+            }
+
+            _isMoving = false;
+            _agent.ResetPath();
+            DestroyCargo();
+
+            if (!SetAgentDestination(_campfirePosition))
+            {
+                // Can't reach campfire — stay put and hope
+                _state = SettlerState.IdlePausing;
+                _stateTimer = 2f;
+                return;
+            }
+
+            float speed = TASK_WALK_SPEED;
+            if (_hunger > HUNGER_SLOW_THRESHOLD)
+                speed *= HUNGER_SPEED_PENALTY;
+            _agent.speed = speed;
+
+            _state = SettlerState.WalkingToEat;
+            Debug.Log($"[{name}] HUNGRY ({_hunger:F0}) - walking to campfire to eat");
+        }
+
+        /// <summary>Walk to campfire to eat. Story 5.2.</summary>
+        private void UpdateWalkingToEat()
+        {
+            if (HasReachedDestination())
+            {
+                _agent.ResetPath();
+                _isMoving = false;
+                _state = SettlerState.Eating;
+                _stateTimer = EAT_DURATION;
+            }
+        }
+
+        /// <summary>
+        /// Try to consume food at the campfire.
+        /// If food is available: hunger restored, resume previous task.
+        /// If not: return hungry, try again later.
+        /// Story 5.2: Nahrungsaufnahme
+        /// </summary>
+        private void UpdateEating()
+        {
+            _stateTimer -= Time.deltaTime;
+            if (_stateTimer > 0f) return;
+
+            var rm = ResourceManager.Instance;
+            if (rm != null && rm.TryConsumeFood())
+            {
+                _hunger = 0f;
+                _isStarving = false;
+                Debug.Log($"[{name}] ATE food - hunger reset to 0 (satt)");
+            }
+            else
+            {
+                Debug.Log($"[{name}] No food available at campfire!");
+            }
+
+            UpdateVisualColor();
+            ResumeAfterEating();
+        }
+
+        /// <summary>
+        /// After eating (or failing to eat), resume the saved task or go idle.
+        /// </summary>
+        private void ResumeAfterEating()
+        {
+            if (_savedTask != null)
+            {
+                var task = _savedTask;
+                _savedTask = null;
+
+                // Check if the saved task is still valid
+                if (task.IsTargetValid)
+                {
+                    _currentTask = task;
+
+                    if (SetAgentDestination(task.TargetPosition))
+                    {
+                        _state = SettlerState.WalkingToTarget;
+                        float speed = TASK_WALK_SPEED * task.SpeedMultiplier;
+                        if (_hunger > HUNGER_SLOW_THRESHOLD)
+                            speed *= HUNGER_SPEED_PENALTY;
+                        _agent.speed = speed;
+                        UpdateVisualColor();
+                        Debug.Log($"[{name}] Resuming {task.TaskType} after eating");
+                        return;
+                    }
+                }
+
+                // Task no longer valid — release reservations
+                if (task.TargetResource != null && task.TargetResource.IsReserved)
+                    task.TargetResource.Release();
+                if (task.TargetBuilding != null && task.TargetBuilding.IsBeingBuilt)
+                    task.TargetBuilding.ReleaseConstruction();
+            }
+
+            // No saved task or it's invalid — go idle
+            _currentTask = null;
+            _agent.speed = WALK_SPEED;
+            _state = SettlerState.IdlePausing;
+            _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
+            UpdateVisualColor();
+        }
+
+        /// <summary>
+        /// Settler dies from starvation. Cleans up task, publishes event, destroys.
+        /// Story 5.4: Tod
+        /// </summary>
+        private void Die()
+        {
+            Debug.Log($"[{name}] DIED of starvation!");
+
+            // Release any held resources
+            if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
+                _currentTask.TargetResource.Release();
+            if (_currentTask?.TargetBuilding != null && _currentTask.TargetBuilding.IsBeingBuilt)
+                _currentTask.TargetBuilding.ReleaseConstruction();
+            if (_savedTask?.TargetResource != null && _savedTask.TargetResource.IsReserved)
+                _savedTask.TargetResource.Release();
+
+            // Free building assignment
+            var buildings = FindObjectsByType<Building>(FindObjectsSortMode.None);
+            foreach (var b in buildings)
+            {
+                if (b.AssignedWorker == gameObject)
+                {
+                    b.HasWorker = false;
+                    b.AssignedWorker = null;
+                }
+            }
+
+            EventBus.Publish(new SettlerDiedEvent
+            {
+                SettlerName = name,
+                Position = transform.position,
+                CauseOfDeath = "Starvation"
+            });
+
+            // Update population count
+            var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
+            EventBus.Publish(new PopulationChangedEvent
+            {
+                CurrentPopulation = settlers.Length - 1 // -1 because we're about to be destroyed
+            });
+
+            Destroy(gameObject);
         }
 
         /// <summary>
@@ -555,79 +833,58 @@ namespace Terranova.Population
 
         private void CreateVisual()
         {
+            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            visual.name = "Visual";
+            visual.transform.SetParent(transform, false);
+            visual.transform.localScale = new Vector3(0.4f, 0.4f, 0.4f);
+            visual.transform.localPosition = new Vector3(0f, 0.4f, 0f);
+
+            // Keep collider for raycast selection (Story 6.1).
+            // Collider is on the child visual, so it doesn't affect NavMeshAgent on parent.
+
             EnsureSharedMaterial();
 
-            // Body: cylinder (torso)
-            var body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            body.name = "Body";
-            body.transform.SetParent(transform, false);
-            body.transform.localScale = new Vector3(0.3f, 0.35f, 0.2f);
-            body.transform.localPosition = new Vector3(0f, 0.35f, 0f);
-            var bodyCol = body.GetComponent<Collider>();
-            if (bodyCol != null) bodyCol.isTrigger = true; // keep for raycast selection
-
-            var bodyRenderer = body.GetComponent<MeshRenderer>();
-            bodyRenderer.sharedMaterial = _sharedMaterial;
+            _visualRenderer = visual.GetComponent<MeshRenderer>();
+            _visualRenderer.sharedMaterial = _sharedMaterial;
 
             _propBlock = new MaterialPropertyBlock();
-            Color bodyColor = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
-            _propBlock.SetColor(ColorID, bodyColor);
-            bodyRenderer.SetPropertyBlock(_propBlock);
-
-            // Head: sphere
-            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            head.name = "Head";
-            head.transform.SetParent(transform, false);
-            head.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
-            head.transform.localPosition = new Vector3(0f, 0.81f, 0f);
-            var headCol = head.GetComponent<Collider>();
-            if (headCol != null) Destroy(headCol);
-
-            _headRenderer = head.GetComponent<MeshRenderer>();
-            _headRenderer.sharedMaterial = _sharedMaterial;
-
-            _headPropBlock = new MaterialPropertyBlock();
-            // Head slightly lighter than body
-            Color headColor = Color.Lerp(bodyColor, Color.white, 0.35f);
-            _headPropBlock.SetColor(ColorID, headColor);
-            _headRenderer.SetPropertyBlock(_headPropBlock);
-
-            // Legs: two small cylinders
-            for (int i = 0; i < 2; i++)
-            {
-                var leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-                leg.name = $"Leg_{i}";
-                leg.transform.SetParent(transform, false);
-                float xOff = i == 0 ? -0.08f : 0.08f;
-                leg.transform.localScale = new Vector3(0.1f, 0.15f, 0.1f);
-                leg.transform.localPosition = new Vector3(xOff, 0.08f, 0f);
-                var legCol = leg.GetComponent<Collider>();
-                if (legCol != null) Destroy(legCol);
-
-                var legRenderer = leg.GetComponent<MeshRenderer>();
-                legRenderer.sharedMaterial = _sharedMaterial;
-                var legPb = new MaterialPropertyBlock();
-                legPb.SetColor(ColorID, bodyColor * 0.7f);
-                legRenderer.SetPropertyBlock(legPb);
-            }
+            _propBlock.SetColor(ColorID, DEFAULT_COLOR);
+            _visualRenderer.SetPropertyBlock(_propBlock);
         }
 
         /// <summary>
-        /// Update head color accent when settler gets a specialized role.
-        /// Called when assigned to a woodcutter hut, hunter hut, etc.
+        /// Update the settler's capsule color to reflect role and hunger status.
+        /// Priority: Hungry (red) > Specialized role (brown/green) > Default (white).
+        /// Story 5.5: Visuelles Feedback
         /// </summary>
-        public void UpdateRoleAccent(SettlerTaskType role)
+        private void UpdateVisualColor()
         {
-            if (_headRenderer == null || _headPropBlock == null) return;
+            if (_visualRenderer == null || _propBlock == null) return;
 
-            Color accent = role switch
+            Color color = DEFAULT_COLOR;
+
+            // Hunger overrides role color when critical
+            if (_hunger > HUNGER_SLOW_THRESHOLD)
             {
-                SettlerTaskType.GatherWood => WOODCUTTER_ACCENT,
-                SettlerTaskType.Hunt => HUNTER_ACCENT,
-                _ => Color.Lerp(SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length], Color.white, 0.35f)
-            };
-            _headPropBlock.SetColor(ColorID, accent);
-            _headRenderer.SetPropertyBlock(_headPropBlock);
+                color = HUNGRY_COLOR;
+            }
+            else
+            {
+                // Check specialized role (current or saved task during eating)
+                var roleTask = _currentTask ?? _savedTask;
+                if (roleTask != null && roleTask.IsSpecialized)
+                {
+                    color = roleTask.TaskType switch
+                    {
+                        SettlerTaskType.GatherWood => WOODCUTTER_COLOR,
+                        SettlerTaskType.Hunt => HUNTER_COLOR,
+                        _ => DEFAULT_COLOR
+                    };
+                }
+            }
+
+            _propBlock.SetColor(ColorID, color);
+            _visualRenderer.SetPropertyBlock(_propBlock);
         }
 
         private static void EnsureSharedMaterial()
@@ -646,6 +903,72 @@ namespace Terranova.Population
 
             _sharedMaterial = new Material(shader);
             _sharedMaterial.name = "Settler_Shared (Auto)";
+        }
+
+        // ─── Specialized Worker Helpers ─────────────────────────
+
+        /// <summary>
+        /// Find a new resource for a specialized worker whose current target
+        /// is depleted. Keeps the task (and color/speed) but swaps the resource.
+        /// </summary>
+        private bool TryFindNewResource()
+        {
+            if (_currentTask == null) return false;
+
+            ResourceType resType = _currentTask.TaskType switch
+            {
+                SettlerTaskType.GatherWood => ResourceType.Wood,
+                SettlerTaskType.Hunt => ResourceType.Food,
+                _ => ResourceType.Wood
+            };
+
+            var nodes = FindObjectsByType<ResourceNode>(FindObjectsSortMode.None);
+            ResourceNode nearest = null;
+            float nearestDist = float.MaxValue;
+
+            foreach (var node in nodes)
+            {
+                if (node.Type != resType || !node.IsAvailable) continue;
+                float dist = Vector3.Distance(_currentTask.BasePosition, node.transform.position);
+                if (dist < nearestDist)
+                {
+                    nearestDist = dist;
+                    nearest = node;
+                }
+            }
+
+            if (nearest == null || !nearest.TryReserve()) return false;
+
+            _currentTask.TargetResource = nearest;
+            _currentTask.SetNewTarget(nearest.transform.position);
+
+            if (!SetAgentDestination(nearest.transform.position))
+            {
+                nearest.Release();
+                return false;
+            }
+
+            _state = SettlerState.WalkingToTarget;
+            _agent.speed = TASK_WALK_SPEED * _currentTask.SpeedMultiplier;
+            Debug.Log($"[{name}] Specialized worker found new {resType} target");
+            return true;
+        }
+
+        // ─── Priority Check ──────────────────────────────────────
+
+        /// <summary>
+        /// Check if any construction site needs a builder.
+        /// Called after delivery to re-evaluate task priorities.
+        /// </summary>
+        private static bool HasPendingConstructionSite()
+        {
+            var buildings = Object.FindObjectsByType<Building>(FindObjectsSortMode.None);
+            foreach (var building in buildings)
+            {
+                if (!building.IsConstructed && !building.IsBeingBuilt)
+                    return true;
+            }
+            return false;
         }
     }
 }
