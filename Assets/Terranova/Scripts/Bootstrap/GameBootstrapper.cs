@@ -32,6 +32,7 @@ namespace Terranova.Core
         {
             EnsureWorldManager();
             EnsureResourceManager();
+            EnsureBuildingRegistry();
             EnsureCamera();
             EnsureBuildingPlacer();
             EnsureUI();
@@ -54,6 +55,20 @@ namespace Terranova.Core
             var go = new GameObject("World");
             go.AddComponent<WorldManager>();
             Debug.Log("GameBootstrapper: Created WorldManager.");
+        }
+
+        /// <summary>
+        /// Registry of all buildable building types.
+        /// Story 4.3: Gebäude-Typen Epoche I.1
+        /// </summary>
+        private static void EnsureBuildingRegistry()
+        {
+            if (BuildingRegistry.Instance != null)
+                return;
+
+            var go = new GameObject("BuildingRegistry");
+            go.AddComponent<BuildingRegistry>();
+            Debug.Log("GameBootstrapper: Created BuildingRegistry.");
         }
 
         /// <summary>
@@ -103,6 +118,7 @@ namespace Terranova.Core
                 var campfire = ScriptableObject.CreateInstance<BuildingDefinition>();
                 campfire.DisplayName = "Campfire";
                 campfire.Description = "A simple campfire. The heart of your settlement.";
+                campfire.Type = BuildingType.Campfire;
                 campfire.WoodCost = 5;
                 campfire.StoneCost = 0;
                 campfire.FootprintSize = Vector2Int.one;
