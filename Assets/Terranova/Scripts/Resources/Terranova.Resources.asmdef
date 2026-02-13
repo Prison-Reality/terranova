@@ -1,9 +1,8 @@
 {
-    "name": "Terranova.Terrain",
-    "rootNamespace": "Terranova.Terrain",
+    "name": "Terranova.Resources",
+    "rootNamespace": "Terranova.Resources",
     "references": [
-        "Terranova.Core",
-        "Unity.InputSystem"
+        "Terranova.Terrain"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

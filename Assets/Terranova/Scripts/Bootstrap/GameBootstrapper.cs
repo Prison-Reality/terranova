@@ -5,6 +5,8 @@ using Terranova.Terrain;
 using Terranova.Buildings;
 using Terranova.Camera;
 using Terranova.UI;
+using Terranova.Population;
+using Terranova.Resources;
 
 namespace Terranova.Core
 {
@@ -33,6 +35,10 @@ namespace Terranova.Core
             EnsureBuildingPlacer();
             EnsureUI();
             EnsureEventSystem();
+            EnsureSettlerSpawner();
+            EnsureResourceSpawner();
+            EnsureDebugTerrainModifier();
+            EnsureDebugTaskAssigner();
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
@@ -110,6 +116,55 @@ namespace Terranova.Core
             go.AddComponent<EventSystem>();
             go.AddComponent<InputSystemUIInputModule>();
             Debug.Log("GameBootstrapper: Created EventSystem.");
+        }
+
+        private static void EnsureSettlerSpawner()
+        {
+            if (Object.FindFirstObjectByType<SettlerSpawner>() != null)
+                return;
+
+            var go = new GameObject("SettlerSpawner");
+            go.AddComponent<SettlerSpawner>();
+            Debug.Log("GameBootstrapper: Created SettlerSpawner.");
+        }
+
+        private static void EnsureResourceSpawner()
+        {
+            if (Object.FindFirstObjectByType<ResourceSpawner>() != null)
+                return;
+
+            var go = new GameObject("ResourceSpawner");
+            go.AddComponent<ResourceSpawner>();
+            Debug.Log("GameBootstrapper: Created ResourceSpawner.");
+        }
+
+        /// <summary>
+        /// DEBUG ONLY - Click terrain to modify blocks (left=remove, right=add).
+        /// Remove this when a proper terrain editing tool exists.
+        /// Story 0.5: Terrain-Modifikation aktualisiert Mesh
+        /// </summary>
+        private static void EnsureDebugTerrainModifier()
+        {
+            if (Object.FindFirstObjectByType<DebugTerrainModifier>() != null)
+                return;
+
+            var go = new GameObject("DebugTerrainModifier");
+            go.AddComponent<DebugTerrainModifier>();
+            Debug.Log("GameBootstrapper: Created DebugTerrainModifier (left-click=remove, right-click=add).");
+        }
+
+        /// <summary>
+        /// DEBUG ONLY - Creates the debug task assigner (press T to assign tasks).
+        /// Remove this when building-driven task assignment exists (Story 4.4).
+        /// </summary>
+        private static void EnsureDebugTaskAssigner()
+        {
+            if (Object.FindFirstObjectByType<DebugTaskAssigner>() != null)
+                return;
+
+            var go = new GameObject("DebugTaskAssigner");
+            go.AddComponent<DebugTaskAssigner>();
+            Debug.Log("GameBootstrapper: Created DebugTaskAssigner (press T to assign tasks).");
         }
     }
 }

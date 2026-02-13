@@ -82,6 +82,33 @@ namespace Terranova.Terrain
             return height >= 0 ? GetBlock(x, height, z) : VoxelType.Air;
         }
 
+        /// <summary>
+        /// Find the highest solid (non-air, non-water) block in a column.
+        /// Returns -1 if the column has no solid blocks.
+        /// Used by: smooth mesh builder (terrain mesh follows seafloor, not water surface).
+        /// </summary>
+        public int GetSolidHeightAt(int x, int z)
+        {
+            for (int y = HEIGHT - 1; y >= 0; y--)
+            {
+                VoxelType block = GetBlock(x, y, z);
+                if (block != VoxelType.Air && block != VoxelType.Water)
+                    return y;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Get the surface type of the highest solid block (skips water).
+        /// Returns the block type of the seafloor for underwater columns.
+        /// Used by: smooth mesh builder for terrain coloring under water.
+        /// </summary>
+        public VoxelType GetSolidSurfaceType(int x, int z)
+        {
+            int height = GetSolidHeightAt(x, z);
+            return height >= 0 ? GetBlock(x, height, z) : VoxelType.Air;
+        }
+
         private static bool IsInBounds(int x, int y, int z)
         {
             return x >= 0 && x < WIDTH

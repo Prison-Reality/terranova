@@ -1,20 +1,20 @@
 # Terranova – Project Briefing for AI Developer Agent
 
 > This file is the primary context for Claude Code working on Terranova.
-> Last updated: February 2026 | Based on GDD v0.8
+> Last updated: February 2026 | Based on GDD v0.9
 
 ---
 
 ## What is Terranova?
 
-Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+) where the player guides a civilization through 29 epochs – from stone tool culture to a speculative post-biological future – on a procedurally generated voxel planet.
+Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+) where the player guides a civilization through 29 epochs – from stone tool culture to a speculative post-biological future – on a procedurally generated planet with organically rendered terrain.
 
-**Elevator pitch:** Empire Earth's epoch system + Minecraft's voxel terrain + Anno/Settlers' economic chains + RimWorld's emergent storytelling.
+**Elevator pitch:** Empire Earth's epoch system + dynamic terrain generation & terraforming + Anno/Settlers' economic chains + RimWorld's emergent storytelling. Visual target: Northgard / Empire Earth (no block look).
 
 ### Design Pillars (in priority order)
 
 1. **Building Fascination ("Wuselfaktor")** – Individual settlers autonomously work, trade, and live. The player watches, optimizes, and guides indirectly. The joy of seeing a civilization grow from a campfire to a metropolis.
-2. **Strategic Depth Through Terrain** – The voxel world is not backdrop but strategy. Where you build, which biome you settle, how you shape terrain – all have real consequences on build costs and research direction.
+2. **Strategic Depth Through Terrain** – The world is not backdrop but strategy. Where you build, which biome you settle, how you shape terrain – all have real consequences on build costs and research direction.
 3. **Epoch Progression** – Advancing through epochs must feel like a civilizational leap. New possibilities, new aesthetics, new strategies. Even the way research works evolves over time.
 
 ### What Terranova is NOT
@@ -36,7 +36,7 @@ Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+)
 | Primary Platform | iPad (M4 processor or higher) |
 | Future Platforms | Meta Quest 3 (MR multiplayer – far future) |
 | Input | Touch primary, Apple Pencil optional, mouse/keyboard for dev |
-| Voxel System | Custom chunk-mesh system (not an off-the-shelf solution) |
+| Terrain System | Volumetric chunk system (internal data) + smooth mesh rendering (visual). No block look. |
 | Networking | Singleplayer first. Architecture must allow future multiplayer. |
 
 ---
@@ -45,7 +45,7 @@ Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+)
 
 ### 1. World Geometry: Goldberg Polyhedron
 
-The planet is a **Goldberg polyhedron** – a body of pentagons and hexagons approximating a sphere. Each facet (pentagon or hexagon) is internally flat and contains a chunk-based voxel terrain. Planet shape emerges at macro level through angles between facets.
+The planet is a **Goldberg polyhedron** – a body of pentagons and hexagons approximating a sphere. Each facet (pentagon or hexagon) is internally flat and contains a chunk-based volumetric terrain. Planet shape emerges at macro level through angles between facets.
 
 - **Planet size** scales via polyhedron resolution: GP(1,0) = 32 facets (quick game) to GP(4,0)+ = 162+ facets (planetary scale)
 - **Each facet = one biome**
@@ -55,12 +55,16 @@ The planet is a **Goldberg polyhedron** – a body of pentagons and hexagons app
 
 > **For Vertical Slice:** Start with a SINGLE flat facet. Polyhedron integration is a later milestone.
 
-### 2. Voxel System
+### 2. Terrain System (Volumetric Chunks + Smooth Mesh Rendering)
 
-- Block size: 1×1×1 meter
+> **Art Style Decision (GDD v0.9):** Realistic-stylized, inspired by Empire Earth and Northgard. NO block/voxel look. The internal data structure uses blocks/chunks, but the player sees smooth, textured, organic landscapes.
+
+- Block size (internal data): 1×1×1 meter
 - Chunk size: 16×16×256 blocks
 - View distance: 12 chunks each direction (192m)
 - Terrain height: 0–256 blocks (sea level at block 64)
+- **Rendering:** Smooth mesh generation from block data (e.g. Marching Cubes, Surface Nets). Textured surfaces with soft material blending. LOD for distant chunks.
+- **Key principle:** Blocks are the DATA STRUCTURE (like cells in a spreadsheet). The RENDERING produces smooth hills, valleys, coastlines. The player never sees individual blocks.
 
 ### 3. Biomes (20 types)
 
@@ -121,7 +125,7 @@ Goods are physically transported by individual settlers. Paths, distances, and s
 
 ### 8. Terraforming
 
-Three atomic operations on voxel level:
+Three atomic operations on block level (internal data). Visual result = organic terrain deformation:
 - **Remove** (dig, mine, quarry, level hills)
 - **Add** (build walls, dams, landfill)
 - **Transform** (earth → farmland, sand → foundation, rock → tunnel wall)
@@ -166,7 +170,7 @@ Panel-driven single-object model with building-as-group-proxy. 22 gestures total
 - **Use namespaces.** All code under `Terranova.*`:
   - `Terranova.Core` – Game loop, epoch manager, event bus, save/load
   - `Terranova.World` – Goldberg polyhedron, facet management, coordinate transforms
-  - `Terranova.Terrain` – Voxel system, chunk generation/rendering, biome terrain features
+  - `Terranova.Terrain` – Volumetric chunk system, chunk generation, smooth mesh rendering, biome terrain features
   - `Terranova.Economy` – Resources, production chains, storage, transport
   - `Terranova.Buildings` – Building placement, construction, operation, terraforming integration
   - `Terranova.Population` – Settler AI, needs, lifecycle, knowledge, professions
@@ -238,42 +242,36 @@ Assets/
 ### Testing
 
 - **Edit Mode tests** for: economy calculations, discovery probabilities, epoch transition logic, resource dependency validation, terraforming cost calculations.
-- **Play Mode tests** for: building placement, terrain generation, settler pathfinding, camera controls.
+- **Play Mode tests** for: building placement, terrain generation, smooth mesh rendering, settler pathfinding, camera controls.
 - Every new system should have at least basic test coverage.
 
 ---
 
-## Current Milestone: MS1 – Technical Foundation
+## Completed: MS1 – Technical Foundation ✅
 
-**Goal:** Prove that the voxel terrain and basic interaction work.
+MS1 is complete. The volumetric terrain generates and renders, RTS camera works, buildings can be placed, and basic UI is functional.
 
-### Acceptance Criteria
+> **Note:** MS1 was built with a block-based renderer. MS2 Feature 0 replaces this with smooth mesh rendering to match the art style decision (GDD v0.9).
 
-- [ ] Flat voxel terrain generates and renders (single facet, single biome, min. 64×64 blocks)
-- [ ] Multiple voxel types visible (grass, stone, water, sand)
-- [ ] RTS camera works (pan, zoom, rotate) – mouse/keyboard first, touch later
-- [ ] A single building type (campfire) can be placed on terrain via click
-- [ ] Terrain-aware placement (building snaps to surface, rejects water)
-- [ ] Basic resource counter in UI (wood, stone – just numbers, no gathering yet)
+---
 
-### What is NOT in this milestone
+## Current Milestone: MS2 – Living World
 
-- Settlers / population
-- Economy / gathering
-- Research / discoveries
-- Multiple biomes or Goldberg polyhedron
-- Touch input (use mouse/keyboard for faster iteration)
-- Audio
-- Save/Load
+**Goal:** Prove that settlers exist, move, and interact with the world. The "Wuselfaktor" (Design Pillar #1) must work.
 
-### After MS1, the next milestones are:
+**Definition of Done:** 5 settlers autonomously gather wood and stone, build structures, and hunt. Settlers without food die. The player places buildings and controls game speed. It feels like a small living world.
 
-- **MS2: Living World** – Settler AI, resource gathering, 3–5 buildings
-- **MS3: Discovery** – Research system (5–8 discoveries), Epoch I.1 complete
-- **MS4: Vertical Slice** – Second biome, epoch transition I.1→I.2, terraforming, touch input
-- **MS5: Demo** – Polish, full UI, sound, tutorial, save/load
+### Feature Order (strict dependencies)
 
-See `docs/roadmap.md` for full details.
+1. **Feature 0: Smooth Mesh Rendering** – Replace block renderer with smooth mesh (Marching Cubes or similar). MUST be done before Pathfinding.
+2. **Feature 1: Settler AI** – Settlers spawn, idle behavior, task system, task cycle. Can be developed parallel to Feature 0.
+3. **Feature 2: Pathfinding** – Navigation on smooth mesh (not block grid). Depends on Feature 0 + 1.
+4. **Feature 3: Resource Gathering** – Gatherable objects, collection, transport, UI updates, respawn.
+5. **Feature 4: Building Construction** – Build costs, construction progress, 4 building types (Epoch I.1), building function, build menu.
+6. **Feature 5: Hunger** – Hunger mechanic, food consumption, food sources, death, visual feedback.
+7. **Feature 6: Selection & Info Panel** – Tap selection, deselect, long press, highlight ring. Can be developed parallel from Feature 1 onwards.
+
+See the MS2 backlog (v3) for detailed stories and acceptance criteria per sub-issue.
 
 ---
 
@@ -289,7 +287,8 @@ The human producer is learning C# and Unity. When writing code:
 6. **Reference the GDD.** The design documents in `docs/` are the source of truth. If a design decision is unclear, ask rather than assume.
 7. **Flag scope creep.** If implementing something "right" would take significantly longer than a simpler version, say so and suggest the simpler version for now.
 8. Remember that the human producer is using **GitHub Desktop** for all push/merge/pull activities
-9. Always develop on the **main branch** in GitHub to avoid merge activities. **Never open a separate branch** unless explicitly told so by the human producer.
+9. Push directly to https://github.com/Prison-Reality/terranova (credentials are stored in the git credential store at ~/.git-credentials)
+
 
 ---
 
@@ -297,7 +296,7 @@ The human producer is learning C# and Unity. When writing code:
 
 | Document | Content |
 |----------|---------|
-| `docs/gdd-terranova.md` | Main Game Design Document (v0.8) |
+| `docs/gdd-terranova.md` | Main Game Design Document (v0.9) |
 | `docs/epochs.md` | All 29 epochs, transition mechanics |
 | `docs/biomes.md` | 20 biome types, distribution rules, discovery influence |
 | `docs/research.md` | Research system, discoveries per epoch |
@@ -315,7 +314,7 @@ magic numbers, and event-bus architecture compliance.
 
 ## Working with the Task Board
 - when done with an issue, find the next one by looking in the ToDo column for the top item of type "Story" in the column "ToDo"
-- plan the implementation work by creating sub-issues of type "Task" for the given story
+- plan the implementation work by creating sub-issues of type "Task" for the given story. Make sure that tasks you create are always added to the top of the "ToDo" column.
 - then set the story and the first task to "In Progress"
 - finished tasks can be set to done directly
 - when all tasks of a story are done, write a comment into the story about what has been done

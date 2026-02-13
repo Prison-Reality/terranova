@@ -37,9 +37,10 @@ namespace Terranova.Terrain
         [Tooltip("Material for water (transparent, vertex colors). Auto-created if not assigned.")]
         [SerializeField] private Material _waterMaterial;
 
-        // Track whether materials were auto-created (so we can clean them up)
+        // Track whether materials/textures were auto-created (so we can clean them up)
         private bool _ownsSolidMaterial;
         private bool _ownsWaterMaterial;
+        private readonly List<Texture2D> _autoTextures = new();
 
         // All chunks indexed by (chunkX, chunkZ) coordinates
         private readonly Dictionary<Vector2Int, ChunkRenderer> _chunks = new();
@@ -68,6 +69,12 @@ namespace Terranova.Terrain
             Instance = this;
         }
 
+        [Header("LOD")]
+        [Tooltip("Distance in chunks for LOD 1 (medium detail). Chunks closer use LOD 0.")]
+        [SerializeField] private int _lod1Distance = 4;
+        [Tooltip("Distance in chunks for LOD 2 (low detail). Chunks closer use LOD 1.")]
+        [SerializeField] private int _lod2Distance = 8;
+
         private void Start()
         {
             EnsureMaterials();
@@ -79,6 +86,9 @@ namespace Terranova.Terrain
             }
 
             GenerateWorld();
+
+            // Periodically update LOD based on camera position (every 0.5s)
+            InvokeRepeating(nameof(UpdateChunkLODs), 1f, 0.5f);
         }
 
         /// <summary>
@@ -101,7 +111,7 @@ namespace Terranova.Terrain
             // across chunk boundaries – all data must exist first)
             foreach (var chunk in _chunks.Values)
             {
-                chunk.RebuildMesh(GetBlockAtWorldPos);
+                chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos);
             }
 
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
@@ -125,6 +135,49 @@ namespace Terranova.Terrain
             renderer.Initialize(data, _solidMaterial, _waterMaterial);
 
             _chunks[new Vector2Int(chunkX, chunkZ)] = renderer;
+        }
+
+        /// <summary>
+        /// Update LOD levels for all chunks based on camera distance.
+        /// Called periodically via InvokeRepeating.
+        /// Only rebuilds meshes for chunks whose LOD level changed.
+        ///
+        /// Story 0.4: Performance und LOD
+        /// </summary>
+        private void UpdateChunkLODs()
+        {
+            var cam = Camera.main;
+            if (cam == null)
+                return;
+
+            Vector3 camPos = cam.transform.position;
+
+            foreach (var kvp in _chunks)
+            {
+                var chunk = kvp.Value;
+
+                // Calculate distance from camera to chunk center (in chunk units)
+                float chunkCenterX = (kvp.Key.x + 0.5f) * ChunkData.WIDTH;
+                float chunkCenterZ = (kvp.Key.y + 0.5f) * ChunkData.DEPTH;
+                float dx = camPos.x - chunkCenterX;
+                float dz = camPos.z - chunkCenterZ;
+                float distInChunks = Mathf.Sqrt(dx * dx + dz * dz) / ChunkData.WIDTH;
+
+                // Determine desired LOD level
+                int desiredLod;
+                if (distInChunks < _lod1Distance)
+                    desiredLod = 0;
+                else if (distInChunks < _lod2Distance)
+                    desiredLod = 1;
+                else
+                    desiredLod = 2;
+
+                // Only rebuild if LOD changed
+                if (chunk.CurrentLod != desiredLod)
+                {
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, desiredLod);
+                }
+            }
         }
 
         /// <summary>
@@ -191,15 +244,244 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
+        /// Get the solid terrain height at a world position (skips water blocks).
+        /// Returns the seafloor height for underwater columns.
+        /// Used by: smooth mesh builder (terrain follows seafloor, not water surface).
+        /// </summary>
+        public int GetSolidHeightAtWorldPos(int worldX, int worldZ)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return -1;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            return chunk.Data.GetSolidHeightAt(localX, localZ);
+        }
+
+        /// <summary>
+        /// Get the solid surface type at a world position (skips water blocks).
+        /// Returns the seafloor block type for underwater columns.
+        /// Used by: smooth mesh builder for terrain coloring under water.
+        /// </summary>
+        public VoxelType GetSolidSurfaceTypeAtWorldPos(int worldX, int worldZ)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return VoxelType.Air;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            return chunk.Data.GetSolidSurfaceType(localX, localZ);
+        }
+
+        /// <summary>
+        /// Get the interpolated smooth mesh height at a world position.
+        /// Uses the same 4-column averaging as SmoothTerrainBuilder for consistency.
+        /// This is the visual surface height – use for positioning objects on the
+        /// smooth terrain mesh (settlers, buildings, etc.).
+        ///
+        /// Story 0.6: Bestehende Objekte auf Mesh-Oberfläche
+        /// </summary>
+        public float GetSmoothedHeightAtWorldPos(float worldX, float worldZ)
+        {
+            // Determine which vertex "cell" this position falls in (same grid as mesh builder)
+            // The vertex at (vx, vz) is the average of 4 surrounding columns.
+            // We bilinearly interpolate between the 4 nearest vertices.
+            float fx = worldX;  // Already in world space
+            float fz = worldZ;
+
+            // Floor to get the cell (integer vertex positions in world space)
+            int x0 = Mathf.FloorToInt(fx);
+            int z0 = Mathf.FloorToInt(fz);
+            int x1 = x0 + 1;
+            int z1 = z0 + 1;
+
+            // Fractional position within cell for bilinear interpolation
+            float tx = fx - x0;
+            float tz = fz - z0;
+
+            // Get averaged heights at the 4 cell corners
+            float h00 = GetAveragedVertexHeight(x0, z0);
+            float h10 = GetAveragedVertexHeight(x1, z0);
+            float h01 = GetAveragedVertexHeight(x0, z1);
+            float h11 = GetAveragedVertexHeight(x1, z1);
+
+            // Bilinear interpolation
+            float h0 = Mathf.Lerp(h00, h10, tx);
+            float h1 = Mathf.Lerp(h01, h11, tx);
+            return Mathf.Lerp(h0, h1, tz);
+        }
+
+        /// <summary>
+        /// Get the averaged vertex height at a world-space vertex position.
+        /// Replicates SmoothTerrainBuilder's 4-column averaging logic.
+        /// Uses solid heights (skips water) to match the visible terrain mesh.
+        /// </summary>
+        private float GetAveragedVertexHeight(int worldVx, int worldVz)
+        {
+            float totalHeight = 0f;
+            int count = 0;
+
+            for (int dx = -1; dx <= 0; dx++)
+            {
+                for (int dz = -1; dz <= 0; dz++)
+                {
+                    int h = GetSolidHeightAtWorldPos(worldVx + dx, worldVz + dz);
+                    if (h >= 0)
+                    {
+                        totalHeight += h;
+                        count++;
+                    }
+                }
+            }
+
+            return count > 0 ? (totalHeight / count) + 1f : TerrainGenerator.SEA_LEVEL + 1f;
+        }
+
+        /// <summary>
+        /// Flatten terrain in a square area around (centerX, centerZ) so all columns
+        /// match the height of the center column. Columns that are too high get their
+        /// upper blocks removed (set to Air); columns that are too low get filled up
+        /// with the surface type of the center column.
+        ///
+        /// Rebuilds affected chunk meshes once at the end (not per block).
+        ///
+        /// Story 0.6: Flatten terrain before placing objects
+        /// </summary>
+        public void FlattenTerrain(int centerX, int centerZ, int radius)
+        {
+            int targetHeight = GetHeightAtWorldPos(centerX, centerZ);
+            if (targetHeight < 0)
+                return;
+
+            VoxelType surfaceType = GetSurfaceTypeAtWorldPos(centerX, centerZ);
+            if (!surfaceType.IsSolid())
+                surfaceType = VoxelType.Grass;
+
+            var affectedChunks = new HashSet<Vector2Int>();
+
+            for (int x = centerX - radius; x <= centerX + radius; x++)
+            {
+                for (int z = centerZ - radius; z <= centerZ + radius; z++)
+                {
+                    int currentHeight = GetHeightAtWorldPos(x, z);
+                    if (currentHeight < 0)
+                        continue;
+
+                    if (currentHeight > targetHeight)
+                    {
+                        // Remove blocks above target height
+                        for (int y = targetHeight + 1; y <= currentHeight; y++)
+                            SetBlockInternal(x, y, z, VoxelType.Air, affectedChunks);
+                    }
+                    else if (currentHeight < targetHeight)
+                    {
+                        // Fill blocks up to target height
+                        for (int y = currentHeight + 1; y <= targetHeight; y++)
+                            SetBlockInternal(x, y, z, surfaceType, affectedChunks);
+                    }
+                }
+            }
+
+            // Rebuild all affected chunks once
+            foreach (var key in affectedChunks)
+            {
+                if (_chunks.TryGetValue(key, out var chunk))
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
+            }
+        }
+
+        /// <summary>
+        /// Set a block without rebuilding the mesh. Tracks which chunks are affected.
+        /// Used by FlattenTerrain for batch modifications.
+        /// </summary>
+        private void SetBlockInternal(int worldX, int worldY, int worldZ, VoxelType type,
+            HashSet<Vector2Int> affectedChunks)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            chunk.Data.SetBlock(localX, worldY, localZ, type);
+            affectedChunks.Add(key);
+
+            // Also mark neighbor chunks if at boundary (smooth mesh averaging crosses boundaries)
+            if (localX <= 0) affectedChunks.Add(new Vector2Int(chunkX - 1, chunkZ));
+            if (localX >= ChunkData.WIDTH - 1) affectedChunks.Add(new Vector2Int(chunkX + 1, chunkZ));
+            if (localZ <= 0) affectedChunks.Add(new Vector2Int(chunkX, chunkZ - 1));
+            if (localZ >= ChunkData.DEPTH - 1) affectedChunks.Add(new Vector2Int(chunkX, chunkZ + 1));
+        }
+
+        /// <summary>
+        /// Modify a block at a world position and rebuild the affected chunk mesh.
+        /// Also rebuilds neighbor chunks if the modification is at a boundary.
+        ///
+        /// Story 0.5: Terrain-Modifikation aktualisiert Mesh
+        /// </summary>
+        public void ModifyBlock(int worldX, int worldY, int worldZ, VoxelType newType)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            chunk.Data.SetBlock(localX, worldY, localZ, newType);
+            chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
+
+            // Rebuild neighbors if modification is at a chunk boundary (within 1 block of edge).
+            // The smooth mesh averaging samples from neighboring chunks at boundaries.
+            if (localX <= 0) RebuildNeighbor(chunkX - 1, chunkZ);
+            if (localX >= ChunkData.WIDTH - 1) RebuildNeighbor(chunkX + 1, chunkZ);
+            if (localZ <= 0) RebuildNeighbor(chunkX, chunkZ - 1);
+            if (localZ >= ChunkData.DEPTH - 1) RebuildNeighbor(chunkX, chunkZ + 1);
+        }
+
+        /// <summary>
+        /// Rebuild a neighbor chunk's mesh if it exists.
+        /// </summary>
+        private void RebuildNeighbor(int chunkX, int chunkZ)
+        {
+            var key = new Vector2Int(chunkX, chunkZ);
+            if (_chunks.TryGetValue(key, out var neighbor))
+            {
+                neighbor.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, neighbor.CurrentLod);
+            }
+        }
+
+        /// <summary>
         /// Create fallback materials if none were assigned in Inspector.
-        /// Uses URP Particles/Unlit shader which supports vertex colors.
+        /// Uses TerrainSplat shader for textured terrain with blending,
+        /// falls back to VertexColorOpaque if splatting shader is not available.
         /// </summary>
         private void EnsureMaterials()
         {
             if (_solidMaterial == null)
             {
-                // Try the custom Terranova shader first, fall back to particle shader
-                Shader shader = Shader.Find("Terranova/VertexColorOpaque")
+                // Prefer the terrain splatting shader, fall back to vertex color
+                Shader shader = Shader.Find("Terranova/TerrainSplat")
+                             ?? Shader.Find("Terranova/VertexColorOpaque")
                              ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
 
                 if (shader == null)
@@ -209,8 +491,14 @@ namespace Terranova.Terrain
                 }
 
                 _solidMaterial = new Material(shader);
-                _solidMaterial.name = "Terrain_Solid (Auto)";
+                _solidMaterial.name = "Terrain_Splat (Auto)";
                 _ownsSolidMaterial = true;
+
+                // If using the splatting shader, generate and assign placeholder textures
+                if (shader.name == "Terranova/TerrainSplat")
+                {
+                    AssignPlaceholderTextures(_solidMaterial);
+                }
             }
 
             if (_waterMaterial == null)
@@ -238,9 +526,78 @@ namespace Terranova.Terrain
             }
         }
 
+        /// <summary>
+        /// Generate simple procedural placeholder textures for each terrain type
+        /// and assign them to the splatting material. Each texture is a base color
+        /// with subtle noise variation to avoid a flat, synthetic look.
+        ///
+        /// Story 0.3: Texturierung und Materialien
+        /// </summary>
+        private void AssignPlaceholderTextures(Material material)
+        {
+            const int TEX_SIZE = 128;
+
+            // Base colors matching the vertex color palette
+            var grassBase = new Color(0.30f, 0.65f, 0.20f);
+            var dirtBase  = new Color(0.55f, 0.36f, 0.16f);
+            var stoneBase = new Color(0.52f, 0.52f, 0.52f);
+            var sandBase  = new Color(0.90f, 0.85f, 0.55f);
+
+            material.SetTexture("_GrassTex", CreateNoisyTexture(TEX_SIZE, grassBase, 0.08f, 42));
+            material.SetTexture("_DirtTex",  CreateNoisyTexture(TEX_SIZE, dirtBase,  0.10f, 137));
+            material.SetTexture("_StoneTex", CreateNoisyTexture(TEX_SIZE, stoneBase, 0.12f, 271));
+            material.SetTexture("_SandTex",  CreateNoisyTexture(TEX_SIZE, sandBase,  0.06f, 389));
+            material.SetFloat("_TexScale", 0.25f);
+        }
+
+        /// <summary>
+        /// Create a texture with a base color and subtle Perlin noise variation.
+        /// The noise prevents the flat, synthetic look that solid colors produce.
+        /// </summary>
+        private Texture2D CreateNoisyTexture(int size, Color baseColor, float noiseStrength, int seed)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGB24, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Bilinear;
+
+            var pixels = new Color[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    // Multi-octave Perlin noise for natural variation
+                    float nx = (float)x / size;
+                    float ny = (float)y / size;
+                    float noise = Mathf.PerlinNoise(nx * 8f + seed, ny * 8f + seed) * 0.6f
+                                + Mathf.PerlinNoise(nx * 16f + seed, ny * 16f + seed) * 0.3f
+                                + Mathf.PerlinNoise(nx * 32f + seed, ny * 32f + seed) * 0.1f;
+
+                    // Map noise (0..1) to a brightness variation around the base color
+                    float variation = (noise - 0.5f) * 2f * noiseStrength;
+                    Color pixel = new Color(
+                        Mathf.Clamp01(baseColor.r + variation),
+                        Mathf.Clamp01(baseColor.g + variation),
+                        Mathf.Clamp01(baseColor.b + variation));
+
+                    pixels[y * size + x] = pixel;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply(true); // Generate mipmaps
+            _autoTextures.Add(tex);
+            return tex;
+        }
+
         private void OnDestroy()
         {
-            // Clean up auto-created materials to prevent VRAM leaks
+            // Clean up auto-created textures and materials to prevent VRAM leaks
+            foreach (var tex in _autoTextures)
+            {
+                if (tex != null) Destroy(tex);
+            }
+            _autoTextures.Clear();
+
             if (_ownsSolidMaterial && _solidMaterial != null)
                 Destroy(_solidMaterial);
             if (_ownsWaterMaterial && _waterMaterial != null)

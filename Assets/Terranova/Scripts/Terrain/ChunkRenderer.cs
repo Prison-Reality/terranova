@@ -26,6 +26,13 @@ namespace Terranova.Terrain
         public ChunkData Data { get; private set; }
 
         /// <summary>
+        /// Current LOD level. 0 = full detail, 1 = medium, 2 = low.
+        /// Used by WorldManager to track when a rebuild is needed.
+        /// Story 0.4: Performance und LOD
+        /// </summary>
+        public int CurrentLod { get; private set; }
+
+        /// <summary>
         /// Initialize this renderer with chunk data and materials.
         /// Called by WorldManager when creating a new chunk.
         /// </summary>
@@ -40,21 +47,23 @@ namespace Terranova.Terrain
             // Assign both materials (submesh 0 = solid, submesh 1 = water)
             _meshRenderer.materials = new[] { solidMaterial, waterMaterial };
 
-            // Position the chunk GameObject at its world-space location
-            transform.position = new Vector3(
-                data.ChunkX * ChunkData.WIDTH,
-                0,
-                data.ChunkZ * ChunkData.DEPTH
-            );
+            // Chunks stay at origin – mesh vertices are in world-space coordinates.
+            // This eliminates floating-point seams at chunk boundaries caused by
+            // different model-to-world transforms producing slightly different
+            // clip-space positions for shared boundary vertices (Story 0.2).
+            transform.position = Vector3.zero;
 
             gameObject.name = $"Chunk ({data.ChunkX}, {data.ChunkZ})";
         }
 
         /// <summary>
-        /// Rebuild the mesh from current chunk data.
+        /// Rebuild the mesh from current chunk data using the smooth terrain builder.
         /// Call this after terrain generation or any block modification.
         /// </summary>
-        public void RebuildMesh(ChunkMeshBuilder.NeighborLookup neighborLookup = null)
+        public void RebuildMesh(
+            SmoothTerrainBuilder.HeightLookup heightLookup = null,
+            SmoothTerrainBuilder.SurfaceLookup surfaceLookup = null,
+            int lodLevel = 0)
         {
             if (Data == null)
             {
@@ -62,17 +71,19 @@ namespace Terranova.Terrain
                 return;
             }
 
+            // Convert LOD level (0,1,2) to step size (1,2,4)
+            int lodStep = 1 << lodLevel; // 0→1, 1→2, 2→4
+            CurrentLod = lodLevel;
+
             // Destroy the old mesh to prevent memory leaks
-            // (important once terraforming allows runtime mesh rebuilds)
             if (_meshFilter.sharedMesh != null)
                 Destroy(_meshFilter.sharedMesh);
 
-            // Build mesh from voxel data
-            Mesh mesh = ChunkMeshBuilder.Build(Data, neighborLookup);
+            // Build smooth terrain mesh from voxel data at the requested LOD
+            Mesh mesh = SmoothTerrainBuilder.Build(Data, heightLookup, surfaceLookup, lodStep);
             _meshFilter.sharedMesh = mesh;
 
-            // Update collider for raycasting (building placement, camera ground detection).
-            // We only use the solid submesh (index 0) for collision.
+            // Update collider for raycasting (building placement, camera ground detection)
             _meshCollider.sharedMesh = null; // Clear first to force update
             _meshCollider.sharedMesh = mesh;
         }

@@ -99,9 +99,9 @@ namespace Terranova.Buildings
 
         private void Start()
         {
-            // Auto-start placement mode if a building is assigned (convenient for MS1 testing)
-            if (_selectedBuilding != null)
-                StartPlacement(_selectedBuilding);
+            // MS1 auto-started placement mode here. Now in MS2, the campfire
+            // is auto-placed by SettlerSpawner, so we don't start placement mode.
+            // Future: Build menu (Story 4.5) will call StartPlacement() on demand.
         }
 
         private void Update()
@@ -190,8 +190,8 @@ namespace Terranova.Buildings
                 // Check placement validity
                 _isValidPosition = IsValidPlacement(surface, height);
 
-                // Position the preview on top of the terrain
-                float previewY = height + 1; // Sit on top of the surface block
+                // Position the preview on the smooth mesh surface (Story 0.6)
+                float previewY = world.GetSmoothedHeightAtWorldPos(blockX + 0.5f, blockZ + 0.5f);
                 _preview.transform.position = new Vector3(
                     blockX + 0.5f,  // Center on block
                     previewY,
