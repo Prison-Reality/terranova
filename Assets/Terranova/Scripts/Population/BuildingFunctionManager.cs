@@ -163,6 +163,7 @@ namespace Terranova.Population
                     building.EntrancePosition, duration);
                 task.TargetResource = nearestNode;
                 task.SpeedMultiplier = 2f;
+                task.IsSpecialized = true;
 
                 if (nearest.AssignTask(task))
                 {

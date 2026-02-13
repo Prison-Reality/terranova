@@ -50,6 +50,12 @@ namespace Terranova.Population
         public float SpeedMultiplier { get; set; } = 1f;
 
         /// <summary>
+        /// True when this task was assigned by a production building (WoodcutterHut, HunterHut).
+        /// Specialized workers deliver to their building and are visually distinct.
+        /// </summary>
+        public bool IsSpecialized { get; set; }
+
+        /// <summary>
         /// Whether the target still exists (tree not yet felled, etc.).
         /// Checks ResourceNode for gather tasks, Building for build tasks.
         /// </summary>

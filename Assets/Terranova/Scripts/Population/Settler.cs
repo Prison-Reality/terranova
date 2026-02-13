@@ -603,7 +603,7 @@ namespace Terranova.Population
             if (_visualRenderer == null || _propBlock == null) return;
 
             Color color = DEFAULT_COLOR;
-            if (_currentTask != null)
+            if (_currentTask != null && _currentTask.IsSpecialized)
             {
                 color = _currentTask.TaskType switch
                 {
