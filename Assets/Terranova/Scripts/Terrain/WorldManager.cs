@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.AI.Navigation;
 
 namespace Terranova.Terrain
 {
@@ -47,6 +48,12 @@ namespace Terranova.Terrain
 
         // Terrain generator (deterministic from seed)
         private TerrainGenerator _generator;
+
+        // NavMesh for settler pathfinding (Story 2.0)
+        private NavMeshSurface _navMeshSurface;
+
+        /// <summary>Whether the NavMesh has been baked and is ready for pathfinding.</summary>
+        public bool IsNavMeshReady { get; private set; }
 
         // Public access for other systems (building placement, camera, etc.)
         public static WorldManager Instance { get; private set; }
@@ -116,6 +123,9 @@ namespace Terranova.Terrain
 
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
                       $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={_seed}");
+
+            // Bake NavMesh for settler pathfinding (Story 2.0)
+            BakeNavMesh();
         }
 
         /// <summary>
@@ -350,6 +360,27 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
+        /// Bake (or rebake) the NavMesh from the current terrain colliders.
+        /// Called after world generation and after any terrain modification.
+        ///
+        /// Story 2.0: Siedler-Bewegung auf NavMesh migrieren
+        /// </summary>
+        public void BakeNavMesh()
+        {
+            if (_navMeshSurface == null)
+            {
+                _navMeshSurface = gameObject.AddComponent<NavMeshSurface>();
+                _navMeshSurface.collectObjects = CollectObjects.Children;
+                _navMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
+            }
+
+            _navMeshSurface.BuildNavMesh();
+            IsNavMeshReady = true;
+
+            Debug.Log("NavMesh baked successfully.");
+        }
+
+        /// <summary>
         /// Flatten terrain in a square area around (centerX, centerZ) so all columns
         /// match the height of the center column. Columns that are too high get their
         /// upper blocks removed (set to Air); columns that are too low get filled up
@@ -400,6 +431,10 @@ namespace Terranova.Terrain
                 if (_chunks.TryGetValue(key, out var chunk))
                     chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
             }
+
+            // Rebake NavMesh after terrain modification (Story 2.0)
+            if (IsNavMeshReady)
+                BakeNavMesh();
         }
 
         /// <summary>
@@ -456,6 +491,10 @@ namespace Terranova.Terrain
             if (localX >= ChunkData.WIDTH - 1) RebuildNeighbor(chunkX + 1, chunkZ);
             if (localZ <= 0) RebuildNeighbor(chunkX, chunkZ - 1);
             if (localZ >= ChunkData.DEPTH - 1) RebuildNeighbor(chunkX, chunkZ + 1);
+
+            // Rebake NavMesh after terrain modification (Story 2.0)
+            if (IsNavMeshReady)
+                BakeNavMesh();
         }
 
         /// <summary>

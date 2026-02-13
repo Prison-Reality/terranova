@@ -12,6 +12,9 @@ namespace Terranova.Terrain
     /// Two materials are used:
     ///   Submesh 0 → Opaque material (grass, dirt, stone, sand)
     ///   Submesh 1 → Transparent material (water)
+    ///
+    /// The MeshCollider uses a terrain-only mesh (submesh 0) so that the
+    /// NavMesh does not include water surfaces. (Story 2.0)
     /// </summary>
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
@@ -21,6 +24,9 @@ namespace Terranova.Terrain
         private MeshFilter _meshFilter;
         private MeshRenderer _meshRenderer;
         private MeshCollider _meshCollider;
+
+        // Separate collision mesh without water (for NavMesh baking)
+        private Mesh _collisionMesh;
 
         // Reference to the chunk's data (owned by WorldManager)
         public ChunkData Data { get; private set; }
@@ -54,6 +60,9 @@ namespace Terranova.Terrain
             transform.position = Vector3.zero;
 
             gameObject.name = $"Chunk ({data.ChunkX}, {data.ChunkZ})";
+
+            // Set static flag so NavMesh baking picks up these objects
+            gameObject.isStatic = true;
         }
 
         /// <summary>
@@ -75,17 +84,42 @@ namespace Terranova.Terrain
             int lodStep = 1 << lodLevel; // 0→1, 1→2, 2→4
             CurrentLod = lodLevel;
 
-            // Destroy the old mesh to prevent memory leaks
+            // Destroy old meshes to prevent memory leaks
             if (_meshFilter.sharedMesh != null)
                 Destroy(_meshFilter.sharedMesh);
+            if (_collisionMesh != null)
+                Destroy(_collisionMesh);
 
             // Build smooth terrain mesh from voxel data at the requested LOD
             Mesh mesh = SmoothTerrainBuilder.Build(Data, heightLookup, surfaceLookup, lodStep);
             _meshFilter.sharedMesh = mesh;
 
-            // Update collider for raycasting (building placement, camera ground detection)
+            // Create collision mesh from terrain submesh only (excludes water).
+            // This ensures the NavMesh only covers solid terrain. (Story 2.0)
+            _collisionMesh = BuildCollisionMesh(mesh);
             _meshCollider.sharedMesh = null; // Clear first to force update
-            _meshCollider.sharedMesh = mesh;
+            _meshCollider.sharedMesh = _collisionMesh;
+        }
+
+        /// <summary>
+        /// Extract terrain triangles (submesh 0) into a separate collision mesh.
+        /// Water triangles (submesh 1) are excluded so NavMesh baking doesn't
+        /// create walkable areas over water.
+        /// </summary>
+        private static Mesh BuildCollisionMesh(Mesh sourceMesh)
+        {
+            var collisionMesh = new Mesh();
+            collisionMesh.name = "CollisionMesh";
+            collisionMesh.vertices = sourceMesh.vertices;
+            collisionMesh.triangles = sourceMesh.GetTriangles(0); // Terrain only
+            collisionMesh.RecalculateBounds();
+            return collisionMesh;
+        }
+
+        private void OnDestroy()
+        {
+            if (_collisionMesh != null)
+                Destroy(_collisionMesh);
         }
     }
 }

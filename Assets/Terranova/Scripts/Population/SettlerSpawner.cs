@@ -35,9 +35,9 @@ namespace Terranova.Population
             if (_hasSpawned)
                 return;
 
-            // Wait until terrain is ready
+            // Wait until terrain and NavMesh are ready (Story 2.0)
             var world = WorldManager.Instance;
-            if (world == null || world.WorldBlocksX == 0)
+            if (world == null || world.WorldBlocksX == 0 || !world.IsNavMeshReady)
                 return;
 
             _hasSpawned = true;

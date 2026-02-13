@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.InputSystem;
 using Terranova.Core;
 using Terranova.Terrain;
@@ -124,6 +125,9 @@ namespace Terranova.Population
             Debug.Log("[DebugTaskAssigner] No busy settlers to invalidate.");
         }
 
+        /// <summary>
+        /// Find a valid target position on the NavMesh. (Story 2.0)
+        /// </summary>
         private Vector3 FindValidTargetPosition(WorldManager world, Vector3 center)
         {
             for (int attempt = 0; attempt < 10; attempt++)
@@ -133,15 +137,12 @@ namespace Terranova.Population
                 float x = center.x + Mathf.Cos(angle) * r;
                 float z = center.z + Mathf.Sin(angle) * r;
 
-                int blockX = Mathf.FloorToInt(x);
-                int blockZ = Mathf.FloorToInt(z);
-                int height = world.GetHeightAtWorldPos(blockX, blockZ);
+                Vector3 candidate = new Vector3(x, center.y, z);
 
-                if (height >= 0 && world.GetSurfaceTypeAtWorldPos(blockX, blockZ).IsSolid())
+                // Validate position is on NavMesh (Story 2.0: replaces block-based check)
+                if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 5f, NavMesh.AllAreas))
                 {
-                    // Use smooth mesh height for visual positioning (Story 0.6)
-                    float smoothY = world.GetSmoothedHeightAtWorldPos(x, z);
-                    return new Vector3(x, smoothY, z);
+                    return hit.position;
                 }
             }
 
