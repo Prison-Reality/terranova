@@ -33,12 +33,12 @@ namespace Terranova.Population
 
         // ─── Hunger Settings (Story 5.1) ────────────────────────
 
-        private const float MAX_HUNGER = 100f;
+        private const float MAX_HUNGER = 100f;                  // 0 = satt, 100 = am Verhungern
         private const float HUNGER_RATE = 0.55f;            // Per second (~3 min to starve at 1x)
-        private const float HUNGER_EAT_THRESHOLD = 30f;     // Seek food below this %
-        private const float HUNGER_SLOW_THRESHOLD = 25f;    // Speed penalty below this %
+        private const float HUNGER_EAT_THRESHOLD = 70f;     // Seek food above this
+        private const float HUNGER_SLOW_THRESHOLD = 75f;    // Speed penalty above this
         private const float HUNGER_SPEED_PENALTY = 0.5f;    // Half speed when very hungry
-        private const float STARVATION_GRACE = 30f;          // Seconds at 0 before death
+        private const float STARVATION_GRACE = 30f;          // Seconds at max before death
         private const float EAT_DURATION = 1.5f;             // How long eating takes
 
         // ─── Visual Settings ─────────────────────────────────────
@@ -107,16 +107,16 @@ namespace Terranova.Population
 
         // ─── Hunger System (Story 5.1) ─────────────────────────
 
-        private float _hunger = MAX_HUNGER;
+        private float _hunger;  // Starts at 0 (satt)
         private float _starvationTimer;
         private bool _isStarving;
         private SettlerTask _savedTask;       // Task saved while eating
 
-        /// <summary>Current hunger value (0 = starving, 100 = full).</summary>
+        /// <summary>Current hunger value (0 = satt, 100 = am Verhungern).</summary>
         public float Hunger => _hunger;
-        /// <summary>Hunger as percentage (0.0–1.0).</summary>
+        /// <summary>Hunger as percentage (0.0 = satt, 1.0 = am Verhungern).</summary>
         public float HungerPercent => _hunger / MAX_HUNGER;
-        /// <summary>True when hunger is 0 and grace period is ticking.</summary>
+        /// <summary>True when hunger is at max and grace period is ticking.</summary>
         public bool IsStarving => _isStarving;
 
         // ─── Cargo Visual (Story 3.3) ──────────────────────────
@@ -273,7 +273,7 @@ namespace Terranova.Population
             if (TryPickWalkTarget())
             {
                 _state = SettlerState.IdleWalking;
-                _agent.speed = _hunger < HUNGER_SLOW_THRESHOLD
+                _agent.speed = _hunger > HUNGER_SLOW_THRESHOLD
                     ? WALK_SPEED * HUNGER_SPEED_PENALTY : WALK_SPEED;
             }
             else
@@ -476,15 +476,15 @@ namespace Terranova.Population
         /// </summary>
         private void UpdateHunger()
         {
-            // Decrease hunger
-            if (_hunger > 0f)
+            // Increase hunger over time (0 = satt, 100 = am Verhungern)
+            if (_hunger < MAX_HUNGER)
             {
-                _hunger -= HUNGER_RATE * Time.deltaTime;
-                if (_hunger < 0f) _hunger = 0f;
+                _hunger += HUNGER_RATE * Time.deltaTime;
+                if (_hunger > MAX_HUNGER) _hunger = MAX_HUNGER;
             }
 
             // Starvation: grace period before death
-            if (_hunger <= 0f)
+            if (_hunger >= MAX_HUNGER)
             {
                 if (!_isStarving)
                 {
@@ -503,7 +503,7 @@ namespace Terranova.Population
             }
 
             // Check if should eat (only interrupt safe states)
-            if (_hunger < HUNGER_EAT_THRESHOLD
+            if (_hunger > HUNGER_EAT_THRESHOLD
                 && _state != SettlerState.WalkingToEat
                 && _state != SettlerState.Eating
                 && _state != SettlerState.ReturningToBase
@@ -540,12 +540,12 @@ namespace Terranova.Population
             }
 
             float speed = TASK_WALK_SPEED;
-            if (_hunger < HUNGER_SLOW_THRESHOLD)
+            if (_hunger > HUNGER_SLOW_THRESHOLD)
                 speed *= HUNGER_SPEED_PENALTY;
             _agent.speed = speed;
 
             _state = SettlerState.WalkingToEat;
-            Debug.Log($"[{name}] HUNGRY ({_hunger:F0}%) - walking to campfire to eat");
+            Debug.Log($"[{name}] HUNGRY ({_hunger:F0}) - walking to campfire to eat");
         }
 
         /// <summary>Walk to campfire to eat. Story 5.2.</summary>
@@ -574,9 +574,9 @@ namespace Terranova.Population
             var rm = ResourceManager.Instance;
             if (rm != null && rm.TryConsumeFood())
             {
-                _hunger = MAX_HUNGER;
+                _hunger = 0f;
                 _isStarving = false;
-                Debug.Log($"[{name}] ATE food - hunger restored to {_hunger:F0}%");
+                Debug.Log($"[{name}] ATE food - hunger reset to 0 (satt)");
             }
             else
             {
@@ -606,7 +606,7 @@ namespace Terranova.Population
                     {
                         _state = SettlerState.WalkingToTarget;
                         float speed = TASK_WALK_SPEED * task.SpeedMultiplier;
-                        if (_hunger < HUNGER_SLOW_THRESHOLD)
+                        if (_hunger > HUNGER_SLOW_THRESHOLD)
                             speed *= HUNGER_SPEED_PENALTY;
                         _agent.speed = speed;
                         UpdateVisualColor();
@@ -861,7 +861,7 @@ namespace Terranova.Population
             Color color = DEFAULT_COLOR;
 
             // Hunger overrides role color when critical
-            if (_hunger < HUNGER_SLOW_THRESHOLD)
+            if (_hunger > HUNGER_SLOW_THRESHOLD)
             {
                 color = HUNGRY_COLOR;
             }
