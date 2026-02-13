@@ -3,7 +3,8 @@
     "rootNamespace": "Terranova.Terrain",
     "references": [
         "Terranova.Core",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.AI.Navigation"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

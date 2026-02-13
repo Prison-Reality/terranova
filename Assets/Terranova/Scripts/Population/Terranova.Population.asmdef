@@ -2,9 +2,12 @@
     "name": "Terranova.Population",
     "rootNamespace": "Terranova.Population",
     "references": [
+        "Terranova.Buildings",
         "Terranova.Core",
+        "Terranova.Resources",
         "Terranova.Terrain",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.AI.Navigation"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

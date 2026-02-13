@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Terranova.Terrain
@@ -12,6 +13,9 @@ namespace Terranova.Terrain
     /// Two materials are used:
     ///   Submesh 0 → Opaque material (grass, dirt, stone, sand)
     ///   Submesh 1 → Transparent material (water)
+    ///
+    /// The MeshCollider uses a terrain-only mesh (submesh 0) so that the
+    /// NavMesh does not include water surfaces. (Story 2.0)
     /// </summary>
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
@@ -21,6 +25,9 @@ namespace Terranova.Terrain
         private MeshFilter _meshFilter;
         private MeshRenderer _meshRenderer;
         private MeshCollider _meshCollider;
+
+        // Separate collision mesh without water (for NavMesh baking)
+        private Mesh _collisionMesh;
 
         // Reference to the chunk's data (owned by WorldManager)
         public ChunkData Data { get; private set; }
@@ -54,6 +61,9 @@ namespace Terranova.Terrain
             transform.position = Vector3.zero;
 
             gameObject.name = $"Chunk ({data.ChunkX}, {data.ChunkZ})";
+
+            // Set static flag so NavMesh baking picks up these objects
+            gameObject.isStatic = true;
         }
 
         /// <summary>
@@ -75,17 +85,66 @@ namespace Terranova.Terrain
             int lodStep = 1 << lodLevel; // 0→1, 1→2, 2→4
             CurrentLod = lodLevel;
 
-            // Destroy the old mesh to prevent memory leaks
+            // Destroy old meshes to prevent memory leaks
             if (_meshFilter.sharedMesh != null)
                 Destroy(_meshFilter.sharedMesh);
+            if (_collisionMesh != null)
+                Destroy(_collisionMesh);
 
             // Build smooth terrain mesh from voxel data at the requested LOD
             Mesh mesh = SmoothTerrainBuilder.Build(Data, heightLookup, surfaceLookup, lodStep);
             _meshFilter.sharedMesh = mesh;
 
-            // Update collider for raycasting (building placement, camera ground detection)
+            // Create collision mesh from terrain submesh only (excludes water).
+            // This ensures the NavMesh only covers solid terrain. (Story 2.0)
+            _collisionMesh = BuildCollisionMesh(mesh);
             _meshCollider.sharedMesh = null; // Clear first to force update
-            _meshCollider.sharedMesh = mesh;
+            _meshCollider.sharedMesh = _collisionMesh;
+        }
+
+        /// <summary>
+        /// Extract above-water terrain triangles into a separate collision mesh.
+        /// Excludes: water submesh (submesh 1) AND underwater terrain triangles
+        /// (where all 3 vertices are below the water surface).
+        /// This prevents NavMesh from creating walkable areas under water.
+        /// </summary>
+        private static Mesh BuildCollisionMesh(Mesh sourceMesh)
+        {
+            Vector3[] vertices = sourceMesh.vertices;
+            int[] sourceTriangles = sourceMesh.GetTriangles(0); // Terrain submesh only
+
+            // Water surface Y position (same as SmoothTerrainBuilder)
+            float waterSurfaceY = TerrainGenerator.SEA_LEVEL + 0.15f;
+
+            // Filter out triangles that are fully submerged
+            var filteredTriangles = new List<int>(sourceTriangles.Length);
+            for (int i = 0; i < sourceTriangles.Length; i += 3)
+            {
+                float y0 = vertices[sourceTriangles[i]].y;
+                float y1 = vertices[sourceTriangles[i + 1]].y;
+                float y2 = vertices[sourceTriangles[i + 2]].y;
+
+                // Keep triangle if ANY vertex is above water surface
+                if (y0 >= waterSurfaceY || y1 >= waterSurfaceY || y2 >= waterSurfaceY)
+                {
+                    filteredTriangles.Add(sourceTriangles[i]);
+                    filteredTriangles.Add(sourceTriangles[i + 1]);
+                    filteredTriangles.Add(sourceTriangles[i + 2]);
+                }
+            }
+
+            var collisionMesh = new Mesh();
+            collisionMesh.name = "CollisionMesh";
+            collisionMesh.vertices = vertices;
+            collisionMesh.triangles = filteredTriangles.ToArray();
+            collisionMesh.RecalculateBounds();
+            return collisionMesh;
+        }
+
+        private void OnDestroy()
+        {
+            if (_collisionMesh != null)
+                Destroy(_collisionMesh);
         }
     }
 }

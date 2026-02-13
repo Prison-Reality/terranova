@@ -35,9 +35,9 @@ namespace Terranova.Population
             if (_hasSpawned)
                 return;
 
-            // Wait until terrain is ready
+            // Wait until terrain and NavMesh are ready (Story 2.0)
             var world = WorldManager.Instance;
-            if (world == null || world.WorldBlocksX == 0)
+            if (world == null || world.WorldBlocksX == 0 || !world.IsNavMeshReady)
                 return;
 
             _hasSpawned = true;
@@ -137,7 +137,9 @@ namespace Terranova.Population
                 }
 
                 var settlerObj = new GameObject($"Settler_{i}");
-                settlerObj.transform.position = new Vector3(x, 0f, z);
+                // Place at correct terrain height so NavMeshAgent can find the NavMesh
+                float y = world.GetSmoothedHeightAtWorldPos(x, z);
+                settlerObj.transform.position = new Vector3(x, y, z);
 
                 var settler = settlerObj.AddComponent<Settler>();
                 settler.Initialize(i, campfirePos);

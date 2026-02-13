@@ -1,7 +1,7 @@
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using Terranova.Core;
-using Terranova.Terrain;
+using Terranova.Resources;
 
 namespace Terranova.Population
 {
@@ -12,6 +12,9 @@ namespace Terranova.Population
     /// Story 1.2: Idle wander behavior around the campfire.
     /// Story 1.3: Task system (can receive and hold one task).
     /// Story 1.4: Work cycle (walk to target -> work -> return -> deliver -> repeat).
+    /// Story 2.0: Movement migrated to NavMesh (replaces block-grid pathfinding).
+    /// Story 3.2: Gathering calls to ResourceNode on work completion.
+    /// Story 3.3: Visual cargo indicator during transport.
     /// </summary>
     public class Settler : MonoBehaviour
     {
@@ -23,6 +26,9 @@ namespace Terranova.Population
         private const float MIN_PAUSE = 1f;
         private const float MAX_PAUSE = 3.5f;
         private const float ARRIVAL_THRESHOLD = 0.3f;
+
+        // How far to search for a valid NavMesh point when sampling
+        private const float NAV_SAMPLE_RADIUS = 5f;
 
         // ─── Visual Settings ─────────────────────────────────────
 
@@ -61,10 +67,14 @@ namespace Terranova.Population
         private Vector3 _campfirePosition;
         private float _stateTimer;
 
-        // ─── Pathfinding (Story 2.1) ───────────────────────────
+        // ─── NavMesh Agent (Story 2.0) ───────────────────────────
 
-        private List<Vector3> _currentPath = new List<Vector3>();
-        private int _pathIndex;
+        private NavMeshAgent _agent;
+        private bool _isMoving;
+
+        // True if the last completed path actually reached the destination.
+        // False when the path was partial or invalid (Story 2.2: obstacle handling).
+        private bool _pathReachable;
 
         // ─── Task System (Story 1.3) ─────────────────────────────
 
@@ -84,6 +94,10 @@ namespace Terranova.Population
         /// <summary>Current state name (for UI/debug display).</summary>
         public string StateName => _state.ToString();
 
+        // ─── Cargo Visual (Story 3.3) ──────────────────────────
+
+        private GameObject _cargoVisual;
+
         // ─── Instance Data ───────────────────────────────────────
 
         private MaterialPropertyBlock _propBlock;
@@ -102,11 +116,35 @@ namespace Terranova.Population
             _campfirePosition = campfirePosition;
 
             CreateVisual();
-            SnapToTerrain();
+            SetupNavMeshAgent();
 
             // Start with random pause (desync settlers)
             _state = SettlerState.IdlePausing;
             _stateTimer = Random.Range(0f, MAX_PAUSE);
+        }
+
+        /// <summary>
+        /// Configure the NavMeshAgent component and warp to nearest NavMesh position.
+        /// Story 2.0: Replaces manual terrain snapping and VoxelPathfinder.
+        /// </summary>
+        private void SetupNavMeshAgent()
+        {
+            _agent = gameObject.AddComponent<NavMeshAgent>();
+            _agent.speed = WALK_SPEED;
+            _agent.angularSpeed = 360f;
+            _agent.acceleration = 8f;
+            _agent.stoppingDistance = ARRIVAL_THRESHOLD;
+            _agent.radius = 0.2f;
+            _agent.height = 0.8f;
+            _agent.baseOffset = 0f;
+            _agent.autoBraking = true;
+            _agent.autoRepath = true;
+
+            // Warp to nearest valid NavMesh position (replaces SnapToTerrain)
+            if (NavMesh.SamplePosition(transform.position, out NavMeshHit hit, NAV_SAMPLE_RADIUS, NavMesh.AllAreas))
+            {
+                _agent.Warp(hit.position);
+            }
         }
 
         // ─── Task Assignment (Story 1.3) ─────────────────────────
@@ -126,7 +164,7 @@ namespace Terranova.Population
 
             _currentTask = task;
 
-            if (!ComputePath(task.TargetPosition))
+            if (!SetAgentDestination(task.TargetPosition))
             {
                 Debug.Log($"[{name}] REJECTED {task.TaskType} - no path to target");
                 _currentTask = null;
@@ -134,6 +172,7 @@ namespace Terranova.Population
             }
 
             _state = SettlerState.WalkingToTarget;
+            _agent.speed = TASK_WALK_SPEED;
             Debug.Log($"[{name}] ASSIGNED {task.TaskType} - walking to target");
             return true;
         }
@@ -144,10 +183,18 @@ namespace Terranova.Population
         /// </summary>
         public void ClearTask()
         {
+            // Release resource reservation if we had one (Story 3.2)
+            if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
+                _currentTask.TargetResource.Release();
+
             var wasTask = _currentTask?.TaskType;
             _currentTask = null;
+            _isMoving = false;
+            _agent.ResetPath();
+            _agent.speed = WALK_SPEED;
             _state = SettlerState.IdlePausing;
             _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
+            DestroyCargo();
             Debug.Log($"[{name}] Task ended ({wasTask}) - returning to IDLE");
         }
 
@@ -187,15 +234,19 @@ namespace Terranova.Population
                 return;
 
             if (TryPickWalkTarget())
+            {
                 _state = SettlerState.IdleWalking;
+                _agent.speed = WALK_SPEED;
+            }
             else
                 _stateTimer = 0.5f;
         }
 
         private void UpdateIdleWalking()
         {
-            if (FollowPath(WALK_SPEED))
+            if (HasReachedDestination())
             {
+                // Path unreachable is fine for idle – just pause and pick a new spot
                 _state = SettlerState.IdlePausing;
                 _stateTimer = Random.Range(MIN_PAUSE, MAX_PAUSE);
             }
@@ -205,7 +256,8 @@ namespace Terranova.Population
 
         /// <summary>
         /// Walk toward the work target (tree, rock, building site).
-        /// If the target becomes invalid, return to idle.
+        /// If the target becomes invalid or unreachable, return to idle.
+        /// Story 2.2: Settler stops gracefully when path is blocked.
         /// </summary>
         private void UpdateWalkingToTarget()
         {
@@ -215,8 +267,17 @@ namespace Terranova.Population
                 return;
             }
 
-            if (FollowPath(TASK_WALK_SPEED))
+            if (HasReachedDestination())
             {
+                if (!_pathReachable)
+                {
+                    Debug.Log($"[{name}] Target unreachable (blocked by obstacle) - going idle");
+                    ClearTask();
+                    return;
+                }
+
+                _agent.ResetPath();
+                _isMoving = false;
                 _state = SettlerState.Working;
                 _stateTimer = _currentTask.WorkDuration;
                 Debug.Log($"[{name}] Arrived at target - WORKING ({_currentTask.TaskType}, {_stateTimer:F1}s)");
@@ -225,7 +286,7 @@ namespace Terranova.Population
 
         /// <summary>
         /// Perform work at the target location.
-        /// For now just a timer. Later: animation, resource depletion.
+        /// Story 3.2: On completion, calls ResourceNode.CompleteGathering().
         /// </summary>
         private void UpdateWorking()
         {
@@ -233,23 +294,41 @@ namespace Terranova.Population
             if (_stateTimer > 0f)
                 return;
 
-            if (!ComputePath(_currentTask.BasePosition))
+            // Complete gathering on the resource node (Story 3.2)
+            if (_currentTask?.TargetResource != null)
+                _currentTask.TargetResource.CompleteGathering();
+
+            // Show cargo visual during transport (Story 3.3)
+            CreateCargo();
+
+            if (!SetAgentDestination(_currentTask.BasePosition))
             {
                 Debug.LogWarning($"[{name}] No path back to base - going idle");
                 ClearTask();
                 return;
             }
             _state = SettlerState.ReturningToBase;
+            _agent.speed = TASK_WALK_SPEED;
             Debug.Log($"[{name}] Work done - RETURNING to base");
         }
 
         /// <summary>
         /// Walk back to the campfire/storage with gathered resources.
+        /// Story 2.2: If return path blocked, go idle (don't freeze).
         /// </summary>
         private void UpdateReturningToBase()
         {
-            if (FollowPath(TASK_WALK_SPEED))
+            if (HasReachedDestination())
             {
+                if (!_pathReachable)
+                {
+                    Debug.Log($"[{name}] Return path blocked - going idle");
+                    ClearTask();
+                    return;
+                }
+
+                _agent.ResetPath();
+                _isMoving = false;
                 _state = SettlerState.Delivering;
                 _stateTimer = 0.5f;
                 Debug.Log($"[{name}] Arrived at base - DELIVERING {_currentTask.TaskType}");
@@ -265,6 +344,9 @@ namespace Terranova.Population
             _stateTimer -= Time.deltaTime;
             if (_stateTimer > 0f)
                 return;
+
+            // Remove cargo visual (Story 3.3)
+            DestroyCargo();
 
             // Deliver resources and log to console
             if (_currentTask != null)
@@ -283,13 +365,25 @@ namespace Terranova.Population
 
             if (_currentTask != null && _currentTask.IsTargetValid)
             {
-                if (!ComputePath(_currentTask.TargetPosition))
+                // Re-reserve the resource for the next cycle (Story 3.2)
+                if (_currentTask.TargetResource != null)
+                {
+                    if (!_currentTask.TargetResource.TryReserve())
+                    {
+                        Debug.Log($"[{name}] Resource no longer available - going idle");
+                        ClearTask();
+                        return;
+                    }
+                }
+
+                if (!SetAgentDestination(_currentTask.TargetPosition))
                 {
                     Debug.LogWarning($"[{name}] No path to target for repeat - going idle");
                     ClearTask();
                     return;
                 }
                 _state = SettlerState.WalkingToTarget;
+                _agent.speed = TASK_WALK_SPEED;
                 Debug.Log($"[{name}] REPEATING cycle ({_currentTask.TaskType})");
             }
             else
@@ -320,99 +414,63 @@ namespace Terranova.Population
             }
         }
 
-        // ─── Pathfinding (Story 2.1) ───────────────────────────
+        // ─── NavMesh Movement (Story 2.0) ────────────────────────
 
         /// <summary>
-        /// Compute an A* path from the current position to the destination.
-        /// Stores result in _currentPath/_pathIndex.
-        /// Returns false if no path exists.
+        /// Set the NavMeshAgent destination. Samples the target position onto the
+        /// NavMesh to handle slight position mismatches.
+        /// Returns false if the target is not reachable.
         /// </summary>
-        private bool ComputePath(Vector3 destination)
+        private bool SetAgentDestination(Vector3 target)
         {
-            var world = WorldManager.Instance;
-            if (world == null) return false;
-
-            Vector2Int start = new Vector2Int(
-                Mathf.FloorToInt(transform.position.x),
-                Mathf.FloorToInt(transform.position.z));
-            Vector2Int end = new Vector2Int(
-                Mathf.FloorToInt(destination.x),
-                Mathf.FloorToInt(destination.z));
-
-            _currentPath = VoxelPathfinder.FindPath(world, start, end);
-            _pathIndex = 0;
-
-            if (_currentPath.Count == 0 && start != end)
+            if (!NavMesh.SamplePosition(target, out NavMeshHit hit, NAV_SAMPLE_RADIUS, NavMesh.AllAreas))
             {
-                Debug.Log($"[{name}] No path from ({start.x},{start.y}) to ({end.x},{end.y})");
+                Debug.Log($"[{name}] Target not on NavMesh: ({target.x:F0}, {target.z:F0})");
                 return false;
             }
 
-            Debug.Log($"[{name}] Path: {_currentPath.Count} waypoints to ({end.x},{end.y})");
-            return true;
-        }
-
-        /// <summary>
-        /// Advance along the computed path. Returns true when final
-        /// waypoint has been reached (or path is empty = already there).
-        /// </summary>
-        private bool FollowPath(float speed)
-        {
-            if (_pathIndex >= _currentPath.Count)
-                return true; // Already at destination
-
-            if (MoveToward(_currentPath[_pathIndex], speed))
+            if (_agent.SetDestination(hit.position))
             {
-                _pathIndex++;
-                if (_pathIndex >= _currentPath.Count)
-                    return true; // Reached final waypoint
+                _isMoving = true;
+                return true;
             }
             return false;
         }
 
-        // ─── Shared Movement ─────────────────────────────────────
-
         /// <summary>
-        /// Move toward a single waypoint with terrain snapping.
-        /// Returns true when the waypoint is reached.
+        /// Check whether the NavMeshAgent has reached its current destination.
+        /// Handles edge cases: path pending, invalid/partial path, not yet moving.
+        /// Sets _pathReachable so callers know if the destination was truly reached.
+        /// Story 2.2: Settlers stay put when no valid path exists.
         /// </summary>
-        private bool MoveToward(Vector3 target, float speed)
+        private bool HasReachedDestination()
         {
-            Vector3 pos = transform.position;
-            Vector3 direction = target - pos;
-            direction.y = 0f;
+            if (!_isMoving) return true;
+            if (_agent.pathPending) return false;
 
-            float distance = direction.magnitude;
-
-            if (distance < ARRIVAL_THRESHOLD)
-                return true;
-
-            Vector3 step = direction.normalized * speed * Time.deltaTime;
-            if (step.magnitude > distance)
-                step = direction;
-
-            Vector3 newPos = pos + step;
-
-            // Snap Y to smooth mesh surface (Story 0.6: objects on mesh surface)
-            var world = WorldManager.Instance;
-            if (world != null)
+            // Path failed or only partially reachable (Story 2.2)
+            if (_agent.pathStatus != NavMeshPathStatus.PathComplete)
             {
-                newPos.y = world.GetSmoothedHeightAtWorldPos(newPos.x, newPos.z);
+                _isMoving = false;
+                _pathReachable = false;
+                return true;
             }
 
-            transform.position = newPos;
+            if (_agent.remainingDistance <= _agent.stoppingDistance)
+            {
+                _isMoving = false;
+                _pathReachable = true;
+                return true;
+            }
             return false;
         }
 
         /// <summary>
         /// Pick a random idle walk target within the campfire radius.
+        /// Uses NavMesh.SamplePosition to validate positions. (Story 2.0)
         /// </summary>
         private bool TryPickWalkTarget()
         {
-            var world = WorldManager.Instance;
-            if (world == null)
-                return false;
-
             for (int attempt = 0; attempt < 5; attempt++)
             {
                 float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
@@ -420,24 +478,70 @@ namespace Terranova.Population
                 float x = _campfirePosition.x + Mathf.Cos(angle) * radius;
                 float z = _campfirePosition.z + Mathf.Sin(angle) * radius;
 
-                int blockX = Mathf.FloorToInt(x);
-                int blockZ = Mathf.FloorToInt(z);
-
-                if (!VoxelPathfinder.IsWalkable(world, blockX, blockZ))
-                    continue;
+                Vector3 candidate = new Vector3(x, _campfirePosition.y, z);
 
                 // Don't pick a target right on the campfire block
-                Vector3 candidate = new Vector3(x, 0f, z);
                 Vector3 toCampfire = candidate - _campfirePosition;
                 toCampfire.y = 0f;
                 if (toCampfire.magnitude < 1.2f)
                     continue;
 
-                if (ComputePath(candidate))
-                    return true;
+                // Validate position is on NavMesh
+                if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, NAV_SAMPLE_RADIUS, NavMesh.AllAreas))
+                {
+                    if (SetAgentDestination(hit.position))
+                        return true;
+                }
             }
 
             return false;
+        }
+
+        // ─── Cargo Visual (Story 3.3) ──────────────────────────
+
+        /// <summary>
+        /// Show a small colored cube above the settler to indicate carried resource.
+        /// Brown for wood, gray for stone.
+        /// </summary>
+        private void CreateCargo()
+        {
+            if (_cargoVisual != null) return;
+            if (_currentTask == null) return;
+
+            _cargoVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _cargoVisual.name = "Cargo";
+            _cargoVisual.transform.SetParent(transform, false);
+            _cargoVisual.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
+            _cargoVisual.transform.localPosition = new Vector3(0f, 1.0f, 0f);
+
+            // Remove collider
+            var col = _cargoVisual.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+
+            // Color based on resource type
+            Color cargoColor = _currentTask.TaskType switch
+            {
+                SettlerTaskType.GatherWood => new Color(0.45f, 0.28f, 0.10f),  // Brown
+                SettlerTaskType.GatherStone => new Color(0.55f, 0.55f, 0.55f), // Gray
+                SettlerTaskType.Hunt => new Color(0.20f, 0.65f, 0.20f),        // Green (berries)
+                _ => Color.white
+            };
+
+            EnsureSharedMaterial();
+            var renderer = _cargoVisual.GetComponent<MeshRenderer>();
+            renderer.sharedMaterial = _sharedMaterial;
+            var block = new MaterialPropertyBlock();
+            block.SetColor(ColorID, cargoColor);
+            renderer.SetPropertyBlock(block);
+        }
+
+        private void DestroyCargo()
+        {
+            if (_cargoVisual != null)
+            {
+                Destroy(_cargoVisual);
+                _cargoVisual = null;
+            }
         }
 
         // ─── Visual Setup ────────────────────────────────────────
@@ -463,23 +567,6 @@ namespace Terranova.Population
             Color color = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
             _propBlock.SetColor(ColorID, color);
             meshRenderer.SetPropertyBlock(_propBlock);
-        }
-
-        /// <summary>
-        /// Snap settler Y position to the smooth mesh surface.
-        /// Story 0.6: Bestehende Objekte auf Mesh-Oberfläche
-        /// </summary>
-        private void SnapToTerrain()
-        {
-            var world = WorldManager.Instance;
-            if (world == null)
-                return;
-
-            transform.position = new Vector3(
-                transform.position.x,
-                world.GetSmoothedHeightAtWorldPos(transform.position.x, transform.position.z),
-                transform.position.z
-            );
         }
 
         private static void EnsureSharedMaterial()

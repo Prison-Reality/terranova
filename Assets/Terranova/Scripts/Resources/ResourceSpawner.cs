@@ -1,19 +1,19 @@
 using UnityEngine;
+using Terranova.Core;
 using Terranova.Terrain;
 
 namespace Terranova.Resources
 {
     /// <summary>
-    /// Spawns placeholder resource objects (trees and rocks) on the terrain surface.
+    /// Spawns resource objects (trees, rocks, berry bushes) on the terrain surface
+    /// and attaches ResourceNode components for gathering.
     ///
-    /// Trees  = brown cylinders (blockout)
-    /// Rocks  = gray spheres (blockout)
+    /// Trees       = brown cylinders (blockout) → ResourceType.Wood
+    /// Rocks       = gray spheres (blockout) → ResourceType.Stone
+    /// Berry Bushes = green sphere + red berry spheres → ResourceType.Food
     ///
-    /// All objects are positioned using GetSmoothedHeightAtWorldPos so they
-    /// sit correctly on the smooth mesh surface.
-    ///
+    /// Story 3.1: Sammelbare Objekte
     /// Story 0.6: Bestehende Objekte auf Mesh-Oberfläche
-    /// Story 3.1: Sammelbare Objekte (placeholder visuals)
     /// </summary>
     public class ResourceSpawner : MonoBehaviour
     {
@@ -26,6 +26,10 @@ namespace Terranova.Resources
         [SerializeField] private int _rockCount = 40;
         [SerializeField] private float _rockRadius = 0.4f;
 
+        [Header("Berry Bushes")]
+        [SerializeField] private int _bushCount = 30;
+        [SerializeField] private float _bushRadius = 0.5f;
+
         [Header("Placement")]
         [Tooltip("Minimum distance from world edge in blocks.")]
         [SerializeField] private int _edgeMargin = 4;
@@ -33,6 +37,10 @@ namespace Terranova.Resources
         [SerializeField] private int _seed = 123;
 
         private bool _hasSpawned;
+
+        // Shared materials (created once, reused)
+        private static Material _bushMaterial;
+        private static Material _berryMaterial;
 
         private void Update()
         {
@@ -54,23 +62,25 @@ namespace Terranova.Resources
             var parent = new GameObject("Resources");
 
             int treeSpawned = SpawnObjects(world, rng, parent.transform,
-                _treeCount, "Tree", PrimitiveType.Cylinder,
+                _treeCount, "Tree", PrimitiveType.Cylinder, ResourceType.Wood,
                 new Color(0.45f, 0.28f, 0.10f), // Brown
                 new Vector3(_treeRadius * 2f, _treeHeight * 0.5f, _treeRadius * 2f),
                 _treeHeight * 0.5f);
 
             int rockSpawned = SpawnObjects(world, rng, parent.transform,
-                _rockCount, "Rock", PrimitiveType.Sphere,
+                _rockCount, "Rock", PrimitiveType.Sphere, ResourceType.Stone,
                 new Color(0.55f, 0.55f, 0.55f), // Gray
                 new Vector3(_rockRadius * 2f, _rockRadius * 2f, _rockRadius * 2f),
                 _rockRadius);
 
-            Debug.Log($"ResourceSpawner: Placed {treeSpawned} trees, {rockSpawned} rocks.");
+            int bushSpawned = SpawnBerryBushes(world, rng, parent.transform);
+
+            Debug.Log($"ResourceSpawner: Placed {treeSpawned} trees, {rockSpawned} rocks, {bushSpawned} berry bushes.");
         }
 
         private int SpawnObjects(
             WorldManager world, System.Random rng, Transform parent,
-            int count, string namePrefix, PrimitiveType shape,
+            int count, string namePrefix, PrimitiveType shape, ResourceType resourceType,
             Color color, Vector3 scale, float yOffset)
         {
             int maxX = world.WorldBlocksX - _edgeMargin;
@@ -117,15 +127,114 @@ namespace Terranova.Resources
                 if (mat != null)
                     obj.GetComponent<MeshRenderer>().sharedMaterial = mat;
 
-                // Remove collider from resource objects (not needed for QA testing,
-                // prevents interference with terrain raycasting)
+                // Keep collider for NavMesh obstacle avoidance but set to trigger
+                // so it doesn't interfere with terrain raycasting
                 var col = obj.GetComponent<Collider>();
-                if (col != null) Object.Destroy(col);
+                if (col != null)
+                    col.isTrigger = true;
+
+                // Attach ResourceNode component (Story 3.1)
+                var node = obj.AddComponent<ResourceNode>();
+                node.Initialize(resourceType);
 
                 spawned++;
             }
 
             return spawned;
+        }
+
+        /// <summary>
+        /// Spawn berry bushes: green flattened sphere (bush body) with
+        /// small red spheres on top (berries). Compound visual.
+        /// </summary>
+        private int SpawnBerryBushes(WorldManager world, System.Random rng, Transform parent)
+        {
+            int maxX = world.WorldBlocksX - _edgeMargin;
+            int maxZ = world.WorldBlocksZ - _edgeMargin;
+            int spawned = 0;
+
+            EnsureBushMaterials();
+
+            for (int i = 0; i < _bushCount; i++)
+            {
+                float x = _edgeMargin + (float)(rng.NextDouble() * (maxX - _edgeMargin));
+                float z = _edgeMargin + (float)(rng.NextDouble() * (maxZ - _edgeMargin));
+
+                int blockX = Mathf.FloorToInt(x);
+                int blockZ = Mathf.FloorToInt(z);
+
+                VoxelType surface = world.GetSurfaceTypeAtWorldPos(blockX, blockZ);
+                if (!surface.IsSolid())
+                    continue;
+
+                world.FlattenTerrain(blockX, blockZ, 1);
+                float y = world.GetSmoothedHeightAtWorldPos(x, z);
+
+                // Parent object with ResourceNode
+                var bush = new GameObject($"Bush_{spawned}");
+                bush.transform.SetParent(parent);
+                bush.transform.position = new Vector3(x, y, z);
+
+                // Green bush body (flattened sphere)
+                var body = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                body.name = "Body";
+                body.transform.SetParent(bush.transform, false);
+                float r = _bushRadius;
+                body.transform.localScale = new Vector3(r * 2f, r * 1.2f, r * 2f);
+                body.transform.localPosition = new Vector3(0f, r * 0.6f, 0f);
+                if (_bushMaterial != null)
+                    body.GetComponent<MeshRenderer>().sharedMaterial = _bushMaterial;
+                var bodyCol = body.GetComponent<Collider>();
+                if (bodyCol != null) bodyCol.isTrigger = true;
+
+                // Red berries (3 small spheres on top)
+                float berrySize = 0.12f;
+                float berryY = r * 1.0f;
+                Vector3[] berryOffsets =
+                {
+                    new Vector3(0.15f, berryY, 0.1f),
+                    new Vector3(-0.1f, berryY, 0.15f),
+                    new Vector3(0.05f, berryY, -0.15f)
+                };
+
+                for (int b = 0; b < berryOffsets.Length; b++)
+                {
+                    var berry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    berry.name = $"Berry_{b}";
+                    berry.transform.SetParent(bush.transform, false);
+                    berry.transform.localScale = new Vector3(berrySize, berrySize, berrySize);
+                    berry.transform.localPosition = berryOffsets[b];
+                    if (_berryMaterial != null)
+                        berry.GetComponent<MeshRenderer>().sharedMaterial = _berryMaterial;
+                    var berryCol = berry.GetComponent<Collider>();
+                    if (berryCol != null) Object.Destroy(berryCol);
+                }
+
+                // Attach ResourceNode to the parent bush object
+                var node = bush.AddComponent<ResourceNode>();
+                node.Initialize(ResourceType.Food);
+
+                spawned++;
+            }
+
+            return spawned;
+        }
+
+        private static void EnsureBushMaterials()
+        {
+            if (_bushMaterial != null) return;
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                         ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            if (shader == null) return;
+
+            _bushMaterial = new Material(shader);
+            _bushMaterial.name = "Bush_Material (Auto)";
+            _bushMaterial.SetColor("_BaseColor", new Color(0.20f, 0.55f, 0.15f)); // Dark green
+
+            _berryMaterial = new Material(shader);
+            _berryMaterial.name = "Berry_Material (Auto)";
+            _berryMaterial.SetColor("_BaseColor", new Color(0.85f, 0.15f, 0.15f)); // Red
         }
     }
 }
