@@ -110,7 +110,7 @@ namespace Terranova.Terrain
 
             if (above == VoxelType.Air)
             {
-                Color waterColor = new Color(0.15f, 0.4f, 0.75f, 0.7f);
+                Color waterColor = new Color(0.10f, 0.32f, 0.60f, 0.75f);
                 // Lower the water surface slightly for a nice visual effect
                 AddQuad(new Vector3(x, y - 0.1f, z), 0, waterColor, mesh);
             }
@@ -171,14 +171,14 @@ namespace Terranova.Terrain
         {
             return type switch
             {
-                VoxelType.Grass => new Color(0.30f, 0.65f, 0.20f),  // Natural green
-                VoxelType.Dirt  => new Color(0.55f, 0.36f, 0.16f),  // Earth brown
-                VoxelType.Stone => new Color(                         // Gray with subtle variation
-                    0.50f + (y % 3) * 0.02f,
-                    0.50f + (y % 3) * 0.02f,
-                    0.50f + (y % 3) * 0.02f),
-                VoxelType.Sand  => new Color(0.90f, 0.85f, 0.55f),  // Warm sand
-                _               => Color.magenta                      // Error: should never appear
+                VoxelType.Grass => new Color(0.28f, 0.58f, 0.18f),  // Rich natural green
+                VoxelType.Dirt  => new Color(0.50f, 0.34f, 0.18f),  // Warm earth brown
+                VoxelType.Stone => new Color(                         // Natural grey with variation
+                    0.46f + (y % 3) * 0.02f,
+                    0.45f + (y % 3) * 0.02f,
+                    0.43f + (y % 3) * 0.02f),
+                VoxelType.Sand  => new Color(0.85f, 0.78f, 0.55f),  // Warm beige
+                _               => Color.magenta
             };
         }
 

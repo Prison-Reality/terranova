@@ -32,14 +32,19 @@ namespace Terranova.Population
 
         // ─── Visual Settings ─────────────────────────────────────
 
+        // Body colors: each settler gets a unique hue for visual distinction
         private static readonly Color[] SETTLER_COLORS =
         {
-            new Color(0.85f, 0.25f, 0.25f), // Red
-            new Color(0.25f, 0.55f, 0.85f), // Blue
-            new Color(0.25f, 0.75f, 0.35f), // Green
-            new Color(0.85f, 0.65f, 0.15f), // Orange
-            new Color(0.70f, 0.30f, 0.75f), // Purple
+            new Color(0.85f, 0.55f, 0.45f), // Warm skin tone
+            new Color(0.70f, 0.50f, 0.35f), // Tan
+            new Color(0.55f, 0.45f, 0.40f), // Olive
+            new Color(0.75f, 0.60f, 0.50f), // Light brown
+            new Color(0.60f, 0.42f, 0.35f), // Medium brown
         };
+
+        // Role accent colors (applied to head when assigned a specialized task)
+        private static readonly Color WOODCUTTER_ACCENT = new Color(0.55f, 0.33f, 0.14f); // Brown cap
+        private static readonly Color HUNTER_ACCENT = new Color(0.20f, 0.50f, 0.20f);     // Green cap
 
         private static Material _sharedMaterial;
         private static readonly int ColorID = Shader.PropertyToID("_BaseColor");
@@ -101,6 +106,8 @@ namespace Terranova.Population
         // ─── Instance Data ───────────────────────────────────────
 
         private MaterialPropertyBlock _propBlock;
+        private MaterialPropertyBlock _headPropBlock;
+        private MeshRenderer _headRenderer;
         private int _colorIndex;
 
         public int ColorIndex => _colorIndex;
@@ -511,8 +518,8 @@ namespace Terranova.Population
             _cargoVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
             _cargoVisual.name = "Cargo";
             _cargoVisual.transform.SetParent(transform, false);
-            _cargoVisual.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
-            _cargoVisual.transform.localPosition = new Vector3(0f, 1.0f, 0f);
+            _cargoVisual.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
+            _cargoVisual.transform.localPosition = new Vector3(0f, 1.05f, 0f);
 
             // Remove collider
             var col = _cargoVisual.GetComponent<Collider>();
@@ -548,25 +555,79 @@ namespace Terranova.Population
 
         private void CreateVisual()
         {
-            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            visual.name = "Visual";
-            visual.transform.SetParent(transform, false);
-            visual.transform.localScale = new Vector3(0.4f, 0.4f, 0.4f);
-            visual.transform.localPosition = new Vector3(0f, 0.4f, 0f);
-
-            var collider = visual.GetComponent<Collider>();
-            if (collider != null)
-                Destroy(collider);
-
             EnsureSharedMaterial();
 
-            var meshRenderer = visual.GetComponent<MeshRenderer>();
-            meshRenderer.sharedMaterial = _sharedMaterial;
+            // Body: cylinder (torso)
+            var body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            body.name = "Body";
+            body.transform.SetParent(transform, false);
+            body.transform.localScale = new Vector3(0.3f, 0.35f, 0.2f);
+            body.transform.localPosition = new Vector3(0f, 0.35f, 0f);
+            var bodyCol = body.GetComponent<Collider>();
+            if (bodyCol != null) bodyCol.isTrigger = true; // keep for raycast selection
+
+            var bodyRenderer = body.GetComponent<MeshRenderer>();
+            bodyRenderer.sharedMaterial = _sharedMaterial;
 
             _propBlock = new MaterialPropertyBlock();
-            Color color = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
-            _propBlock.SetColor(ColorID, color);
-            meshRenderer.SetPropertyBlock(_propBlock);
+            Color bodyColor = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
+            _propBlock.SetColor(ColorID, bodyColor);
+            bodyRenderer.SetPropertyBlock(_propBlock);
+
+            // Head: sphere
+            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            head.name = "Head";
+            head.transform.SetParent(transform, false);
+            head.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
+            head.transform.localPosition = new Vector3(0f, 0.81f, 0f);
+            var headCol = head.GetComponent<Collider>();
+            if (headCol != null) Destroy(headCol);
+
+            _headRenderer = head.GetComponent<MeshRenderer>();
+            _headRenderer.sharedMaterial = _sharedMaterial;
+
+            _headPropBlock = new MaterialPropertyBlock();
+            // Head slightly lighter than body
+            Color headColor = Color.Lerp(bodyColor, Color.white, 0.35f);
+            _headPropBlock.SetColor(ColorID, headColor);
+            _headRenderer.SetPropertyBlock(_headPropBlock);
+
+            // Legs: two small cylinders
+            for (int i = 0; i < 2; i++)
+            {
+                var leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                leg.name = $"Leg_{i}";
+                leg.transform.SetParent(transform, false);
+                float xOff = i == 0 ? -0.08f : 0.08f;
+                leg.transform.localScale = new Vector3(0.1f, 0.15f, 0.1f);
+                leg.transform.localPosition = new Vector3(xOff, 0.08f, 0f);
+                var legCol = leg.GetComponent<Collider>();
+                if (legCol != null) Destroy(legCol);
+
+                var legRenderer = leg.GetComponent<MeshRenderer>();
+                legRenderer.sharedMaterial = _sharedMaterial;
+                var legPb = new MaterialPropertyBlock();
+                legPb.SetColor(ColorID, bodyColor * 0.7f);
+                legRenderer.SetPropertyBlock(legPb);
+            }
+        }
+
+        /// <summary>
+        /// Update head color accent when settler gets a specialized role.
+        /// Called when assigned to a woodcutter hut, hunter hut, etc.
+        /// </summary>
+        public void UpdateRoleAccent(SettlerTaskType role)
+        {
+            if (_headRenderer == null || _headPropBlock == null) return;
+
+            Color accent = role switch
+            {
+                SettlerTaskType.GatherWood => WOODCUTTER_ACCENT,
+                SettlerTaskType.Hunt => HUNTER_ACCENT,
+                _ => Color.Lerp(SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length], Color.white, 0.35f)
+            };
+            _headPropBlock.SetColor(ColorID, accent);
+            _headRenderer.SetPropertyBlock(_headPropBlock);
         }
 
         private static void EnsureSharedMaterial()

@@ -61,85 +61,158 @@ namespace Terranova.Resources
             var rng = new System.Random(_seed);
             var parent = new GameObject("Resources");
 
-            int treeSpawned = SpawnObjects(world, rng, parent.transform,
-                _treeCount, "Tree", PrimitiveType.Cylinder, ResourceType.Wood,
-                new Color(0.45f, 0.28f, 0.10f), // Brown
-                new Vector3(_treeRadius * 2f, _treeHeight * 0.5f, _treeRadius * 2f),
-                _treeHeight * 0.5f);
+            EnsureTreeMeshes();
+            EnsureRockMesh();
 
-            int rockSpawned = SpawnObjects(world, rng, parent.transform,
-                _rockCount, "Rock", PrimitiveType.Sphere, ResourceType.Stone,
-                new Color(0.55f, 0.55f, 0.55f), // Gray
-                new Vector3(_rockRadius * 2f, _rockRadius * 2f, _rockRadius * 2f),
-                _rockRadius);
+            int treeSpawned = SpawnTrees(world, rng, parent.transform);
+
+            int rockSpawned = SpawnRocks(world, rng, parent.transform);
 
             int bushSpawned = SpawnBerryBushes(world, rng, parent.transform);
 
             Debug.Log($"ResourceSpawner: Placed {treeSpawned} trees, {rockSpawned} rocks, {bushSpawned} berry bushes.");
         }
 
-        private int SpawnObjects(
-            WorldManager world, System.Random rng, Transform parent,
-            int count, string namePrefix, PrimitiveType shape, ResourceType resourceType,
-            Color color, Vector3 scale, float yOffset)
+        // ─── Shared mesh/material caches ─────────────────────────
+
+        private static Mesh _treeCanopyMesh;  // Cone for pine canopy
+        private static Mesh _rockMesh;        // Irregular angular rock
+        private static Material _trunkMaterial;
+        private static Material _canopyMaterial;
+        private static Material _rockMaterial;
+
+        /// <summary>
+        /// Spawn trees as low-poly pines: brown cylinder trunk + green cone canopy.
+        /// Slight size variation for a natural look.
+        /// </summary>
+        private int SpawnTrees(WorldManager world, System.Random rng, Transform parent)
         {
             int maxX = world.WorldBlocksX - _edgeMargin;
             int maxZ = world.WorldBlocksZ - _edgeMargin;
             int spawned = 0;
 
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
-                         ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
-            Material mat = null;
-            if (shader != null)
+            for (int i = 0; i < _treeCount; i++)
             {
-                mat = new Material(shader);
-                mat.name = $"{namePrefix}_Material (Auto)";
-                mat.SetColor("_BaseColor", color);
-            }
-
-            for (int i = 0; i < count; i++)
-            {
-                // Random position within world bounds (with margin)
                 float x = _edgeMargin + (float)(rng.NextDouble() * (maxX - _edgeMargin));
                 float z = _edgeMargin + (float)(rng.NextDouble() * (maxZ - _edgeMargin));
-
                 int blockX = Mathf.FloorToInt(x);
                 int blockZ = Mathf.FloorToInt(z);
 
-                // Only place on solid, non-water ground
                 VoxelType surface = world.GetSurfaceTypeAtWorldPos(blockX, blockZ);
-                if (!surface.IsSolid())
-                    continue;
+                if (!surface.IsSolid()) continue;
 
-                // Flatten terrain under the object so it stands on level ground
                 world.FlattenTerrain(blockX, blockZ, 1);
-
-                // Position on smooth mesh surface (re-query after flattening)
                 float y = world.GetSmoothedHeightAtWorldPos(x, z);
 
-                var obj = GameObject.CreatePrimitive(shape);
-                obj.name = $"{namePrefix}_{spawned}";
-                obj.transform.SetParent(parent);
-                obj.transform.localScale = scale;
-                // Offset Y so bottom sits on terrain surface
-                obj.transform.position = new Vector3(x, y + yOffset, z);
+                // Size variation: 0.8x to 1.2x
+                float sizeScale = 0.8f + (float)rng.NextDouble() * 0.4f;
+                float trunkH = _treeHeight * 0.35f * sizeScale;
+                float canopyH = _treeHeight * 0.7f * sizeScale;
+                float canopyR = _treeRadius * 2.5f * sizeScale;
 
-                if (mat != null)
-                    obj.GetComponent<MeshRenderer>().sharedMaterial = mat;
+                // Parent object
+                var tree = new GameObject($"Tree_{spawned}");
+                tree.transform.SetParent(parent);
+                tree.transform.position = new Vector3(x, y, z);
+                // Slight random rotation for variety
+                tree.transform.rotation = Quaternion.Euler(0f, (float)rng.NextDouble() * 360f, 0f);
 
-                // Keep collider for NavMesh obstacle avoidance but set to trigger
-                // so it doesn't interfere with terrain raycasting
-                var col = obj.GetComponent<Collider>();
-                if (col != null)
-                    col.isTrigger = true;
+                // Trunk: cylinder
+                var trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                trunk.name = "Trunk";
+                trunk.transform.SetParent(tree.transform, false);
+                trunk.transform.localScale = new Vector3(_treeRadius * 0.6f, trunkH * 0.5f, _treeRadius * 0.6f);
+                trunk.transform.localPosition = new Vector3(0f, trunkH * 0.5f, 0f);
+                if (_trunkMaterial != null)
+                    trunk.GetComponent<MeshRenderer>().sharedMaterial = _trunkMaterial;
+                var trunkCol = trunk.GetComponent<Collider>();
+                if (trunkCol != null) trunkCol.isTrigger = true;
 
-                // Attach ResourceNode component (Story 3.1)
-                var node = obj.AddComponent<ResourceNode>();
-                node.Initialize(resourceType);
+                // Canopy: cone mesh
+                var canopy = new GameObject("Canopy");
+                canopy.transform.SetParent(tree.transform, false);
+                canopy.transform.localPosition = new Vector3(0f, trunkH * 0.6f, 0f);
+                canopy.transform.localScale = new Vector3(canopyR, canopyH, canopyR);
+                var canopyMF = canopy.AddComponent<MeshFilter>();
+                canopyMF.sharedMesh = _treeCanopyMesh;
+                var canopyMR = canopy.AddComponent<MeshRenderer>();
+                if (_canopyMaterial != null)
+                    canopyMR.sharedMaterial = _canopyMaterial;
+
+                // ResourceNode on parent
+                var node = tree.AddComponent<ResourceNode>();
+                node.Initialize(ResourceType.Wood);
 
                 spawned++;
             }
+            return spawned;
+        }
 
+        /// <summary>
+        /// Spawn rocks as irregular angular shapes with grey tone variation.
+        /// </summary>
+        private int SpawnRocks(WorldManager world, System.Random rng, Transform parent)
+        {
+            int maxX = world.WorldBlocksX - _edgeMargin;
+            int maxZ = world.WorldBlocksZ - _edgeMargin;
+            int spawned = 0;
+
+            for (int i = 0; i < _rockCount; i++)
+            {
+                float x = _edgeMargin + (float)(rng.NextDouble() * (maxX - _edgeMargin));
+                float z = _edgeMargin + (float)(rng.NextDouble() * (maxZ - _edgeMargin));
+                int blockX = Mathf.FloorToInt(x);
+                int blockZ = Mathf.FloorToInt(z);
+
+                VoxelType surface = world.GetSurfaceTypeAtWorldPos(blockX, blockZ);
+                if (!surface.IsSolid()) continue;
+
+                world.FlattenTerrain(blockX, blockZ, 1);
+                float y = world.GetSmoothedHeightAtWorldPos(x, z);
+
+                // Size variation: 0.7x to 1.3x
+                float sizeScale = 0.7f + (float)rng.NextDouble() * 0.6f;
+                float rx = _rockRadius * sizeScale * (0.8f + (float)rng.NextDouble() * 0.4f);
+                float ry = _rockRadius * sizeScale * (0.5f + (float)rng.NextDouble() * 0.5f);
+                float rz = _rockRadius * sizeScale * (0.8f + (float)rng.NextDouble() * 0.4f);
+
+                var rock = new GameObject($"Rock_{spawned}");
+                rock.transform.SetParent(parent);
+                rock.transform.position = new Vector3(x, y, z);
+                rock.transform.rotation = Quaternion.Euler(
+                    (float)rng.NextDouble() * 15f,
+                    (float)rng.NextDouble() * 360f,
+                    (float)rng.NextDouble() * 15f);
+
+                var meshObj = new GameObject("Mesh");
+                meshObj.transform.SetParent(rock.transform, false);
+                meshObj.transform.localScale = new Vector3(rx * 2f, ry * 2f, rz * 2f);
+                meshObj.transform.localPosition = new Vector3(0f, ry * 0.7f, 0f);
+
+                var mf = meshObj.AddComponent<MeshFilter>();
+                mf.sharedMesh = _rockMesh;
+                var mr = meshObj.AddComponent<MeshRenderer>();
+
+                // Grey tone variation
+                float grey = 0.45f + (float)rng.NextDouble() * 0.2f;
+                if (_rockMaterial != null)
+                {
+                    mr.sharedMaterial = _rockMaterial;
+                    var pb = new MaterialPropertyBlock();
+                    pb.SetColor(Shader.PropertyToID("_BaseColor"),
+                        new Color(grey, grey * 0.95f, grey * 0.9f));
+                    mr.SetPropertyBlock(pb);
+                }
+
+                // Add a box collider for raycasting (trigger so no physics)
+                var col = meshObj.AddComponent<BoxCollider>();
+                col.isTrigger = true;
+
+                var node = rock.AddComponent<ResourceNode>();
+                node.Initialize(ResourceType.Stone);
+
+                spawned++;
+            }
             return spawned;
         }
 
@@ -230,11 +303,141 @@ namespace Terranova.Resources
 
             _bushMaterial = new Material(shader);
             _bushMaterial.name = "Bush_Material (Auto)";
-            _bushMaterial.SetColor("_BaseColor", new Color(0.20f, 0.55f, 0.15f)); // Dark green
+            _bushMaterial.SetColor("_BaseColor", new Color(0.18f, 0.50f, 0.12f));
 
             _berryMaterial = new Material(shader);
             _berryMaterial.name = "Berry_Material (Auto)";
-            _berryMaterial.SetColor("_BaseColor", new Color(0.85f, 0.15f, 0.15f)); // Red
+            _berryMaterial.SetColor("_BaseColor", new Color(0.80f, 0.10f, 0.15f));
+        }
+
+        /// <summary>Create shared cone mesh for tree canopies and trunk/canopy materials.</summary>
+        private static void EnsureTreeMeshes()
+        {
+            if (_treeCanopyMesh != null) return;
+
+            _treeCanopyMesh = CreateConeMesh(0.5f, 1f, 8); // Low-poly pine shape
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                         ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            if (shader == null) return;
+
+            _trunkMaterial = new Material(shader);
+            _trunkMaterial.name = "TreeTrunk_Material (Auto)";
+            _trunkMaterial.SetColor("_BaseColor", new Color(0.40f, 0.26f, 0.12f));
+
+            _canopyMaterial = new Material(shader);
+            _canopyMaterial.name = "TreeCanopy_Material (Auto)";
+            _canopyMaterial.SetColor("_BaseColor", new Color(0.15f, 0.45f, 0.12f));
+        }
+
+        /// <summary>Create a shared irregular rock mesh.</summary>
+        private static void EnsureRockMesh()
+        {
+            if (_rockMesh != null) return;
+            _rockMesh = CreateRockMesh();
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
+                         ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            if (shader == null) return;
+
+            _rockMaterial = new Material(shader);
+            _rockMaterial.name = "Rock_Material (Auto)";
+            _rockMaterial.SetColor("_BaseColor", new Color(0.55f, 0.53f, 0.50f));
+        }
+
+        /// <summary>Create a simple cone mesh (base at y=0, apex at y=height).</summary>
+        private static Mesh CreateConeMesh(float radius, float height, int segments)
+        {
+            var mesh = new Mesh { name = "Cone" };
+            int vertCount = segments + 2;
+            var verts = new Vector3[vertCount];
+            var normals = new Vector3[vertCount];
+
+            verts[0] = Vector3.zero;
+            normals[0] = Vector3.down;
+
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * Mathf.PI * 2f / segments;
+                verts[i + 1] = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                Vector3 outward = new Vector3(verts[i + 1].x, 0f, verts[i + 1].z).normalized;
+                normals[i + 1] = Vector3.Lerp(outward, Vector3.up, 0.5f).normalized;
+            }
+
+            verts[segments + 1] = new Vector3(0f, height, 0f);
+            normals[segments + 1] = Vector3.up;
+
+            var tris = new int[segments * 6];
+            for (int i = 0; i < segments; i++)
+            {
+                int next = (i + 1) % segments;
+                tris[i * 6 + 0] = 0;
+                tris[i * 6 + 1] = next + 1;
+                tris[i * 6 + 2] = i + 1;
+                tris[i * 6 + 3] = i + 1;
+                tris[i * 6 + 4] = next + 1;
+                tris[i * 6 + 5] = segments + 1;
+            }
+
+            mesh.vertices = verts;
+            mesh.normals = normals;
+            mesh.triangles = tris;
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>
+        /// Create an irregular rock mesh by deforming a sphere.
+        /// Low-poly angular look with 3 subdivisions.
+        /// </summary>
+        private static Mesh CreateRockMesh()
+        {
+            var mesh = new Mesh { name = "Rock" };
+
+            // Start from an icosahedron-like shape (deformed UV sphere)
+            int latSegments = 4;
+            int lonSegments = 6;
+            var rng = new System.Random(42); // Deterministic deformation
+
+            var verts = new System.Collections.Generic.List<Vector3>();
+            var tris = new System.Collections.Generic.List<int>();
+
+            // Generate deformed sphere vertices
+            for (int lat = 0; lat <= latSegments; lat++)
+            {
+                float theta = lat * Mathf.PI / latSegments;
+                for (int lon = 0; lon <= lonSegments; lon++)
+                {
+                    float phi = lon * 2f * Mathf.PI / lonSegments;
+                    float deform = 0.7f + (float)rng.NextDouble() * 0.6f;
+                    float x = Mathf.Sin(theta) * Mathf.Cos(phi) * 0.5f * deform;
+                    float y = Mathf.Cos(theta) * 0.4f * deform + 0.4f;
+                    float z = Mathf.Sin(theta) * Mathf.Sin(phi) * 0.5f * deform;
+                    verts.Add(new Vector3(x, Mathf.Max(0f, y), z));
+                }
+            }
+
+            // Generate triangles
+            for (int lat = 0; lat < latSegments; lat++)
+            {
+                for (int lon = 0; lon < lonSegments; lon++)
+                {
+                    int current = lat * (lonSegments + 1) + lon;
+                    int next = current + lonSegments + 1;
+                    tris.Add(current);
+                    tris.Add(next);
+                    tris.Add(current + 1);
+                    tris.Add(current + 1);
+                    tris.Add(next);
+                    tris.Add(next + 1);
+                }
+            }
+
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
         }
     }
 }

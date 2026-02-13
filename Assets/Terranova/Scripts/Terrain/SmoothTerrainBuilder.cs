@@ -271,7 +271,7 @@ namespace Terranova.Terrain
         private static void BuildWaterSurface(ChunkData chunk, float[,] heights, MeshData mesh, int lodStep = 1)
         {
             float waterY = SEA_LEVEL + WATER_Y_OFFSET;
-            Color waterColor = new Color(0.15f, 0.4f, 0.75f, 0.7f);
+            Color waterColor = new Color(0.10f, 0.32f, 0.60f, 0.75f);
 
             float worldOriginX = chunk.ChunkX * ChunkData.WIDTH;
             float worldOriginZ = chunk.ChunkZ * ChunkData.DEPTH;
@@ -444,17 +444,17 @@ namespace Terranova.Terrain
 
         /// <summary>
         /// Map voxel surface type to vertex color.
-        /// Same palette as the old ChunkMeshBuilder for visual consistency.
+        /// Northgard-inspired natural palette.
         /// </summary>
         private static Color GetSurfaceColor(VoxelType type)
         {
             return type switch
             {
-                VoxelType.Grass => new Color(0.30f, 0.65f, 0.20f),
-                VoxelType.Dirt  => new Color(0.55f, 0.36f, 0.16f),
-                VoxelType.Stone => new Color(0.52f, 0.52f, 0.52f),
-                VoxelType.Sand  => new Color(0.90f, 0.85f, 0.55f),
-                VoxelType.Water => new Color(0.15f, 0.4f, 0.75f),
+                VoxelType.Grass => new Color(0.28f, 0.58f, 0.18f),   // Rich natural green
+                VoxelType.Dirt  => new Color(0.50f, 0.34f, 0.18f),   // Warm earth brown
+                VoxelType.Stone => new Color(0.48f, 0.47f, 0.45f),   // Natural grey with warmth
+                VoxelType.Sand  => new Color(0.85f, 0.78f, 0.55f),   // Warm beige
+                VoxelType.Water => new Color(0.12f, 0.35f, 0.65f),   // Deeper blue
                 _               => Color.magenta
             };
         }
