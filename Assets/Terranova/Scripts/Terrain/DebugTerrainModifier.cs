@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 namespace Terranova.Terrain
@@ -27,6 +28,10 @@ namespace Terranova.Terrain
         private void Update()
         {
             if (_mouse == null)
+                return;
+
+            // Don't modify terrain when clicking on UI elements (e.g., build menu)
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                 return;
 
             if (_mouse.leftButton.wasPressedThisFrame)

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using Terranova.Core;
 using Terranova.Terrain;
@@ -118,6 +119,10 @@ namespace Terranova.Buildings
 
             var mouse = Mouse.current;
             var kb = Keyboard.current;
+
+            // Don't place buildings when clicking on UI elements
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                return;
 
             // Left-click to place
             if (mouse != null && mouse.leftButton.wasPressedThisFrame && _isValidPosition)
