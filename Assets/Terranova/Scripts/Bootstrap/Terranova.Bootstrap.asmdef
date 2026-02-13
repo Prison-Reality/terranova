@@ -8,6 +8,7 @@
         "Terranova.Camera",
         "Terranova.UI",
         "Terranova.Population",
+        "Terranova.Resources",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],
