@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.AI;
 using Terranova.Core;
+using Terranova.Buildings;
 using Terranova.Resources;
 
 namespace Terranova.Population
@@ -384,6 +385,15 @@ namespace Terranova.Population
                           $"(totals: Wood={_totalWoodDelivered}, Stone={_totalStoneDelivered}, Food={_totalFoodDelivered})");
             }
 
+            // Re-evaluate priorities: construction sites take precedence over gathering
+            if (_currentTask != null && _currentTask.TaskType != SettlerTaskType.Build
+                && HasPendingConstructionSite())
+            {
+                Debug.Log($"[{name}] Construction site waiting - dropping gather task");
+                ClearTask();
+                return;
+            }
+
             if (_currentTask != null && _currentTask.IsTargetValid)
             {
                 // Re-reserve the resource for the next cycle (Story 3.2)
@@ -606,6 +616,23 @@ namespace Terranova.Population
 
             _sharedMaterial = new Material(shader);
             _sharedMaterial.name = "Settler_Shared (Auto)";
+        }
+
+        // ─── Priority Check ──────────────────────────────────────
+
+        /// <summary>
+        /// Check if any construction site needs a builder.
+        /// Called after delivery to re-evaluate task priorities.
+        /// </summary>
+        private static bool HasPendingConstructionSite()
+        {
+            var buildings = Object.FindObjectsByType<Building>(FindObjectsSortMode.None);
+            foreach (var building in buildings)
+            {
+                if (!building.IsConstructed && !building.IsBeingBuilt)
+                    return true;
+            }
+            return false;
         }
     }
 }
