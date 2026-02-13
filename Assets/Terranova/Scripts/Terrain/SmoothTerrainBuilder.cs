@@ -136,9 +136,10 @@ namespace Terranova.Terrain
                             if (localX >= 0 && localX < ChunkData.WIDTH &&
                                 localZ >= 0 && localZ < ChunkData.DEPTH)
                             {
-                                // Column is within this chunk
-                                h = chunk.GetHeightAt(localX, localZ);
-                                st = chunk.GetSurfaceType(localX, localZ);
+                                // Column is within this chunk – use solid height
+                                // (skip water so terrain mesh follows seafloor)
+                                h = chunk.GetSolidHeightAt(localX, localZ);
+                                st = chunk.GetSolidSurfaceType(localX, localZ);
                             }
                             else if (getHeight != null && getSurface != null)
                             {

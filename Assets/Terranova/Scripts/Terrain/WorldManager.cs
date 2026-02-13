@@ -111,7 +111,7 @@ namespace Terranova.Terrain
             // across chunk boundaries – all data must exist first)
             foreach (var chunk in _chunks.Values)
             {
-                chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos);
+                chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos);
             }
 
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
@@ -175,7 +175,7 @@ namespace Terranova.Terrain
                 // Only rebuild if LOD changed
                 if (chunk.CurrentLod != desiredLod)
                 {
-                    chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos, desiredLod);
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, desiredLod);
                 }
             }
         }
@@ -244,6 +244,48 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
+        /// Get the solid terrain height at a world position (skips water blocks).
+        /// Returns the seafloor height for underwater columns.
+        /// Used by: smooth mesh builder (terrain follows seafloor, not water surface).
+        /// </summary>
+        public int GetSolidHeightAtWorldPos(int worldX, int worldZ)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return -1;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            return chunk.Data.GetSolidHeightAt(localX, localZ);
+        }
+
+        /// <summary>
+        /// Get the solid surface type at a world position (skips water blocks).
+        /// Returns the seafloor block type for underwater columns.
+        /// Used by: smooth mesh builder for terrain coloring under water.
+        /// </summary>
+        public VoxelType GetSolidSurfaceTypeAtWorldPos(int worldX, int worldZ)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return VoxelType.Air;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            return chunk.Data.GetSolidSurfaceType(localX, localZ);
+        }
+
+        /// <summary>
         /// Get the interpolated smooth mesh height at a world position.
         /// Uses the same 4-column averaging as SmoothTerrainBuilder for consistency.
         /// This is the visual surface height – use for positioning objects on the
@@ -284,6 +326,7 @@ namespace Terranova.Terrain
         /// <summary>
         /// Get the averaged vertex height at a world-space vertex position.
         /// Replicates SmoothTerrainBuilder's 4-column averaging logic.
+        /// Uses solid heights (skips water) to match the visible terrain mesh.
         /// </summary>
         private float GetAveragedVertexHeight(int worldVx, int worldVz)
         {
@@ -294,7 +337,7 @@ namespace Terranova.Terrain
             {
                 for (int dz = -1; dz <= 0; dz++)
                 {
-                    int h = GetHeightAtWorldPos(worldVx + dx, worldVz + dz);
+                    int h = GetSolidHeightAtWorldPos(worldVx + dx, worldVz + dz);
                     if (h >= 0)
                     {
                         totalHeight += h;
@@ -355,7 +398,7 @@ namespace Terranova.Terrain
             foreach (var key in affectedChunks)
             {
                 if (_chunks.TryGetValue(key, out var chunk))
-                    chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos, chunk.CurrentLod);
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
             }
         }
 
@@ -405,7 +448,7 @@ namespace Terranova.Terrain
             int localZ = worldZ - chunkZ * ChunkData.DEPTH;
 
             chunk.Data.SetBlock(localX, worldY, localZ, newType);
-            chunk.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos, chunk.CurrentLod);
+            chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
 
             // Rebuild neighbors if modification is at a chunk boundary (within 1 block of edge).
             // The smooth mesh averaging samples from neighboring chunks at boundaries.
@@ -423,7 +466,7 @@ namespace Terranova.Terrain
             var key = new Vector2Int(chunkX, chunkZ);
             if (_chunks.TryGetValue(key, out var neighbor))
             {
-                neighbor.RebuildMesh(GetHeightAtWorldPos, GetSurfaceTypeAtWorldPos, neighbor.CurrentLod);
+                neighbor.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, neighbor.CurrentLod);
             }
         }
 
