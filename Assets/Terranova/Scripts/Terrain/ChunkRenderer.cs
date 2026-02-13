@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Terranova.Terrain
@@ -102,16 +103,40 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
-        /// Extract terrain triangles (submesh 0) into a separate collision mesh.
-        /// Water triangles (submesh 1) are excluded so NavMesh baking doesn't
-        /// create walkable areas over water.
+        /// Extract above-water terrain triangles into a separate collision mesh.
+        /// Excludes: water submesh (submesh 1) AND underwater terrain triangles
+        /// (where all 3 vertices are below the water surface).
+        /// This prevents NavMesh from creating walkable areas under water.
         /// </summary>
         private static Mesh BuildCollisionMesh(Mesh sourceMesh)
         {
+            Vector3[] vertices = sourceMesh.vertices;
+            int[] sourceTriangles = sourceMesh.GetTriangles(0); // Terrain submesh only
+
+            // Water surface Y position (same as SmoothTerrainBuilder)
+            float waterSurfaceY = TerrainGenerator.SEA_LEVEL + 0.15f;
+
+            // Filter out triangles that are fully submerged
+            var filteredTriangles = new List<int>(sourceTriangles.Length);
+            for (int i = 0; i < sourceTriangles.Length; i += 3)
+            {
+                float y0 = vertices[sourceTriangles[i]].y;
+                float y1 = vertices[sourceTriangles[i + 1]].y;
+                float y2 = vertices[sourceTriangles[i + 2]].y;
+
+                // Keep triangle if ANY vertex is above water surface
+                if (y0 >= waterSurfaceY || y1 >= waterSurfaceY || y2 >= waterSurfaceY)
+                {
+                    filteredTriangles.Add(sourceTriangles[i]);
+                    filteredTriangles.Add(sourceTriangles[i + 1]);
+                    filteredTriangles.Add(sourceTriangles[i + 2]);
+                }
+            }
+
             var collisionMesh = new Mesh();
             collisionMesh.name = "CollisionMesh";
-            collisionMesh.vertices = sourceMesh.vertices;
-            collisionMesh.triangles = sourceMesh.GetTriangles(0); // Terrain only
+            collisionMesh.vertices = vertices;
+            collisionMesh.triangles = filteredTriangles.ToArray();
             collisionMesh.RecalculateBounds();
             return collisionMesh;
         }
