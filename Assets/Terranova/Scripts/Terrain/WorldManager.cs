@@ -519,17 +519,30 @@ namespace Terranova.Terrain
         {
             if (_solidMaterial == null)
             {
-                // Prefer the terrain splatting shader, fall back to vertex color
-                Shader shader = Shader.Find("Terranova/TerrainSplat")
-                             ?? Shader.Find("Terranova/VertexColorOpaque")
-                             ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+                // Prefer the terrain splatting shader, fall back to vertex color.
+                // These shaders must be in GraphicsSettings → Always Included Shaders,
+                // otherwise Shader.Find() returns null in builds (shader stripping).
+                Shader shader = Shader.Find("Terranova/TerrainSplat");
+                if (shader == null)
+                {
+                    Debug.LogWarning("WorldManager: TerrainSplat shader not found, trying VertexColorOpaque...");
+                    shader = Shader.Find("Terranova/VertexColorOpaque");
+                }
+                if (shader == null)
+                {
+                    Debug.LogWarning("WorldManager: VertexColorOpaque shader not found, trying URP Particles/Unlit...");
+                    shader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+                }
 
                 if (shader == null)
                 {
-                    Debug.LogError("No suitable shader found! Assign materials manually.");
+                    Debug.LogError("WorldManager: No suitable shader found! " +
+                        "All terrain shaders were stripped from the build. " +
+                        "Add them to GraphicsSettings → Always Included Shaders.");
                     return;
                 }
 
+                Debug.Log($"WorldManager: Solid material using shader '{shader.name}'");
                 _solidMaterial = new Material(shader);
                 _solidMaterial.name = "Terrain_Splat (Auto)";
                 _ownsSolidMaterial = true;
@@ -543,15 +556,21 @@ namespace Terranova.Terrain
 
             if (_waterMaterial == null)
             {
-                Shader shader = Shader.Find("Terranova/VertexColorTransparent")
-                             ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+                Shader shader = Shader.Find("Terranova/VertexColorTransparent");
+                if (shader == null)
+                {
+                    Debug.LogWarning("WorldManager: VertexColorTransparent shader not found, trying URP Particles/Unlit...");
+                    shader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+                }
 
                 if (shader == null)
                 {
-                    Debug.LogError("No suitable shader found! Assign materials manually.");
+                    Debug.LogError("WorldManager: No suitable water shader found! " +
+                        "Add Terranova shaders to GraphicsSettings → Always Included Shaders.");
                     return;
                 }
 
+                Debug.Log($"WorldManager: Water material using shader '{shader.name}'");
                 _waterMaterial = new Material(shader);
                 _waterMaterial.name = "Water_Transparent (Auto)";
                 _ownsWaterMaterial = true;
