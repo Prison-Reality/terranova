@@ -1,7 +1,9 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using Unity.AI.Navigation;
+using Terranova.Core;
 
 namespace Terranova.Terrain
 {
@@ -83,28 +85,38 @@ namespace Terranova.Terrain
         [Tooltip("Distance in chunks for LOD 2 (low detail). Chunks closer use LOD 1.")]
         [SerializeField] private int _lod2Distance = 8;
 
-        private void Start()
+        private IEnumerator Start()
         {
             EnsureMaterials();
 
             if (_solidMaterial == null || _waterMaterial == null)
             {
                 Debug.LogError("WorldManager: Cannot generate world – materials missing. Assign them in the Inspector.");
-                return;
+                yield break;
             }
 
-            GenerateWorld();
+            yield return StartCoroutine(GenerateWorldAsync());
 
             // Periodically update LOD based on camera position (every 0.5s)
             InvokeRepeating(nameof(UpdateChunkLODs), 1f, 0.5f);
         }
 
         /// <summary>
-        /// Generate the entire world: create chunks, fill with terrain, build meshes.
+        /// Generate the entire world as a coroutine, publishing progress events
+        /// so a loading screen can display a progress bar.
         /// </summary>
-        private void GenerateWorld()
+        private IEnumerator GenerateWorldAsync()
         {
             _generator = new TerrainGenerator(_seed);
+            int totalChunks = _worldSizeX * _worldSizeZ;
+            int processed = 0;
+
+            EventBus.Publish(new WorldGenerationProgressEvent
+            {
+                Progress = 0f,
+                Status = "Generating terrain..."
+            });
+            yield return null;
 
             // Phase 1: Create all chunk data
             for (int cx = 0; cx < _worldSizeX; cx++)
@@ -112,21 +124,53 @@ namespace Terranova.Terrain
                 for (int cz = 0; cz < _worldSizeZ; cz++)
                 {
                     CreateChunk(cx, cz);
+                    processed++;
                 }
+                // Yield after each row to allow UI update
+                EventBus.Publish(new WorldGenerationProgressEvent
+                {
+                    Progress = (float)processed / (totalChunks * 2),
+                    Status = $"Generating terrain... {processed}/{totalChunks}"
+                });
+                yield return null;
             }
 
             // Phase 2: Build meshes (done separately so neighbor lookups work
             // across chunk boundaries – all data must exist first)
+            processed = 0;
             foreach (var chunk in _chunks.Values)
             {
                 chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos);
+                processed++;
+                if (processed % 2 == 0)
+                {
+                    EventBus.Publish(new WorldGenerationProgressEvent
+                    {
+                        Progress = 0.5f + (float)processed / (totalChunks * 2),
+                        Status = $"Building meshes... {processed}/{totalChunks}"
+                    });
+                    yield return null;
+                }
             }
 
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
                       $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={_seed}");
 
-            // Bake NavMesh for settler pathfinding (Story 2.0)
+            // Phase 3: NavMesh
+            EventBus.Publish(new WorldGenerationProgressEvent
+            {
+                Progress = 0.95f,
+                Status = "Baking navigation..."
+            });
+            yield return null;
+
             BakeNavMesh();
+
+            EventBus.Publish(new WorldGenerationProgressEvent
+            {
+                Progress = 1f,
+                Status = "Ready!"
+            });
         }
 
         /// <summary>
