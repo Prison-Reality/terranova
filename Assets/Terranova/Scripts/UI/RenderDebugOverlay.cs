@@ -28,13 +28,12 @@ namespace Terranova.UI
         private float _updateTimer;
         private StringBuilder _sb = new();
 
-        // Always start visible on device so we can see diagnostics immediately.
-        // In Editor, start hidden and toggle with F4.
+        // Start hidden by default. Toggle with F4 in both Editor and device builds.
         private bool _isVisible;
 
         private void Start()
         {
-            _isVisible = !Application.isEditor;
+            _isVisible = false;
             CreateOverlayUI();
             _panel.SetActive(_isVisible);
 
