@@ -143,7 +143,9 @@ namespace Terranova.Core
             go.AddComponent<BuildMenu>();
             // Story 6.1: Info panel for selection
             go.AddComponent<InfoPanel>();
-            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, and InfoPanel.");
+            // Render debug overlay for iPad grey screen diagnosis (temporary)
+            go.AddComponent<RenderDebugOverlay>();
+            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, InfoPanel, and RenderDebugOverlay.");
         }
 
         private static void EnsureEventSystem()
