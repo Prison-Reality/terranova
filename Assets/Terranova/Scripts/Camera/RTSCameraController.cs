@@ -180,23 +180,25 @@ namespace Terranova.Camera
         }
 
         /// <summary>
-        /// Scroll wheel to zoom in/out.
+        /// Scroll wheel to zoom in/out. Smooth interpolation runs always
+        /// (needed for touch pinch zoom to take effect even without a mouse).
         /// </summary>
         private void HandleZoom()
         {
             var mouse = Mouse.current;
-            if (mouse == null) return;
-
-            float scroll = mouse.scroll.ReadValue().y;
-            if (!Mathf.Approximately(scroll, 0))
+            if (mouse != null)
             {
-                // scroll.y is typically +-120 per notch, normalize it
-                float normalizedScroll = scroll / 120f;
-                _targetZoom -= normalizedScroll * _zoomSpeed * (_targetZoom * 0.3f);
-                _targetZoom = Mathf.Clamp(_targetZoom, _minZoom, _maxZoom);
+                float scroll = mouse.scroll.ReadValue().y;
+                if (!Mathf.Approximately(scroll, 0))
+                {
+                    // scroll.y is typically +-120 per notch, normalize it
+                    float normalizedScroll = scroll / 120f;
+                    _targetZoom -= normalizedScroll * _zoomSpeed * (_targetZoom * 0.3f);
+                    _targetZoom = Mathf.Clamp(_targetZoom, _minZoom, _maxZoom);
+                }
             }
 
-            // Smooth zoom interpolation
+            // Smooth zoom interpolation (runs always — pinch zoom sets _targetZoom too)
             _currentZoom = Mathf.Lerp(_currentZoom, _targetZoom, Time.deltaTime * _zoomSmoothing);
         }
 

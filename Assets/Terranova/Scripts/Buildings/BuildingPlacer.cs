@@ -364,8 +364,8 @@ namespace Terranova.Buildings
             Debug.Log($"Placed {_selectedBuilding.DisplayName} at {position} " +
                       $"(cost: {_selectedBuilding.WoodCost}W, {_selectedBuilding.StoneCost}S)");
 
-            // Continue placement mode (build loop – player can keep placing)
-            // As per GDD gesture lexicon: "build loop for serial construction"
+            // Exit placement mode after placing (serial build loop deferred to future milestone)
+            CancelPlacement();
         }
 
         /// <summary>

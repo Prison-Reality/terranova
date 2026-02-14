@@ -216,7 +216,9 @@ namespace Terranova.Input
         {
             Ray ray = UnityEngine.Camera.main.ScreenPointToRay(screenPos);
 
-            if (!Physics.Raycast(ray, out RaycastHit hit, RAYCAST_DISTANCE))
+            // QueryTriggerInteraction.Collide: settler body collider is a trigger
+            if (!Physics.Raycast(ray, out RaycastHit hit, RAYCAST_DISTANCE,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Collide))
             {
                 Deselect();
                 return;
