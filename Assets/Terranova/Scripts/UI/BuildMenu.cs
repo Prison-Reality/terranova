@@ -1,19 +1,23 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Buildings;
+using Terranova.Discovery;
 
 namespace Terranova.UI
 {
     /// <summary>
-    /// Build menu UI showing all available buildings with costs.
+    /// Build menu UI showing available buildings with costs.
     /// Player selects a building to enter placement mode.
     ///
     /// - Grays out buildings the player can't afford
     /// - Updates live when resources change
+    /// - Hides buildings that haven't been unlocked by discoveries (Feature 3.2)
     /// - Press B or click the toggle button to open/close
     ///
     /// Story 4.5: Bau-Menü
+    /// Feature 3.2: Discovery-gated buildings
     /// </summary>
     public class BuildMenu : MonoBehaviour
     {
@@ -22,12 +26,21 @@ namespace Terranova.UI
         private const float SPACING = 8f;
         private const int FONT_SIZE = 14;
 
+        // Building types that require discovery unlock
+        private static readonly HashSet<BuildingType> DISCOVERY_GATED = new()
+        {
+            BuildingType.CookingFire,
+            BuildingType.TrapSite
+        };
+
         private GameObject _panel;
-        private BuildingButton[] _buttons;
+        private List<BuildingButton> _buttons;
         private bool _isOpen;
+        private bool _panelDirty = true;
 
         private struct BuildingButton
         {
+            public GameObject Root;
             public Button Button;
             public Text Label;
             public Image Background;
@@ -42,11 +55,11 @@ namespace Terranova.UI
         private void OnEnable()
         {
             EventBus.Subscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Subscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
         }
 
         private void Update()
         {
-            // B key toggles the build menu
             if (UnityEngine.InputSystem.Keyboard.current != null &&
                 UnityEngine.InputSystem.Keyboard.current.bKey.wasPressedThisFrame)
             {
@@ -64,10 +77,10 @@ namespace Terranova.UI
 
         private void OpenMenu()
         {
-            if (_panel == null)
-                CreatePanel();
+            if (_panelDirty || _panel == null)
+                RebuildPanel();
 
-            if (_panel == null) return; // No registry yet
+            if (_panel == null) return;
 
             _panel.SetActive(true);
             _isOpen = true;
@@ -87,9 +100,17 @@ namespace Terranova.UI
                 RefreshButtons();
         }
 
-        /// <summary>
-        /// Create the toggle button (bottom-left corner).
-        /// </summary>
+        private void OnDiscoveryMade(DiscoveryMadeEvent evt)
+        {
+            _panelDirty = true;
+            if (_isOpen)
+            {
+                RebuildPanel();
+                _panel.SetActive(true);
+                RefreshButtons();
+            }
+        }
+
         private void CreateToggleButton()
         {
             var canvas = GetComponent<Canvas>();
@@ -128,20 +149,40 @@ namespace Terranova.UI
         }
 
         /// <summary>
-        /// Create the building selection panel.
+        /// Rebuild the panel, filtering out buildings not yet unlocked by discoveries.
         /// </summary>
-        private void CreatePanel()
+        private void RebuildPanel()
         {
+            if (_panel != null)
+                Destroy(_panel);
+
             var registry = BuildingRegistry.Instance;
             if (registry == null || registry.Definitions == null) return;
 
-            var defs = registry.Definitions;
+            var sm = DiscoveryStateManager.Instance;
+
+            // Filter definitions: show always-available + discovery-unlocked
+            var visibleDefs = new List<BuildingDefinition>();
+            foreach (var def in registry.Definitions)
+            {
+                if (DISCOVERY_GATED.Contains(def.Type))
+                {
+                    if (sm != null && sm.IsBuildingUnlocked(def.Type))
+                        visibleDefs.Add(def);
+                }
+                else
+                {
+                    visibleDefs.Add(def);
+                }
+            }
+
+            if (visibleDefs.Count == 0) return;
 
             _panel = new GameObject("BuildPanel");
             _panel.transform.SetParent(transform, false);
 
             var panelRect = _panel.AddComponent<RectTransform>();
-            float totalWidth = defs.Length * (BUTTON_WIDTH + SPACING) + SPACING;
+            float totalWidth = visibleDefs.Count * (BUTTON_WIDTH + SPACING) + SPACING;
             panelRect.anchorMin = new Vector2(0.5f, 0);
             panelRect.anchorMax = new Vector2(0.5f, 0);
             panelRect.pivot = new Vector2(0.5f, 0);
@@ -151,12 +192,12 @@ namespace Terranova.UI
             var panelImage = _panel.AddComponent<Image>();
             panelImage.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
 
-            _buttons = new BuildingButton[defs.Length];
+            _buttons = new List<BuildingButton>();
 
-            for (int i = 0; i < defs.Length; i++)
+            for (int i = 0; i < visibleDefs.Count; i++)
             {
-                var def = defs[i];
-                int index = i; // Capture for closure
+                var def = visibleDefs[i];
+                int index = i;
 
                 var btnObj = new GameObject($"Btn_{def.DisplayName}");
                 btnObj.transform.SetParent(_panel.transform, false);
@@ -175,7 +216,6 @@ namespace Terranova.UI
                 btn.targetGraphic = bg;
                 btn.onClick.AddListener(() => OnBuildingSelected(index));
 
-                // Label with name and cost
                 var labelObj = new GameObject("Label");
                 labelObj.transform.SetParent(btnObj.transform, false);
                 var labelRect = labelObj.AddComponent<RectTransform>();
@@ -196,21 +236,20 @@ namespace Terranova.UI
                     : $"{def.DisplayName}\n{def.WoodCost}W";
                 label.text = costText;
 
-                _buttons[i] = new BuildingButton
+                _buttons.Add(new BuildingButton
                 {
+                    Root = btnObj,
                     Button = btn,
                     Label = label,
                     Background = bg,
                     Definition = def
-                };
+                });
             }
 
             _panel.SetActive(false);
+            _panelDirty = false;
         }
 
-        /// <summary>
-        /// Refresh button states based on current resources.
-        /// </summary>
         private void RefreshButtons()
         {
             if (_buttons == null) return;
@@ -229,19 +268,15 @@ namespace Terranova.UI
             }
         }
 
-        /// <summary>
-        /// Player selected a building to place.
-        /// </summary>
         private void OnBuildingSelected(int index)
         {
-            if (_buttons == null || index >= _buttons.Length) return;
+            if (_buttons == null || index >= _buttons.Count) return;
 
             var def = _buttons[index].Definition;
             var rm = ResourceManager.Instance;
             if (rm != null && !rm.CanAfford(def.WoodCost, def.StoneCost))
                 return;
 
-            // Find the BuildingPlacer and start placement
             var placer = FindFirstObjectByType<BuildingPlacer>();
             if (placer != null)
             {
@@ -253,12 +288,13 @@ namespace Terranova.UI
         private void OnDisable()
         {
             EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Unsubscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
         }
 
         private void OnDestroy()
         {
-            // Safety: ensure cleanup even if OnDisable wasn't called
             EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Unsubscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
         }
     }
 }

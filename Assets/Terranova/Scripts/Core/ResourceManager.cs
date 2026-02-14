@@ -19,10 +19,16 @@ namespace Terranova.Core
         [SerializeField] private int _wood = 50;
         [SerializeField] private int _stone = 30;
         [SerializeField] private int _food;
+        private int _resin;
+        private int _flint;
+        private int _plantFiber;
 
         public int Wood => _wood;
         public int Stone => _stone;
         public int Food => _food;
+        public int Resin => _resin;
+        public int Flint => _flint;
+        public int PlantFiber => _plantFiber;
 
         private void Awake()
         {
@@ -49,12 +55,7 @@ namespace Terranova.Core
         /// </summary>
         private void OnResourceDelivered(ResourceDeliveredEvent evt)
         {
-            switch (evt.TaskType)
-            {
-                case SettlerTaskType.GatherWood: Add(ResourceType.Wood); break;
-                case SettlerTaskType.GatherStone: Add(ResourceType.Stone); break;
-                case SettlerTaskType.Hunt: Add(ResourceType.Food); break;
-            }
+            Add(evt.ActualResourceType);
         }
 
         /// <summary>Check if we have enough resources for a purchase.</summary>
@@ -95,9 +96,12 @@ namespace Terranova.Core
         {
             switch (type)
             {
-                case ResourceType.Wood:  _wood += amount; break;
-                case ResourceType.Stone: _stone += amount; break;
-                case ResourceType.Food:  _food += amount; break;
+                case ResourceType.Wood:      _wood += amount; break;
+                case ResourceType.Stone:     _stone += amount; break;
+                case ResourceType.Food:      _food += amount; break;
+                case ResourceType.Resin:     _resin += amount; break;
+                case ResourceType.Flint:     _flint += amount; break;
+                case ResourceType.PlantFiber: _plantFiber += amount; break;
             }
             PublishChanged();
         }

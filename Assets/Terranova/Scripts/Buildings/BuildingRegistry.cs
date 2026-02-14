@@ -65,6 +65,17 @@ namespace Terranova.Buildings
                     new Vector2Int(2, 2), 2.5f,
                     new Color(0.65f, 0.55f, 0.40f), // Tan
                     housingCapacity: 2),
+
+                // Discovery-unlocked buildings (Feature 3.2)
+                CreateDef("Cooking Fire", "Reduces food spoilage. Unlocked by Fire.",
+                    BuildingType.CookingFire, 5, 3,
+                    new Vector2Int(1, 1), 1.0f,
+                    new Color(0.95f, 0.55f, 0.15f)), // Orange-flame
+
+                CreateDef("Trap Site", "Passive food source. Unlocked by Animal Traps.",
+                    BuildingType.TrapSite, 8, 2,
+                    new Vector2Int(2, 2), 1.5f,
+                    new Color(0.50f, 0.40f, 0.20f)), // Dark tan
             };
 
             Debug.Log($"BuildingRegistry: Created {_definitions.Length} building definitions.");

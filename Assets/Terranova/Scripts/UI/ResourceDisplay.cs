@@ -190,7 +190,19 @@ namespace Terranova.UI
 
             var rm = ResourceManager.Instance;
             if (rm != null)
-                _resourceText.text = $"Wood: {rm.Wood}    Stone: {rm.Stone}    Food: {rm.Food}    Settlers: {_settlers}";
+            {
+                string text = $"Wood: {rm.Wood}    Stone: {rm.Stone}    Food: {rm.Food}    Settlers: {_settlers}";
+                // Show discovery resources only after they've been unlocked
+                if (rm.Resin > 0 || rm.Flint > 0 || rm.PlantFiber > 0)
+                {
+                    string extras = "";
+                    if (rm.Resin > 0) extras += $"    Resin: {rm.Resin}";
+                    if (rm.Flint > 0) extras += $"    Flint: {rm.Flint}";
+                    if (rm.PlantFiber > 0) extras += $"    Fiber: {rm.PlantFiber}";
+                    text += extras;
+                }
+                _resourceText.text = text;
+            }
             else
                 _resourceText.text = $"Settlers: {_settlers}";
         }
@@ -331,10 +343,10 @@ namespace Terranova.UI
             if (GetComponent<GraphicRaycaster>() == null)
                 gameObject.AddComponent<GraphicRaycaster>();
 
-            // Resource counter (top-left)
+            // Resource counter (top-left) — wider to accommodate discovery resources
             _resourceText = CreateText("ResourceText",
                 new Vector2(20, -20),    // Offset from top-left
-                new Vector2(400, 40),    // Size
+                new Vector2(700, 40),    // Size (wider for Resin/Flint/Fiber counters)
                 TextAnchor.UpperLeft);
 
             // Event notification (top-center)
