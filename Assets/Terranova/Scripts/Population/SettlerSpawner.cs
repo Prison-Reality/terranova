@@ -28,6 +28,7 @@ namespace Terranova.Population
 
         // Track whether we've already spawned (to avoid double-spawning)
         private bool _hasSpawned;
+        private static Mesh _cachedFlameConeMesh;
 
         // We wait for WorldManager in Update because terrain generates in Start
         // and we can't guarantee execution order between different Start methods.
@@ -84,26 +85,72 @@ namespace Terranova.Population
             float y = world.GetSmoothedHeightAtWorldPos(centerX + 0.5f, centerZ + 0.5f);
             Vector3 position = new Vector3(centerX + 0.5f, y, centerZ + 0.5f);
 
-            // Create campfire visual as a cone (looks like a campfire)
+            // Create campfire visual: stone ring + flame cone
             var campfire = new GameObject("Campfire");
-            var meshFilter = campfire.AddComponent<MeshFilter>();
-            meshFilter.sharedMesh = CreateConeMesh(0.5f, 1.2f, 12);
-            campfire.AddComponent<MeshRenderer>();
-            campfire.AddComponent<MeshCollider>().sharedMesh = meshFilter.sharedMesh;
-            // Cone mesh has base at y=0, so position directly on terrain surface
             campfire.transform.position = position;
 
-            // Apply warm orange-red color
-            var meshRenderer = campfire.GetComponent<MeshRenderer>();
             Shader shader = Shader.Find("Universal Render Pipeline/Lit")
                          ?? Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            Material stoneMat = null;
+            Material flameMat = null;
+            Material glowMat = null;
             if (shader != null)
             {
-                var material = new Material(shader);
-                material.name = "Campfire_Material (Auto)";
-                material.SetColor("_BaseColor", new Color(0.9f, 0.45f, 0.1f));
-                meshRenderer.material = material;
+                stoneMat = new Material(shader);
+                stoneMat.name = "CampfireStone_Material (Auto)";
+                stoneMat.SetColor("_BaseColor", new Color(0.45f, 0.43f, 0.40f));
+
+                flameMat = new Material(shader);
+                flameMat.name = "CampfireFlame_Material (Auto)";
+                flameMat.SetColor("_BaseColor", new Color(1f, 0.55f, 0.1f));
+
+                glowMat = new Material(shader);
+                glowMat.name = "CampfireGlow_Material (Auto)";
+                glowMat.SetColor("_BaseColor", new Color(1f, 0.85f, 0.3f));
             }
+
+            // Stone ring: 6 small cubes
+            for (int s = 0; s < 6; s++)
+            {
+                float sAngle = s * Mathf.PI * 2f / 6f;
+                var stone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                stone.name = $"Stone_{s}";
+                stone.transform.SetParent(campfire.transform, false);
+                stone.transform.localScale = new Vector3(0.2f, 0.15f, 0.2f);
+                stone.transform.localPosition = new Vector3(
+                    Mathf.Cos(sAngle) * 0.35f, 0.07f, Mathf.Sin(sAngle) * 0.35f);
+                stone.transform.localRotation = Quaternion.Euler(0f, sAngle * Mathf.Rad2Deg + 15f, 0f);
+                var sCol = stone.GetComponent<Collider>();
+                if (sCol != null) Destroy(sCol);
+                if (stoneMat != null) stone.GetComponent<MeshRenderer>().sharedMaterial = stoneMat;
+            }
+
+            // Flame cone (center) – cache mesh for reuse
+            if (_cachedFlameConeMesh == null)
+                _cachedFlameConeMesh = CreateConeMesh(0.15f, 0.6f, 6);
+            var flameConeMesh = _cachedFlameConeMesh;
+            var flame = new GameObject("Flame");
+            flame.transform.SetParent(campfire.transform, false);
+            flame.transform.localPosition = new Vector3(0f, 0.05f, 0f);
+            var flameMF = flame.AddComponent<MeshFilter>();
+            flameMF.sharedMesh = flameConeMesh;
+            var flameMR = flame.AddComponent<MeshRenderer>();
+            if (flameMat != null) flameMR.sharedMaterial = flameMat;
+
+            // Inner glow cone
+            var glow = new GameObject("Glow");
+            glow.transform.SetParent(campfire.transform, false);
+            glow.transform.localPosition = new Vector3(0f, 0.05f, 0f);
+            glow.transform.localScale = new Vector3(0.5f, 0.75f, 0.5f);
+            var glowMF = glow.AddComponent<MeshFilter>();
+            glowMF.sharedMesh = flameConeMesh;
+            var glowMR = glow.AddComponent<MeshRenderer>();
+            if (glowMat != null) glowMR.sharedMaterial = glowMat;
+
+            // Box collider on root for selection
+            var rootCol = campfire.AddComponent<BoxCollider>();
+            rootCol.center = new Vector3(0f, 0.3f, 0f);
+            rootCol.size = new Vector3(0.9f, 0.6f, 0.9f);
 
             // Attach Building component so campfire is a real building in the system
             var campfireDef = BuildingRegistry.Instance?.CampfireDefinition;
