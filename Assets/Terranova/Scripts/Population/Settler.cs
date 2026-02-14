@@ -3,7 +3,6 @@ using UnityEngine.AI;
 using Terranova.Core;
 using Terranova.Buildings;
 using Terranova.Resources;
-using Terranova.Discovery;
 
 namespace Terranova.Population
 {
@@ -169,10 +168,16 @@ namespace Terranova.Population
 
             CreateVisual();
             SetupNavMeshAgent();
+            SettlerLocator.Register(transform);
 
             // Start with random pause (desync settlers)
             _state = SettlerState.IdlePausing;
             _stateTimer = Random.Range(0f, MAX_PAUSE);
+        }
+
+        private void OnDestroy()
+        {
+            SettlerLocator.Unregister(transform);
         }
 
         /// <summary>
@@ -522,8 +527,7 @@ namespace Terranova.Population
             // Feature 3.1: Fire discovery reduces food decay by 50%
             if (_hunger < MAX_HUNGER)
             {
-                float decayMult = DiscoveryEffectsManager.Instance != null
-                    ? DiscoveryEffectsManager.Instance.FoodDecayMultiplier : 1f;
+                float decayMult = GameplayModifiers.FoodDecayMultiplier;
                 _hunger += HUNGER_RATE * decayMult * Time.deltaTime;
                 if (_hunger > MAX_HUNGER) _hunger = MAX_HUNGER;
             }

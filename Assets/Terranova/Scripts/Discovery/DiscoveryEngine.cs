@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
 using Terranova.Terrain;
-using Terranova.Population;
 
 namespace Terranova.Discovery
 {
@@ -110,11 +109,11 @@ namespace Terranova.Discovery
             Debug.Log($"[Discovery] Lightning strikes tree at ({strikePos.x:F0}, {strikePos.z:F0})!");
 
             // Check if any settler is within range
-            var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
             bool settlerNearby = false;
-            foreach (var settler in settlers)
+            foreach (var settler in SettlerLocator.ActiveSettlers)
             {
-                if (Vector3.Distance(settler.transform.position, strikePos) <= LIGHTNING_SETTLER_RANGE)
+                if (settler == null) continue;
+                if (Vector3.Distance(settler.position, strikePos) <= LIGHTNING_SETTLER_RANGE)
                 {
                     settlerNearby = true;
                     break;

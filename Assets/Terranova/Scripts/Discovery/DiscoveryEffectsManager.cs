@@ -67,12 +67,14 @@ namespace Terranova.Discovery
             if (sm.HasCapability("fire") && _foodDecayMultiplier > 0.5f)
             {
                 _foodDecayMultiplier = 0.5f;
+                GameplayModifiers.FoodDecayMultiplier = 0.5f;
                 Debug.Log("[DiscoveryEffects] Fire discovered — food decay reduced by 50%.");
             }
 
             if (sm.HasCapability("improved_tools") && _gatherSpeedMultiplier < 1.3f)
             {
                 _gatherSpeedMultiplier = 1.3f;
+                GameplayModifiers.GatherSpeedMultiplier = 1.3f;
                 Debug.Log("[DiscoveryEffects] Improved Tools — gather speed +30%.");
             }
 
