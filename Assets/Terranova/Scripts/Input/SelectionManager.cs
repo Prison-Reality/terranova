@@ -140,74 +140,69 @@ namespace Terranova.Input
 
         /// <summary>
         /// Handle single-finger tap and long press for selection.
+        /// Processes each touch by phase for reliable detection (handles fast taps
+        /// where Began and Ended arrive in the same frame).
         /// Multi-touch and drag cancel the tap gesture.
-        /// Two-finger gestures (pinch, rotate) are handled by RTSCameraController.
+        /// Two-finger gestures (pinch, zoom) are handled by RTSCameraController.
         /// </summary>
         private void HandleTouchInput()
         {
-            var fingers = Touch.activeFingers;
-
             // Multi-touch cancels any tap detection
-            if (fingers.Count >= 2)
+            if (Touch.activeFingers.Count >= 2)
             {
                 _touchCancelled = true;
             }
 
-            // Check for ended touches (tap detection happens on release)
+            // Process each touch event by phase
             foreach (var touch in Touch.activeTouches)
             {
-                if (touch.phase == UnityEngine.InputSystem.TouchPhase.Ended && _touchDown)
+                switch (touch.phase)
                 {
-                    if (!_touchLongPressTriggered && !_touchCancelled)
-                    {
-                        TrySelect(_touchStartPos, isDetailView: false);
-                    }
-                    _touchDown = false;
-                    return;
+                    case UnityEngine.InputSystem.TouchPhase.Began:
+                        if (_touchDown) break;
+
+                        // Skip if over UI (buttons handle their own taps via EventSystem)
+                        if (EventSystem.current != null &&
+                            EventSystem.current.IsPointerOverGameObject(touch.finger.index))
+                            break;
+
+                        _touchDown = true;
+                        _touchTimer = 0f;
+                        _touchStartPos = touch.screenPosition;
+                        _touchLongPressTriggered = false;
+                        _touchCancelled = false;
+                        break;
+
+                    case UnityEngine.InputSystem.TouchPhase.Moved:
+                    case UnityEngine.InputSystem.TouchPhase.Stationary:
+                        if (!_touchDown || _touchCancelled) break;
+
+                        _touchTimer += Time.unscaledDeltaTime;
+
+                        // Finger drifted too far → it's a pan, not a tap
+                        if (Vector2.Distance(touch.screenPosition, _touchStartPos) > TAP_MAX_DRIFT)
+                        {
+                            _touchCancelled = true;
+                        }
+
+                        // Long press: select with detail view
+                        if (!_touchLongPressTriggered && !_touchCancelled &&
+                            _touchTimer >= LONG_PRESS_DURATION)
+                        {
+                            _touchLongPressTriggered = true;
+                            TrySelect(_touchStartPos, isDetailView: true);
+                        }
+                        break;
+
+                    case UnityEngine.InputSystem.TouchPhase.Ended:
+                    case UnityEngine.InputSystem.TouchPhase.Canceled:
+                        if (_touchDown && !_touchLongPressTriggered && !_touchCancelled)
+                        {
+                            TrySelect(_touchStartPos, isDetailView: false);
+                        }
+                        _touchDown = false;
+                        break;
                 }
-            }
-
-            // New single-finger touch began
-            if (fingers.Count == 1 && !_touchDown)
-            {
-                var touch = fingers[0].currentTouch;
-
-                // Skip if over UI (buttons handle their own taps via EventSystem)
-                if (EventSystem.current != null &&
-                    EventSystem.current.IsPointerOverGameObject(touch.finger.index))
-                    return;
-
-                _touchDown = true;
-                _touchTimer = 0f;
-                _touchStartPos = touch.screenPosition;
-                _touchLongPressTriggered = false;
-                _touchCancelled = false;
-            }
-
-            // Ongoing single-finger hold — track for long press and drag
-            if (_touchDown && !_touchCancelled && fingers.Count >= 1)
-            {
-                _touchTimer += Time.unscaledDeltaTime;
-
-                // Check if finger has drifted too far (it's a pan, not a tap)
-                var currentPos = fingers[0].currentTouch.screenPosition;
-                if (Vector2.Distance(currentPos, _touchStartPos) > TAP_MAX_DRIFT)
-                {
-                    _touchCancelled = true;
-                }
-
-                // Long press: select with detail view
-                if (!_touchLongPressTriggered && _touchTimer >= LONG_PRESS_DURATION)
-                {
-                    _touchLongPressTriggered = true;
-                    TrySelect(_touchStartPos, isDetailView: true);
-                }
-            }
-
-            // All fingers lifted — reset state
-            if (fingers.Count == 0 && _touchDown)
-            {
-                _touchDown = false;
             }
         }
 

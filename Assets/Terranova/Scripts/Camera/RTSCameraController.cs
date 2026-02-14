@@ -18,7 +18,6 @@ namespace Terranova.Camera
     ///   Touch (iPad):
     ///     Pan:    One-finger drag
     ///     Zoom:   Two-finger pinch
-    ///     Rotate: Two-finger twist (snaps to 90° on release)
     ///
     /// The camera looks down at an angle (like Anno, Settlers, Age of Empires).
     /// It stays above the terrain and clamps to world boundaries.
@@ -60,7 +59,7 @@ namespace Terranova.Camera
         [SerializeField] private float _safeZonePoints = 20f;
 
         [Tooltip("Touch pan sensitivity. Higher = faster panning per pixel dragged.")]
-        [SerializeField] private float _touchPanScale = 0.003f;
+        [SerializeField] private float _touchPanScale = 0.001f;
 
         [Tooltip("Pinch zoom sensitivity.")]
         [SerializeField] private float _pinchZoomScale = 0.005f;
@@ -91,7 +90,6 @@ namespace Terranova.Camera
         private Vector2 _touchPanPrev;
         private bool _touchPanTracking;
         private float _prevPinchDist;
-        private float _prevTwoFingerAngle;
 
         private void OnEnable()
         {
@@ -110,7 +108,6 @@ namespace Terranova.Camera
             _yaw = 0f;
             _pivotPosition = new Vector3(64, 64, 64);
             _prevPinchDist = -1f;
-            _prevTwoFingerAngle = float.MinValue;
             UpdateCameraTransform();
         }
 
@@ -263,25 +260,19 @@ namespace Terranova.Camera
         // ─── Touch Input ──────────────────────────────────────────
 
         /// <summary>
-        /// Process touch gestures: one-finger pan, pinch zoom, two-finger rotate.
+        /// Process touch gestures: one-finger pan, two-finger pinch zoom.
         /// Uses EnhancedTouch for reliable multi-finger tracking.
         /// All gestures coexist with mouse/keyboard (both active simultaneously).
+        /// Two-finger rotation is deferred to a future update.
         /// </summary>
         private void HandleTouch()
         {
             int fingerCount = Touch.activeFingers.Count;
 
-            // Detect transition: two-finger gesture ending → snap rotation
+            // Reset pinch tracking when leaving two-finger state
             if (_prevFingerCount >= 2 && fingerCount < 2)
             {
-                if (_isRotatingWithMouse) // Flag reused for touch rotation
-                {
-                    _targetYaw = Mathf.Round(_yaw / 90f) * 90f;
-                    _isSnapping = true;
-                    _isRotatingWithMouse = false;
-                }
                 _prevPinchDist = -1f;
-                _prevTwoFingerAngle = float.MinValue;
             }
 
             // Track multi-touch lifecycle: set when 2+ fingers, clear when 0
@@ -292,18 +283,17 @@ namespace Terranova.Camera
                 _touchPanTracking = false;
             }
 
-            // One-finger drag → pan (only if not transitioning out of pinch/rotate)
+            // One-finger drag → pan (only if not transitioning out of pinch)
             if (fingerCount == 1 && !_wasTwoFingerGesture)
             {
                 HandleTouchPan(Touch.activeFingers[0].currentTouch);
             }
-            // Two-finger → simultaneous pinch zoom + rotation
+            // Two-finger → pinch zoom only
             else if (fingerCount >= 2)
             {
                 var t0 = Touch.activeFingers[0].currentTouch;
                 var t1 = Touch.activeFingers[1].currentTouch;
                 HandlePinchZoom(t0, t1);
-                HandleTwoFingerRotation(t0, t1);
                 _touchPanTracking = false;
             }
 
@@ -364,27 +354,6 @@ namespace Terranova.Camera
             }
 
             _prevPinchDist = dist;
-        }
-
-        /// <summary>
-        /// Two-finger twist to rotate the camera. Snaps to nearest 90° on release
-        /// (handled in HandleTouch when finger count drops below 2).
-        /// Gesture Lexicon: CAM-03.
-        /// </summary>
-        private void HandleTwoFingerRotation(Touch t0, Touch t1)
-        {
-            Vector2 diff = t1.screenPosition - t0.screenPosition;
-            float angle = Mathf.Atan2(diff.y, diff.x) * Mathf.Rad2Deg;
-
-            if (_prevTwoFingerAngle > float.MinValue + 1f)
-            {
-                float angleDelta = Mathf.DeltaAngle(_prevTwoFingerAngle, angle);
-                _yaw -= angleDelta;
-                _isRotatingWithMouse = true; // Reuse flag so snap-to-90° triggers on release
-                _isSnapping = false;
-            }
-
-            _prevTwoFingerAngle = angle;
         }
 
         // ─── Shared Utilities ─────────────────────────────────────
