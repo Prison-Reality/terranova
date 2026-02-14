@@ -149,7 +149,9 @@ namespace Terranova.Core
             go.AddComponent<LoadingScreen>();
             // Render debug overlay for iPad grey screen diagnosis (temporary)
             go.AddComponent<RenderDebugOverlay>();
-            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, InfoPanel, LoadingScreen, and RenderDebugOverlay.");
+            // Game-state debug overlay (F3 toggle)
+            go.AddComponent<DebugOverlay>();
+            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, InfoPanel, LoadingScreen, RenderDebugOverlay, and DebugOverlay.");
         }
 
         private static void EnsureEventSystem()
