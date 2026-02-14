@@ -11,7 +11,9 @@ namespace Terranova.Buildings
         Campfire,       // Gathering point, center of settlement
         WoodcutterHut,  // Auto-assigns settler to gather wood
         HunterHut,      // Auto-assigns settler to hunt (produce food)
-        SimpleHut       // Housing for 2 settlers
+        SimpleHut,      // Housing for 2 settlers
+        CookingFire,    // Unlocked by Fire discovery — reduces food decay
+        TrapSite        // Unlocked by Animal Traps discovery — passive food
     }
 
     /// <summary>

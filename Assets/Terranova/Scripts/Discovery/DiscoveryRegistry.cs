@@ -6,13 +6,24 @@ using Terranova.Buildings;
 namespace Terranova.Discovery
 {
     /// <summary>
-    /// Creates and registers all discovery definitions at runtime.
+    /// Creates and registers all GDD Epoch I.1 discovery definitions at runtime.
     ///
-    /// This serves as the data source until .asset files are created in the editor.
-    /// Each discovery is a ScriptableObject instance created programmatically.
+    /// Feature 2: Real discoveries replacing placeholders.
     ///
-    /// Discovery data files live in Assets/Terranova/Data/Discoveries/
-    /// (currently empty; runtime definitions here take precedence).
+    /// Biome-Driven (2.1):
+    ///   - Flint: mountains + stone gathering
+    ///   - Resin & Glue: forest + wood gathering
+    ///   - Various Wood Types: forest + wood gathering
+    ///
+    /// Activity-Driven (2.2):
+    ///   - Friction Fire: lots of wood work + forest biome
+    ///   - Spark Fire: stone work + mountains biome
+    ///   - Improved Stone Tools: lots of stone work
+    ///   - Primitive Cord: plant fiber gathering
+    ///   - Animal Traps: hunting experience (requires Primitive Cord)
+    ///
+    /// Spontaneous (2.3):
+    ///   - Lightning Fire: random lightning strikes tree, settler nearby = Fire
     /// </summary>
     public class DiscoveryRegistry : MonoBehaviour
     {
@@ -26,109 +37,143 @@ namespace Terranova.Discovery
             }
 
             RegisterAllDiscoveries(engine);
-            Debug.Log("[DiscoveryRegistry] All discoveries registered.");
+            Debug.Log("[DiscoveryRegistry] All Epoch I.1 discoveries registered.");
         }
 
         private void RegisterAllDiscoveries(DiscoveryEngine engine)
         {
-            // ─── Biome Discoveries ──────────────────────────────
+            // ─── Biome-Driven Discoveries (2.1) ──────────────────
+
             engine.RegisterDiscovery(CreateDiscovery(
-                "Fertile Soil",
+                "Flint",
                 DiscoveryType.Biome,
-                "Your settlers notice the dark, rich soil in the grasslands. Crops could thrive here.",
-                "The earth here smells of promise.",
-                requiredBiomes: new[] { VoxelType.Grass, VoxelType.Dirt },
+                "Sharp stones found in the mountainside — they can be shaped into cutting edges.",
+                "The mountain gives teeth to those who seek them.",
+                requiredBiomes: new[] { VoxelType.Stone },
+                requiredActivity: SettlerTaskType.GatherStone,
+                requiredActivityCount: 5,
                 baseProbability: 0.15f,
                 repetitionBonus: 0.03f,
-                badLuckThreshold: 40,
-                unlockedCapabilities: new[] { "agriculture" }
+                badLuckThreshold: 35,
+                unlockedResources: new[] { ResourceType.Flint },
+                unlockedCapabilities: new[] { "flint" }
             ));
 
             engine.RegisterDiscovery(CreateDiscovery(
-                "Stone Deposits",
+                "Resin & Glue",
                 DiscoveryType.Biome,
-                "Exposed rock formations reveal veins of workable stone. Sturdier buildings are now possible.",
-                "The mountain yields its secrets.",
-                requiredBiomes: new[] { VoxelType.Stone },
+                "Sticky sap oozing from forest trees — it hardens into a strong adhesive.",
+                "The forest bleeds gold for the patient hands.",
+                requiredBiomes: new[] { VoxelType.Grass },
+                requiredActivity: SettlerTaskType.GatherWood,
+                requiredActivityCount: 8,
                 baseProbability: 0.12f,
                 repetitionBonus: 0.02f,
-                badLuckThreshold: 45,
-                unlockedCapabilities: new[] { "masonry" }
+                badLuckThreshold: 40,
+                unlockedResources: new[] { ResourceType.Resin },
+                unlockedCapabilities: new[] { "resin", "glue" }
             ));
 
             engine.RegisterDiscovery(CreateDiscovery(
-                "Coastal Waters",
+                "Various Wood Types",
                 DiscoveryType.Biome,
-                "The shoreline offers shellfish and driftwood. A new source of sustenance.",
-                "Where land meets water, abundance awaits.",
-                requiredBiomes: new[] { VoxelType.Sand, VoxelType.Water },
+                "Different trees yield different wood — some bend, some don't. Knowledge brings versatility.",
+                "Every tree tells a different story to the axe.",
+                requiredBiomes: new[] { VoxelType.Grass },
+                requiredActivity: SettlerTaskType.GatherWood,
+                requiredActivityCount: 12,
                 baseProbability: 0.10f,
                 repetitionBonus: 0.02f,
-                badLuckThreshold: 50,
-                unlockedCapabilities: new[] { "fishing" }
+                badLuckThreshold: 45,
+                unlockedCapabilities: new[] { "wood_types" }
             ));
 
-            // ─── Activity Discoveries ───────────────────────────
+            // ─── Activity-Driven Discoveries (2.2) ───────────────
+
             engine.RegisterDiscovery(CreateDiscovery(
-                "Woodworking",
+                "Friction Fire",
                 DiscoveryType.Activity,
-                "After felling many trees, your woodcutters have learned to shape timber into planks and beams.",
-                "The grain of the wood speaks to those who listen.",
+                "Rubbing dry sticks together creates heat — and eventually, flame! Fire changes everything.",
+                "From friction, warmth. From warmth, survival.",
+                requiredActivity: SettlerTaskType.GatherWood,
+                requiredActivityCount: 15,
+                requiredBiomes: new[] { VoxelType.Grass },
+                baseProbability: 0.10f,
+                repetitionBonus: 0.03f,
+                badLuckThreshold: 30,
+                unlockedBuildings: new[] { BuildingType.CookingFire },
+                unlockedCapabilities: new[] { "fire" }
+            ));
+
+            engine.RegisterDiscovery(CreateDiscovery(
+                "Spark Fire",
+                DiscoveryType.Activity,
+                "Striking flint against stone sends sparks flying — a faster way to create fire!",
+                "Stone speaks to stone in tongues of light.",
+                requiredActivity: SettlerTaskType.GatherStone,
+                requiredActivityCount: 12,
+                requiredBiomes: new[] { VoxelType.Stone },
+                baseProbability: 0.10f,
+                repetitionBonus: 0.03f,
+                badLuckThreshold: 30,
+                unlockedBuildings: new[] { BuildingType.CookingFire },
+                unlockedCapabilities: new[] { "fire" }
+            ));
+
+            engine.RegisterDiscovery(CreateDiscovery(
+                "Improved Stone Tools",
+                DiscoveryType.Activity,
+                "Repeated work with stone reveals how to knap sharper, longer-lasting tools.",
+                "The stone teaches patience to those who shape it.",
+                requiredActivity: SettlerTaskType.GatherStone,
+                requiredActivityCount: 20,
+                baseProbability: 0.12f,
+                repetitionBonus: 0.03f,
+                badLuckThreshold: 35,
+                unlockedCapabilities: new[] { "improved_tools" }
+            ));
+
+            engine.RegisterDiscovery(CreateDiscovery(
+                "Primitive Cord",
+                DiscoveryType.Activity,
+                "Twisting plant fibers together creates a flexible cord — useful for binding and construction.",
+                "The weakest fiber, twisted, becomes unbreakable.",
                 requiredActivity: SettlerTaskType.GatherWood,
                 requiredActivityCount: 10,
                 baseProbability: 0.12f,
                 repetitionBonus: 0.03f,
-                badLuckThreshold: 40,
-                unlockedCapabilities: new[] { "woodworking" }
+                badLuckThreshold: 35,
+                unlockedResources: new[] { ResourceType.PlantFiber },
+                unlockedCapabilities: new[] { "cord" }
             ));
 
             engine.RegisterDiscovery(CreateDiscovery(
-                "Tracking",
+                "Animal Traps",
                 DiscoveryType.Activity,
-                "Your hunters have become skilled at reading animal trails and predicting prey movement.",
-                "The forest reveals its paths to the patient observer.",
+                "With cord and knowledge of animal paths, your settlers devise cunning traps.",
+                "The patient hunter lets the prey come to them.",
                 requiredActivity: SettlerTaskType.Hunt,
-                requiredActivityCount: 8,
-                baseProbability: 0.12f,
-                repetitionBonus: 0.03f,
-                badLuckThreshold: 40,
-                unlockedCapabilities: new[] { "tracking" }
-            ));
-
-            engine.RegisterDiscovery(CreateDiscovery(
-                "Tool Making",
-                DiscoveryType.Activity,
-                "Experience with stone and wood has inspired your settlers to craft simple tools.",
-                "Necessity births invention.",
-                requiredActivity: SettlerTaskType.GatherStone,
-                requiredActivityCount: 5,
+                requiredActivityCount: 10,
                 baseProbability: 0.10f,
                 repetitionBonus: 0.02f,
-                badLuckThreshold: 50,
-                unlockedCapabilities: new[] { "tools" }
+                badLuckThreshold: 40,
+                prerequisiteDiscoveries: new[] { "Primitive Cord" },
+                unlockedBuildings: new[] { BuildingType.TrapSite },
+                unlockedCapabilities: new[] { "traps" }
             ));
 
-            // ─── Spontaneous Discoveries ────────────────────────
-            engine.RegisterDiscovery(CreateDiscovery(
-                "Fire Mastery",
-                DiscoveryType.Spontaneous,
-                "Careful observation of the campfire has taught your settlers to control flame. Cooking and warmth improve.",
-                "The dancing flame obeys the hand that feeds it.",
-                baseProbability: 0.05f,
-                repetitionBonus: 0.01f,
-                badLuckThreshold: 50,
-                unlockedCapabilities: new[] { "fire_mastery" }
-            ));
+            // ─── Spontaneous Discoveries (2.3) ───────────────────
 
             engine.RegisterDiscovery(CreateDiscovery(
-                "Herbal Knowledge",
+                "Lightning Fire",
                 DiscoveryType.Spontaneous,
-                "A settler stumbles upon plants with healing properties. Basic medicine is now possible.",
-                "Nature provides for those who seek.",
-                baseProbability: 0.04f,
-                repetitionBonus: 0.01f,
-                badLuckThreshold: 60,
-                unlockedCapabilities: new[] { "herbalism" }
+                "A bolt from the sky sets a tree ablaze! A nearby settler witnesses the miracle of fire.",
+                "The sky itself showed us the way.",
+                baseProbability: 0f, // Handled by lightning system, not regular probability
+                repetitionBonus: 0f,
+                badLuckThreshold: 999,
+                unlockedBuildings: new[] { BuildingType.CookingFire },
+                unlockedCapabilities: new[] { "fire" }
             ));
         }
 
@@ -146,6 +191,7 @@ namespace Terranova.Discovery
             float baseProbability = 0.1f,
             float repetitionBonus = 0.02f,
             int badLuckThreshold = 50,
+            string[] prerequisiteDiscoveries = null,
             BuildingType[] unlockedBuildings = null,
             ResourceType[] unlockedResources = null,
             string[] unlockedCapabilities = null)
@@ -162,6 +208,7 @@ namespace Terranova.Discovery
             def.BaseProbability = baseProbability;
             def.RepetitionBonus = repetitionBonus;
             def.BadLuckThreshold = badLuckThreshold;
+            def.PrerequisiteDiscoveries = prerequisiteDiscoveries ?? new string[0];
             def.UnlockedBuildings = unlockedBuildings ?? new BuildingType[0];
             def.UnlockedResources = unlockedResources ?? new ResourceType[0];
             def.UnlockedCapabilities = unlockedCapabilities ?? new string[0];

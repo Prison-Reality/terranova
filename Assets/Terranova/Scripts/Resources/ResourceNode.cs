@@ -20,11 +20,17 @@ namespace Terranova.Resources
         private const float RESPAWN_TIME_WOOD = 60f;   // Game-time seconds
         private const float RESPAWN_TIME_STONE = 90f;
         private const float RESPAWN_TIME_FOOD = 45f;
+        private const float RESPAWN_TIME_RESIN = 75f;
+        private const float RESPAWN_TIME_FLINT = 80f;
+        private const float RESPAWN_TIME_PLANT_FIBER = 50f;
 
         // Epoch I.1: Each resource is picked up in a single action
         private const int DEFAULT_GATHERS_WOOD = 1;
         private const int DEFAULT_GATHERS_STONE = 1;
         private const int DEFAULT_GATHERS_FOOD = 1;
+        private const int DEFAULT_GATHERS_RESIN = 1;
+        private const int DEFAULT_GATHERS_FLINT = 1;
+        private const int DEFAULT_GATHERS_PLANT_FIBER = 1;
 
         // ─── State ─────────────────────────────────────────────
 
@@ -53,7 +59,10 @@ namespace Terranova.Resources
                 ResourceType.Wood => DEFAULT_GATHERS_WOOD,
                 ResourceType.Stone => DEFAULT_GATHERS_STONE,
                 ResourceType.Food => DEFAULT_GATHERS_FOOD,
-                _ => 3
+                ResourceType.Resin => DEFAULT_GATHERS_RESIN,
+                ResourceType.Flint => DEFAULT_GATHERS_FLINT,
+                ResourceType.PlantFiber => DEFAULT_GATHERS_PLANT_FIBER,
+                _ => 1
             };
             RemainingGathers = MaxGathers;
             _originalScale = transform.localScale;
@@ -108,6 +117,9 @@ namespace Terranova.Resources
                 ResourceType.Wood => RESPAWN_TIME_WOOD,
                 ResourceType.Stone => RESPAWN_TIME_STONE,
                 ResourceType.Food => RESPAWN_TIME_FOOD,
+                ResourceType.Resin => RESPAWN_TIME_RESIN,
+                ResourceType.Flint => RESPAWN_TIME_FLINT,
+                ResourceType.PlantFiber => RESPAWN_TIME_PLANT_FIBER,
                 _ => RESPAWN_TIME_WOOD
             };
             _respawning = true;
@@ -175,6 +187,9 @@ namespace Terranova.Resources
                 ResourceType.Wood => SettlerTaskType.GatherWood,
                 ResourceType.Stone => SettlerTaskType.GatherStone,
                 ResourceType.Food => SettlerTaskType.Hunt,
+                ResourceType.Resin => SettlerTaskType.GatherWood,
+                ResourceType.Flint => SettlerTaskType.GatherStone,
+                ResourceType.PlantFiber => SettlerTaskType.GatherWood,
                 _ => SettlerTaskType.None
             };
         }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Terranova.Core
 {
@@ -18,6 +19,15 @@ namespace Terranova.Core
     {
         // Maps each event type to its combined delegate handler
         private static readonly Dictionary<Type, Delegate> _handlers = new();
+
+        /// <summary>
+        /// Reset static state when domain reload is disabled (Enter Play Mode Options).
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _handlers.Clear();
+        }
 
         /// <summary>
         /// Subscribe a handler to receive events of type T.
@@ -118,6 +128,8 @@ namespace Terranova.Core
     {
         /// <summary>What type of task produced this delivery.</summary>
         public SettlerTaskType TaskType;
+        /// <summary>Actual resource type delivered (may differ from task type for discovery resources).</summary>
+        public ResourceType ActualResourceType;
         public UnityEngine.Vector3 Position;
     }
 
@@ -209,6 +221,9 @@ namespace Terranova.Core
     {
         Wood,
         Stone,
-        Food
+        Food,
+        Resin,
+        Flint,
+        PlantFiber
     }
 }

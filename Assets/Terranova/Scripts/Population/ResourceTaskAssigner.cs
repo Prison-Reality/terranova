@@ -2,6 +2,7 @@ using UnityEngine;
 using Terranova.Core;
 using Terranova.Buildings;
 using Terranova.Resources;
+using Terranova.Discovery;
 
 namespace Terranova.Population
 {
@@ -89,6 +90,11 @@ namespace Terranova.Population
                 float duration = SettlerTask.GetDefaultDuration(taskType);
                 var task = new SettlerTask(taskType, nearest.transform.position, basePos, duration);
                 task.TargetResource = nearest;
+
+                // Feature 3.1: Improved Tools → gather speed +30%
+                var effects = DiscoveryEffectsManager.Instance;
+                if (effects != null && effects.GatherSpeedMultiplier > 1f)
+                    task.SpeedMultiplier = effects.GatherSpeedMultiplier;
 
                 if (settler.AssignTask(task))
                     return;

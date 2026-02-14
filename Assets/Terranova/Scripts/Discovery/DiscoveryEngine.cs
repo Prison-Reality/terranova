@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
 using Terranova.Terrain;
+using Terranova.Population;
 
 namespace Terranova.Discovery
 {
@@ -10,6 +11,7 @@ namespace Terranova.Discovery
     ///
     /// Story 1.3: Probability Engine
     /// Story 1.4: Bad Luck Protection
+    /// Feature 2: GDD Epoch I.1 discoveries (biome, activity, spontaneous, lightning)
     ///
     /// Every CHECK_INTERVAL game-seconds, evaluates all undiscovered discoveries:
     ///   probability = base * biome_mod * activity_mod + (cycles_eligible * repetition_bonus)
@@ -24,8 +26,14 @@ namespace Terranova.Discovery
         // Radius around campfire to scan for biomes
         private const int BIOME_SCAN_RADIUS = 20;
 
+        // Lightning Fire: random interval between lightning attempts
+        private const float LIGHTNING_MIN_INTERVAL = 120f;
+        private const float LIGHTNING_MAX_INTERVAL = 300f;
+        private const float LIGHTNING_SETTLER_RANGE = 15f;
+
         private float _checkTimer;
         private int _cyclesWithoutDiscovery;
+        private float _lightningTimer;
 
         // Per-discovery tracking: how many cycles each has been eligible
         private readonly Dictionary<string, int> _eligibleCycles = new();
@@ -44,6 +52,7 @@ namespace Terranova.Discovery
                 return;
             }
             Instance = this;
+            _lightningTimer = Random.Range(LIGHTNING_MIN_INTERVAL, LIGHTNING_MAX_INTERVAL);
         }
 
         private void OnDestroy()
@@ -63,10 +72,86 @@ namespace Terranova.Discovery
         private void Update()
         {
             _checkTimer += Time.deltaTime;
-            if (_checkTimer < CHECK_INTERVAL) return;
-            _checkTimer -= CHECK_INTERVAL;
+            if (_checkTimer >= CHECK_INTERVAL)
+            {
+                _checkTimer -= CHECK_INTERVAL;
+                EvaluateDiscoveries();
+            }
 
-            EvaluateDiscoveries();
+            // Lightning Fire system
+            UpdateLightning();
+        }
+
+        /// <summary>
+        /// Lightning Fire: periodically attempt a lightning strike on a tree.
+        /// If a settler is nearby, Fire is discovered. Otherwise, missed opportunity.
+        /// Feature 2.3: Spontaneous discovery.
+        /// </summary>
+        private void UpdateLightning()
+        {
+            var stateManager = DiscoveryStateManager.Instance;
+            if (stateManager == null) return;
+
+            // Skip if any fire discovery already made
+            if (stateManager.HasCapability("fire")) return;
+
+            _lightningTimer -= Time.deltaTime;
+            if (_lightningTimer > 0f) return;
+
+            _lightningTimer = Random.Range(LIGHTNING_MIN_INTERVAL, LIGHTNING_MAX_INTERVAL);
+
+            // Find a random tree in the world
+            var trees = FindTreesInWorld();
+            if (trees.Count == 0) return;
+
+            var targetTree = trees[Random.Range(0, trees.Count)];
+            Vector3 strikePos = targetTree.transform.position;
+
+            Debug.Log($"[Discovery] Lightning strikes tree at ({strikePos.x:F0}, {strikePos.z:F0})!");
+
+            // Check if any settler is within range
+            var settlers = FindObjectsByType<Settler>(FindObjectsSortMode.None);
+            bool settlerNearby = false;
+            foreach (var settler in settlers)
+            {
+                if (Vector3.Distance(settler.transform.position, strikePos) <= LIGHTNING_SETTLER_RANGE)
+                {
+                    settlerNearby = true;
+                    break;
+                }
+            }
+
+            if (settlerNearby)
+            {
+                // Find the Lightning Fire discovery and trigger it
+                foreach (var discovery in _allDiscoveries)
+                {
+                    if (discovery.DisplayName == "Lightning Fire")
+                    {
+                        TriggerDiscovery(discovery, stateManager);
+                        Debug.Log("[Discovery] A settler witnessed lightning strike a tree — Fire discovered!");
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log("[Discovery] Lightning struck but no settler was nearby to witness it — missed opportunity!");
+            }
+        }
+
+        private List<GameObject> FindTreesInWorld()
+        {
+            var result = new List<GameObject>();
+            var parent = GameObject.Find("Resources");
+            if (parent == null) return result;
+
+            foreach (Transform child in parent.transform)
+            {
+                if (child.name.StartsWith("Tree_"))
+                    result.Add(child.gameObject);
+            }
+            return result;
         }
 
         /// <summary>
@@ -89,6 +174,9 @@ namespace Terranova.Discovery
             {
                 // Skip already discovered
                 if (stateManager.IsDiscovered(discovery.DisplayName)) continue;
+
+                // Check prerequisite discoveries
+                if (!ArePrerequisitesMet(discovery, stateManager)) continue;
 
                 // Check eligibility
                 float probability = CalculateProbability(discovery, biomes, activityTracker);
@@ -136,8 +224,28 @@ namespace Terranova.Discovery
         }
 
         /// <summary>
+        /// Check if all prerequisite discoveries have been completed.
+        /// </summary>
+        private bool ArePrerequisitesMet(DiscoveryDefinition discovery, DiscoveryStateManager stateManager)
+        {
+            if (discovery.PrerequisiteDiscoveries == null || discovery.PrerequisiteDiscoveries.Length == 0)
+                return true;
+
+            foreach (var prereq in discovery.PrerequisiteDiscoveries)
+            {
+                if (!stateManager.IsDiscovered(prereq))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Calculate base probability for a discovery based on its type and conditions.
         /// Returns 0 if prerequisites are not met.
+        ///
+        /// Biome type: all required biomes must be present; activity requirements are optional bonus.
+        /// Activity type: required activity count must be met; biome requirements are optional bonus.
+        /// Spontaneous: base probability (lightning handled separately).
         /// </summary>
         private float CalculateProbability(
             DiscoveryDefinition discovery,
@@ -158,16 +266,32 @@ namespace Terranova.Discovery
                                 return 0f; // Missing required biome
                         }
                     }
+                    // Optional activity requirement for biome discoveries
+                    if (discovery.RequiredActivity != SettlerTaskType.None && tracker != null)
+                    {
+                        int count = tracker.GetGlobalCount(discovery.RequiredActivity);
+                        if (count < discovery.RequiredActivityCount)
+                            return 0f;
+                    }
                     return baseProbability;
 
                 case DiscoveryType.Activity:
                     // Required activity count must be met
                     if (tracker == null) return 0f;
-                    int count = tracker.GetGlobalCount(discovery.RequiredActivity);
-                    if (count < discovery.RequiredActivityCount)
+                    int actCount = tracker.GetGlobalCount(discovery.RequiredActivity);
+                    if (actCount < discovery.RequiredActivityCount)
                         return 0f; // Not enough activity yet
+                    // Optional biome requirement for activity discoveries
+                    if (discovery.RequiredBiomes != null && discovery.RequiredBiomes.Length > 0)
+                    {
+                        foreach (var biome in discovery.RequiredBiomes)
+                        {
+                            if (!availableBiomes.Contains(biome))
+                                return 0f;
+                        }
+                    }
                     // Scale probability with how much the threshold has been exceeded
-                    float activityMod = Mathf.Min(2f, (float)count / discovery.RequiredActivityCount);
+                    float activityMod = Mathf.Min(2f, (float)actCount / discovery.RequiredActivityCount);
                     return baseProbability * activityMod;
 
                 case DiscoveryType.Spontaneous:

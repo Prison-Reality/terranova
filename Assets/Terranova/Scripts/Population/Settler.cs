@@ -3,6 +3,7 @@ using UnityEngine.AI;
 using Terranova.Core;
 using Terranova.Buildings;
 using Terranova.Resources;
+using Terranova.Discovery;
 
 namespace Terranova.Population
 {
@@ -105,6 +106,16 @@ namespace Terranova.Population
         private static int _totalWoodDelivered;
         private static int _totalStoneDelivered;
         private static int _totalFoodDelivered;
+
+        /// <summary>Reset static state when domain reload is disabled.</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _totalWoodDelivered = 0;
+            _totalStoneDelivered = 0;
+            _totalFoodDelivered = 0;
+            _sharedMaterial = null;
+        }
 
         private SettlerTask _currentTask;
 
@@ -428,9 +439,21 @@ namespace Terranova.Population
             {
                 string resourceName = TrackDelivery(_currentTask.TaskType);
 
+                // Determine actual resource type from the target node (for discovery resources)
+                var actualType = _currentTask.TaskType switch
+                {
+                    SettlerTaskType.GatherWood => ResourceType.Wood,
+                    SettlerTaskType.GatherStone => ResourceType.Stone,
+                    SettlerTaskType.Hunt => ResourceType.Food,
+                    _ => ResourceType.Wood
+                };
+                if (_currentTask.TargetResource != null)
+                    actualType = _currentTask.TargetResource.Type;
+
                 EventBus.Publish(new ResourceDeliveredEvent
                 {
                     TaskType = _currentTask.TaskType,
+                    ActualResourceType = actualType,
                     Position = transform.position
                 });
 
@@ -496,9 +519,12 @@ namespace Terranova.Population
         private void UpdateHunger()
         {
             // Increase hunger over time (0 = satt, 100 = am Verhungern)
+            // Feature 3.1: Fire discovery reduces food decay by 50%
             if (_hunger < MAX_HUNGER)
             {
-                _hunger += HUNGER_RATE * Time.deltaTime;
+                float decayMult = DiscoveryEffectsManager.Instance != null
+                    ? DiscoveryEffectsManager.Instance.FoodDecayMultiplier : 1f;
+                _hunger += HUNGER_RATE * decayMult * Time.deltaTime;
                 if (_hunger > MAX_HUNGER) _hunger = MAX_HUNGER;
             }
 

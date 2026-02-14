@@ -42,6 +42,19 @@ namespace Terranova.Resources
         private static Material _bushMaterial;
         private static Material _berryMaterial;
 
+        /// <summary>Reset static state when domain reload is disabled.</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _treeCanopyMesh = null;
+            _rockMesh = null;
+            _trunkMaterial = null;
+            _canopyMaterial = null;
+            _rockMaterial = null;
+            _bushMaterial = null;
+            _berryMaterial = null;
+        }
+
         private void Update()
         {
             if (_hasSpawned)

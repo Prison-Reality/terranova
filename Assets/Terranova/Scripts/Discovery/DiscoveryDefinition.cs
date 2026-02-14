@@ -53,6 +53,9 @@ namespace Terranova.Discovery
         [Tooltip("Number of times activity must be performed before eligible.")]
         public int RequiredActivityCount;
 
+        [Tooltip("Discovery names that must be completed before this one becomes eligible.")]
+        public string[] PrerequisiteDiscoveries;
+
         // ─── Probability ────────────────────────────────────────
         [Header("Probability")]
         [Tooltip("Base probability per check cycle (0-1).")]

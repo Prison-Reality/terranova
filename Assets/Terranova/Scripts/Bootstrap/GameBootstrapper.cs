@@ -268,7 +268,8 @@ namespace Terranova.Core
             go.AddComponent<DiscoveryStateManager>();
             go.AddComponent<DiscoveryEngine>();
             go.AddComponent<DiscoveryRegistry>();
-            Debug.Log("GameBootstrapper: Created DiscoverySystem (ActivityTracker, StateManager, Engine, Registry).");
+            go.AddComponent<DiscoveryEffectsManager>();
+            Debug.Log("GameBootstrapper: Created DiscoverySystem (ActivityTracker, StateManager, Engine, Registry, EffectsManager).");
         }
     }
 }
