@@ -55,9 +55,10 @@ namespace Terranova.Population
 
         private static readonly Color HUNGRY_COLOR = new Color(0.90f, 0.30f, 0.30f);     // Red (hungry)
 
-        // Role accent colors (applied to head when assigned a specialized task)
-        private static readonly Color WOODCUTTER_ACCENT = new Color(0.55f, 0.33f, 0.14f); // Brown cap
-        private static readonly Color HUNTER_ACCENT = new Color(0.20f, 0.50f, 0.20f);     // Green cap
+        // Role accent colors (applied to head AND body when assigned a specialized task)
+        private static readonly Color GATHERER_ACCENT = new Color(0.95f, 0.95f, 0.95f);   // White
+        private static readonly Color WOODCUTTER_ACCENT = new Color(0.55f, 0.33f, 0.14f);  // Brown
+        private static readonly Color HUNTER_ACCENT = new Color(0.20f, 0.50f, 0.20f);      // Green
 
         private static Material _sharedMaterial;
         private static readonly int ColorID = Shader.PropertyToID("_BaseColor");
@@ -910,56 +911,70 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Update the settler's body color to reflect hunger status.
-        /// Priority: Hungry (red) > Default skin tone.
-        /// Head accent is updated separately via UpdateRoleAccent().
+        /// Update the settler's color to reflect role and hunger status.
+        /// Priority: Hungry (red) > Role color > Default skin tone.
+        /// Role colors: Gatherer=white, Hunter=green, Woodcutter=brown (head+body).
         /// Story 5.5: Visuelles Feedback
         /// </summary>
         private void UpdateVisualColor()
         {
             if (_bodyRenderer == null || _propBlock == null) return;
 
-            Color bodyColor = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
-
-            // Hunger overrides body color when critical
+            // Hunger overrides everything when critical
             if (_hunger > HUNGER_SLOW_THRESHOLD)
             {
-                bodyColor = HUNGRY_COLOR;
+                _propBlock.SetColor(ColorID, HUNGRY_COLOR);
+                _bodyRenderer.SetPropertyBlock(_propBlock);
+                if (_headRenderer != null && _headPropBlock != null)
+                {
+                    _headPropBlock.SetColor(ColorID, HUNGRY_COLOR);
+                    _headRenderer.SetPropertyBlock(_headPropBlock);
+                }
+                return;
             }
 
-            _propBlock.SetColor(ColorID, bodyColor);
-            _bodyRenderer.SetPropertyBlock(_propBlock);
-
-            // Update head accent based on role
+            // Determine role color for both body and head
             var roleTask = _currentTask ?? _savedTask;
             if (roleTask != null && roleTask.IsSpecialized)
             {
                 UpdateRoleAccent(roleTask.TaskType);
             }
-            else if (_headRenderer != null && _headPropBlock != null)
+            else
             {
-                Color headColor = Color.Lerp(SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length], Color.white, 0.35f);
-                _headPropBlock.SetColor(ColorID, headColor);
-                _headRenderer.SetPropertyBlock(_headPropBlock);
+                // Gatherer (default role): white body + white head
+                _propBlock.SetColor(ColorID, GATHERER_ACCENT);
+                _bodyRenderer.SetPropertyBlock(_propBlock);
+                if (_headRenderer != null && _headPropBlock != null)
+                {
+                    _headPropBlock.SetColor(ColorID, GATHERER_ACCENT);
+                    _headRenderer.SetPropertyBlock(_headPropBlock);
+                }
             }
         }
 
         /// <summary>
-        /// Update head color accent when settler gets a specialized role.
-        /// Called when assigned to a woodcutter hut, hunter hut, etc.
+        /// Update body and head color when settler gets a specialized role.
+        /// Gatherer=white, Hunter=green, Woodcutter=brown (both head and body).
         /// </summary>
         public void UpdateRoleAccent(SettlerTaskType role)
         {
-            if (_headRenderer == null || _headPropBlock == null) return;
-
             Color accent = role switch
             {
                 SettlerTaskType.GatherWood => WOODCUTTER_ACCENT,
                 SettlerTaskType.Hunt => HUNTER_ACCENT,
-                _ => Color.Lerp(SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length], Color.white, 0.35f)
+                _ => GATHERER_ACCENT
             };
-            _headPropBlock.SetColor(ColorID, accent);
-            _headRenderer.SetPropertyBlock(_headPropBlock);
+
+            if (_bodyRenderer != null && _propBlock != null)
+            {
+                _propBlock.SetColor(ColorID, accent);
+                _bodyRenderer.SetPropertyBlock(_propBlock);
+            }
+            if (_headRenderer != null && _headPropBlock != null)
+            {
+                _headPropBlock.SetColor(ColorID, accent);
+                _headRenderer.SetPropertyBlock(_headPropBlock);
+            }
         }
 
         private static void EnsureSharedMaterial()

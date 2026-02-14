@@ -30,8 +30,8 @@ namespace Terranova.UI
         [SerializeField] private float _minTouchTarget = 44f;
 
         // Available game speeds (index 0 = pause)
-        private static readonly float[] SPEED_VALUES = { 0f, 1f, 2f, 3f };
-        private static readonly string[] SPEED_LABELS = { "❚❚", "1x", "2x", "3x" };
+        private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 5f };
+        private static readonly string[] SPEED_LABELS = { "❚❚", "1x", "3x", "5x" };
         private int _currentSpeedIndex = 1; // Start at 1x
 
         private int _settlers;
@@ -240,7 +240,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.3.2";
+            versionText.text = "v0.3.3";
         }
 
         /// <summary>
