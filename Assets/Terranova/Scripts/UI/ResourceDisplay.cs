@@ -33,8 +33,8 @@ namespace Terranova.UI
         [SerializeField] private float _minTouchTarget = 44f;
 
         // ─── Speed Widget ─────────────────────────────────────────
-        private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 5f };
-        private static readonly string[] SPEED_LABELS = { "\u275A\u275A", "1x", "3x", "5x" };
+        private static readonly float[] SPEED_VALUES = { 0f, 1f, 2f, 3f };
+        private static readonly string[] SPEED_LABELS = { "Pause", "1x", "2x", "3x" };
         private int _currentSpeedIndex = 1;
 
         // ─── Game State ───────────────────────────────────────────
@@ -256,24 +256,21 @@ namespace Terranova.UI
         {
             if (_resourceText == null) return;
 
+            // Always read totals from ResourceManager (the authoritative source for
+            // delivered resources). MaterialInventory may not receive delivery events.
+            var rm = ResourceManager.Instance;
             var inv = MaterialInventory.Instance;
-            if (inv == null)
+
+            if (rm == null && inv == null)
             {
-                // Fallback to legacy ResourceManager
-                var rm = ResourceManager.Instance;
-                if (rm != null)
-                    _resourceText.text = $"Wood: {rm.Wood} | Stone: {rm.Stone} | Food: {rm.Food} | Settlers: {_settlers}";
-                else
-                    _resourceText.text = $"Settlers: {_settlers}";
+                _resourceText.text = $"Settlers: {_settlers}";
                 return;
             }
 
-            int woodTotal  = inv.GetCategoryTotal(MaterialCategory.Wood);
-            int stoneTotal = inv.GetCategoryTotal(MaterialCategory.Stone);
-            int plantTotal = inv.GetCategoryTotal(MaterialCategory.Plant);
-            int animalTotal = inv.GetCategoryTotal(MaterialCategory.Animal);
-            int otherTotal = inv.GetCategoryTotal(MaterialCategory.Other);
-            int foodTotal = plantTotal + animalTotal;
+            int woodTotal  = rm != null ? rm.Wood : 0;
+            int stoneTotal = rm != null ? rm.Stone : 0;
+            int foodTotal  = rm != null ? rm.Food : 0;
+            int otherTotal = inv != null ? inv.GetCategoryTotal(MaterialCategory.Other) : 0;
 
             // Build display string
             System.Text.StringBuilder sb = new();
@@ -428,7 +425,7 @@ namespace Terranova.UI
             _gameOverPanel = new GameObject("GameOverPanel");
             _gameOverPanel.transform.SetParent(transform, false);
             var panelImage = _gameOverPanel.AddComponent<Image>();
-            panelImage.color = new Color(0f, 0f, 0f, 0.75f);
+            panelImage.color = new Color(0f, 0f, 0f, 0.85f);
             var panelRect = _gameOverPanel.GetComponent<RectTransform>();
             panelRect.anchorMin = Vector2.zero;
             panelRect.anchorMax = Vector2.one;
@@ -443,14 +440,17 @@ namespace Terranova.UI
             titleRect.anchorMax = new Vector2(0.5f, 0.5f);
             titleRect.pivot = new Vector2(0.5f, 0.5f);
             titleRect.anchoredPosition = new Vector2(0, 60);
-            titleRect.sizeDelta = new Vector2(500, 80);
+            titleRect.sizeDelta = new Vector2(600, 90);
             var titleText = titleObj.AddComponent<Text>();
             titleText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            titleText.fontSize = 48;
-            titleText.color = new Color(0.9f, 0.3f, 0.3f);
+            titleText.fontSize = 56;
+            titleText.color = new Color(1f, 0.35f, 0.3f);
             titleText.alignment = TextAnchor.MiddleCenter;
             titleText.fontStyle = FontStyle.Bold;
             titleText.text = "GAME OVER";
+            var titleOutline = titleObj.AddComponent<Outline>();
+            titleOutline.effectColor = new Color(0f, 0f, 0f, 1f);
+            titleOutline.effectDistance = new Vector2(2, -2);
 
             // Subtitle with day count
             var dnc = DayNightCycle.Instance;
@@ -461,14 +461,17 @@ namespace Terranova.UI
             subRect.anchorMin = new Vector2(0.5f, 0.5f);
             subRect.anchorMax = new Vector2(0.5f, 0.5f);
             subRect.pivot = new Vector2(0.5f, 0.5f);
-            subRect.anchoredPosition = new Vector2(0, 10);
-            subRect.sizeDelta = new Vector2(500, 40);
+            subRect.anchoredPosition = new Vector2(0, 5);
+            subRect.sizeDelta = new Vector2(600, 50);
             var subText = subtitleObj.AddComponent<Text>();
             subText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            subText.fontSize = 22;
-            subText.color = new Color(0.8f, 0.8f, 0.8f);
+            subText.fontSize = 26;
+            subText.color = Color.white;
             subText.alignment = TextAnchor.MiddleCenter;
             subText.text = $"All settlers perished on Day {dayCount}";
+            var subShadow = subtitleObj.AddComponent<Shadow>();
+            subShadow.effectColor = new Color(0f, 0f, 0f, 0.9f);
+            subShadow.effectDistance = new Vector2(1, -1);
 
             // Restart button
             float btnSize = _minTouchTarget * 2.5f;
@@ -503,8 +506,18 @@ namespace Terranova.UI
 
         private void RestartGame()
         {
-            EventBus.Clear();
+            // Reset time before scene reload (game over panel freezes time)
             Time.timeScale = 1f;
+
+            // Clear event subscriptions to prevent stale handlers in new scene
+            EventBus.Clear();
+
+            // Reset gameplay modifiers (they're static and persist across scenes)
+            GameplayModifiers.FoodDecayMultiplier = 1f;
+            GameplayModifiers.GatherSpeedMultiplier = 1f;
+
+            // Return to main menu
+            GameState.GameStarted = false;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 

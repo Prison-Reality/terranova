@@ -49,10 +49,10 @@ namespace Terranova.Population
         // ═══════════════════════════════════════════════════════════════
 
         private const float MAX_HUNGER = 100f;          // 100 = fully sated, 0 = starving
-        private const float HUNGER_RATE = 0.55f;        // Per second (~3 min to starve at 1x)
-        private const float STARVATION_GRACE = 30f;     // Seconds at 0 before death
-        private const float EAT_DURATION = 1.5f;        // How long eating takes
-        private const float DEFAULT_FOOD_RESTORE = 30f; // Fallback nutrition value
+        private const float HUNGER_RATE = 0.1f;         // Per second (~16 min to starve at 1x)
+        private const float STARVATION_GRACE = 45f;     // Seconds at 0 before death
+        private const float EAT_DURATION = 1.0f;        // How long eating takes
+        private const float DEFAULT_FOOD_RESTORE = 50f; // Fallback nutrition value
 
         // Hunger state thresholds (inverted: 100=full, 0=empty)
         // Sated: 100-70, Hungry: 70-40, Exhausted: 40-10, Starving: <10
@@ -65,10 +65,10 @@ namespace Terranova.Population
         // ═══════════════════════════════════════════════════════════════
 
         private const float MAX_THIRST = 100f;          // 100 = hydrated, 0 = dying
-        private const float THIRST_RATE = 100f / 120f;  // ~0.833/sec, empty in ~2 game-minutes
-        private const float DRINK_DURATION_MIN = 3f;
-        private const float DRINK_DURATION_MAX = 5f;
-        private const float DEHYDRATION_GRACE = 20f;    // Seconds at Dying before death
+        private const float THIRST_RATE = 0.15f;        // Per second (~11 min to dehydrate at 1x)
+        private const float DRINK_DURATION_MIN = 2f;
+        private const float DRINK_DURATION_MAX = 4f;
+        private const float DEHYDRATION_GRACE = 30f;    // Seconds at Dying before death
         private const float WATER_SEARCH_RADIUS = 50f;  // Max distance to search for water
 
         // Thirst state thresholds (100=hydrated, 0=dying)
@@ -1350,8 +1350,10 @@ namespace Terranova.Population
                         int wx = cx + dx;
                         int wz = cz + dz;
 
-                        // Check several y levels for water
-                        for (int wy = 0; wy < 64; wy++)
+                        // Check all y levels for water (ponds can be at any elevation)
+                        int columnH = world.GetHeightAtWorldPos(wx, wz);
+                        if (columnH < 0) columnH = 128;
+                        for (int wy = 0; wy <= columnH; wy++)
                         {
                             VoxelType voxel = world.GetBlockAtWorldPos(wx, wy, wz);
                             if (voxel == VoxelType.Water)

@@ -13,6 +13,13 @@ namespace Terranova.Core
         public static int DayCount { get; set; } = 1;
         public static float GameTimeSeconds { get; set; }
 
+        /// <summary>
+        /// Set to true after the player starts a game from the main menu.
+        /// When false, the bootstrapper shows the main menu instead of
+        /// loading the game world. Persists across scene reloads.
+        /// </summary>
+        public static bool GameStarted { get; set; } = false;
+
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
@@ -21,6 +28,7 @@ namespace Terranova.Core
             IsNewGame = true;
             DayCount = 1;
             GameTimeSeconds = 0f;
+            GameStarted = false;
         }
     }
 }

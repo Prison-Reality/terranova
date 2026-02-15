@@ -27,6 +27,16 @@ namespace Terranova.Population
         [Tooltip("Radius (in blocks) around the campfire where settlers spawn.")]
         [SerializeField] private float _spawnRadius = 3f;
 
+        // Settler name pool – common short names, easy to read
+        private static readonly string[] SETTLER_NAMES =
+        {
+            "Ava", "Bo", "Cal", "Dara", "Eli",
+            "Finn", "Gwen", "Hale", "Iris", "Jace",
+            "Kira", "Lark", "Milo", "Nora", "Orin",
+            "Pax", "Quinn", "Rune", "Sage", "Tove",
+            "Uma", "Vale", "Wren", "Xia", "Yara", "Zev"
+        };
+
         // Track whether we've already spawned (to avoid double-spawning)
         private bool _hasSpawned;
         private static Mesh _cachedFlameConeMesh;
@@ -200,7 +210,9 @@ namespace Terranova.Population
                     continue;
                 }
 
-                var settlerObj = new GameObject($"Settler_{i}");
+                // Give settlers real names from the pool
+                string settlerName = SETTLER_NAMES[i % SETTLER_NAMES.Length];
+                var settlerObj = new GameObject(settlerName);
                 // Place at correct terrain height so NavMeshAgent can find the NavMesh
                 float y = world.GetSmoothedHeightAtWorldPos(x, z);
                 settlerObj.transform.position = new Vector3(x, y, z);

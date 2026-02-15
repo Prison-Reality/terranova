@@ -50,6 +50,7 @@ namespace Terranova.UI
         private GameObject _panelRoot;
         private Image _panelImage;
         private Text _titleText;
+        private Text _traitText;
         private Text _infoText;
 
         // Hunger bar (legacy, kept for building worker display)
@@ -192,26 +193,28 @@ namespace Terranova.UI
             // ─── Tool Info (Feature 3.4) ───────────────────────
             RefreshToolInfo(settler);
 
+            // ─── Trait (dedicated label above needs, Feature 6.1) ────
+            if (settler.HasTrait)
+            {
+                _traitText.gameObject.SetActive(true);
+                _traitText.text = $"Trait: {settler.TraitIcon} {settler.TraitName}";
+            }
+            else
+            {
+                _traitText.gameObject.SetActive(false);
+            }
+
             // ─── Task & State Info ─────────────────────────────
             string task = settler.HasTask
                 ? settler.CurrentTask?.TaskType.ToString() ?? "Eating"
                 : "Idle";
             string state = settler.StateName;
 
-            // Feature 6.1: Trait display
-            string traitLine = settler.HasTrait
-                ? $"{settler.TraitIcon} {settler.TraitName}"
-                : "";
-
             if (_isDetailView)
             {
                 _titleText.text = $"-- {settler.name} --";
 
-                string info = "";
-                if (!string.IsNullOrEmpty(traitLine))
-                    info += $"Trait: {traitLine}\n";
-
-                info += $"State: {state}";
+                string info = $"State: {state}";
                 info += $"\nTask: {task}";
 
                 if (settler.IsStarving)
@@ -255,11 +258,7 @@ namespace Terranova.UI
             else
             {
                 _titleText.text = settler.name;
-                string basicInfo = "";
-                if (!string.IsNullOrEmpty(traitLine))
-                    basicInfo += $"{traitLine}\n";
-                basicInfo += $"Task: {task}\nState: {state}";
-                _infoText.text = basicInfo;
+                _infoText.text = $"Task: {task}\nState: {state}";
             }
         }
 
@@ -466,10 +465,11 @@ namespace Terranova.UI
             string displayName = building.Definition != null
                 ? building.Definition.DisplayName : building.name;
 
-            // Hide needs and tool panels for buildings
+            // Hide needs, tool, and trait panels for buildings
             _hungerBarRoot.SetActive(false);
             _needsRoot.SetActive(false);
             _toolRoot.SetActive(false);
+            _traitText.gameObject.SetActive(false);
 
             // Basic status
             string statusLine;
@@ -554,6 +554,7 @@ namespace Terranova.UI
             _hungerBarRoot.SetActive(false);
             _needsRoot.SetActive(false);
             _toolRoot.SetActive(false);
+            _traitText.gameObject.SetActive(false);
 
             _titleText.text = shelter.DisplayName;
 
@@ -626,6 +627,9 @@ namespace Terranova.UI
 
             // Title
             _titleText = CreateLabel("Title", FONT_SIZE_TITLE, Color.white);
+
+            // Trait label (below title, above needs bars – Feature 6.1)
+            _traitText = CreateLabel("Trait", FONT_SIZE_SMALL, new Color(0.9f, 0.8f, 0.5f));
 
             // Legacy hunger bar (kept for backward compatibility, used in building worker info)
             CreateHungerBar();

@@ -197,21 +197,22 @@ namespace Terranova.UI
         private void StartNewGame()
         {
             GameState.IsNewGame = true;
+            GameState.GameStarted = true;
             GameState.DayCount = 1;
             GameState.GameTimeSeconds = 0f;
 
             if (int.TryParse(_seedInput.text, out int seed))
                 GameState.Seed = seed;
 
-            // Load game scene
-            SceneManager.LoadScene("SampleScene");
+            // Reload current scene – bootstrapper will now create game systems
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         private void ContinueGame()
         {
-            // Placeholder: just start a new game
             GameState.IsNewGame = false;
-            SceneManager.LoadScene("SampleScene");
+            GameState.GameStarted = true;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         private Text CreateText(string content, int fontSize, Color color, Vector2 position, Transform parent)

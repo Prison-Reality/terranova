@@ -158,6 +158,11 @@ namespace Terranova.Terrain
                 yield return null;
             }
 
+            // Phase 2.5: Guarantee water body within 30 blocks of world center.
+            // Some biomes (Forest) rarely generate terrain below sea level,
+            // so we carve a small pond if no water exists near spawn.
+            EnsureWaterNearSpawn();
+
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
                       $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={GameState.Seed}");
 
@@ -486,6 +491,169 @@ namespace Terranova.Terrain
             // Rebake NavMesh after terrain modification (Story 2.0)
             if (IsNavMeshReady)
                 BakeNavMesh();
+        }
+
+        /// <summary>
+        /// Guarantee that water exists within 30 blocks of the world center.
+        /// Water is elevation-independent: a pond is carved at the terrain's
+        /// actual height, not tied to SEA_LEVEL. A visible water surface quad
+        /// is placed at the pond's water level since the chunk mesh system only
+        /// renders water at SEA_LEVEL.
+        /// </summary>
+        private void EnsureWaterNearSpawn()
+        {
+            int centerX = WorldBlocksX / 2;
+            int centerZ = WorldBlocksZ / 2;
+            int scanRadius = 30;
+
+            // Check if water blocks already exist near center (at any height)
+            for (int dx = -scanRadius; dx <= scanRadius; dx++)
+            {
+                for (int dz = -scanRadius; dz <= scanRadius; dz++)
+                {
+                    int wx = centerX + dx;
+                    int wz = centerZ + dz;
+                    int h = GetHeightAtWorldPos(wx, wz);
+                    if (h >= 0)
+                    {
+                        VoxelType surface = GetSurfaceTypeAtWorldPos(wx, wz);
+                        if (surface == VoxelType.Water)
+                            return; // Water already exists
+                    }
+                }
+            }
+
+            // No water found – find the lowest natural point 15-28 blocks from center
+            int bestX = centerX + 20, bestZ = centerZ;
+            int bestHeight = int.MaxValue;
+            for (int dx = -28; dx <= 28; dx++)
+            {
+                for (int dz = -28; dz <= 28; dz++)
+                {
+                    int dist = Mathf.Abs(dx) + Mathf.Abs(dz);
+                    if (dist < 12 || dist > 28) continue;
+
+                    int wx = centerX + dx;
+                    int wz = centerZ + dz;
+                    int h = GetSolidHeightAtWorldPos(wx, wz);
+                    if (h >= 0 && h < bestHeight)
+                    {
+                        bestHeight = h;
+                        bestX = wx;
+                        bestZ = wz;
+                    }
+                }
+            }
+
+            // Flatten the pond area first so the rim is level
+            int pondRadius = 3;
+            FlattenTerrain(bestX, bestZ, pondRadius + 1);
+
+            // Re-query the flattened surface height
+            int surfaceHeight = GetSolidHeightAtWorldPos(bestX, bestZ);
+            if (surfaceHeight < 2) surfaceHeight = 2;
+
+            int pondDepth = 2;
+            int waterLevel = surfaceHeight; // Water surface sits at the original ground level
+
+            // Carve the pond depression and fill with water blocks
+            var affectedChunks = new HashSet<Vector2Int>();
+            for (int dx = -pondRadius; dx <= pondRadius; dx++)
+            {
+                for (int dz = -pondRadius; dz <= pondRadius; dz++)
+                {
+                    float dist = Mathf.Sqrt(dx * dx + dz * dz);
+                    if (dist > pondRadius) continue;
+
+                    int wx = bestX + dx;
+                    int wz = bestZ + dz;
+
+                    // Depth tapers from center to edge
+                    int localDepth = Mathf.CeilToInt(pondDepth * (1f - dist / (pondRadius + 0.5f)));
+                    if (localDepth < 1) localDepth = 1;
+                    int floorY = surfaceHeight - localDepth;
+                    if (floorY < 1) floorY = 1;
+
+                    // Set floor to sand
+                    SetBlockInternal(wx, floorY, wz, VoxelType.Sand, affectedChunks);
+
+                    // Fill above floor to water level with water blocks
+                    for (int y = floorY + 1; y <= waterLevel; y++)
+                        SetBlockInternal(wx, y, wz, VoxelType.Water, affectedChunks);
+
+                    // Clear anything above water level in the depression
+                    int columnH = GetHeightAtWorldPos(wx, wz);
+                    for (int y = waterLevel + 1; y <= columnH; y++)
+                        SetBlockInternal(wx, y, wz, VoxelType.Air, affectedChunks);
+                }
+            }
+
+            // Rebuild affected chunks
+            foreach (var key in affectedChunks)
+            {
+                if (_chunks.TryGetValue(key, out var chunk))
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
+            }
+
+            // Create visible water surface quad (since chunk system only renders water at SEA_LEVEL)
+            CreatePondSurface(bestX, bestZ, pondRadius, waterLevel);
+
+            Debug.Log($"[WorldManager] Created pond at ({bestX}, {bestZ}), elevation {waterLevel} - no natural water near spawn.");
+        }
+
+        /// <summary>
+        /// Create a visible blue water surface quad for a pond at any elevation.
+        /// The chunk mesh system renders water only at SEA_LEVEL, so ponds at
+        /// other elevations need a separate visual.
+        /// </summary>
+        private void CreatePondSurface(int centerX, int centerZ, int radius, int waterY)
+        {
+            // Smoothed y-position for the water plane
+            float visualY = waterY + 0.85f;
+
+            var waterObj = new GameObject("PondSurface");
+            waterObj.transform.SetParent(transform);
+            waterObj.transform.position = new Vector3(centerX + 0.5f, visualY, centerZ + 0.5f);
+
+            // Create a flat disc mesh
+            float meshRadius = radius + 0.3f;
+            int segments = 16;
+            var mesh = new Mesh();
+            var verts = new Vector3[segments + 1];
+            var normals = new Vector3[segments + 1];
+            var colors = new Color[segments + 1];
+            var tris = new int[segments * 3];
+
+            Color waterColor = new Color(0.15f, 0.4f, 0.7f, 0.7f);
+
+            // Center vertex
+            verts[0] = Vector3.zero;
+            normals[0] = Vector3.up;
+            colors[0] = waterColor;
+
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * Mathf.PI * 2f / segments;
+                verts[i + 1] = new Vector3(Mathf.Cos(angle) * meshRadius, 0f, Mathf.Sin(angle) * meshRadius);
+                normals[i + 1] = Vector3.up;
+                colors[i + 1] = waterColor;
+
+                tris[i * 3] = 0;
+                tris[i * 3 + 1] = i + 1;
+                tris[i * 3 + 2] = (i + 1) % segments + 1;
+            }
+
+            mesh.vertices = verts;
+            mesh.normals = normals;
+            mesh.colors = colors;
+            mesh.triangles = tris;
+            mesh.RecalculateBounds();
+
+            var mf = waterObj.AddComponent<MeshFilter>();
+            mf.sharedMesh = mesh;
+
+            var mr = waterObj.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _waterMaterial;
         }
 
         /// <summary>

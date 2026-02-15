@@ -179,9 +179,17 @@ namespace Terranova.Population
             float spawnRadius = 3f;
             float angleStep = 360f / count;
 
+            // Name pool for new tribe settlers
+            string[] names = { "Ava", "Bo", "Cal", "Dara", "Eli",
+                "Finn", "Gwen", "Hale", "Iris", "Jace",
+                "Kira", "Lark", "Milo", "Nora", "Orin" };
+
             // Assign traits without duplicates
             var availableTraits = new System.Collections.Generic.List<SettlerTrait>(
                 (SettlerTrait[])System.Enum.GetValues(typeof(SettlerTrait)));
+
+            // Offset names by tribe number so each tribe gets different names
+            int nameOffset = (_tribeNumber - 1) * count;
 
             for (int i = 0; i < count; i++)
             {
@@ -190,7 +198,8 @@ namespace Terranova.Population
                 float z = campfirePos.z + Mathf.Sin(angle) * spawnRadius;
                 float sy = world.GetSmoothedHeightAtWorldPos(x, z);
 
-                var settlerObj = new GameObject($"Settler_{i}");
+                string settlerName = names[(nameOffset + i) % names.Length];
+                var settlerObj = new GameObject(settlerName);
                 settlerObj.transform.position = new Vector3(x, sy, z);
 
                 var settler = settlerObj.AddComponent<Settler>();
