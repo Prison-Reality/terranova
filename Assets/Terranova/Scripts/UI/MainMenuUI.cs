@@ -204,15 +204,18 @@ namespace Terranova.UI
             if (int.TryParse(_seedInput.text, out int seed))
                 GameState.Seed = seed;
 
-            // Reload current scene – bootstrapper will now create game systems
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            Debug.Log($"MainMenuUI: Starting new game – seed={GameState.Seed}, biome={GameState.SelectedBiome}");
+
+            // Load the Game scene. This guarantees a clean state because
+            // it's a different scene (not a reload of the same one).
+            SceneManager.LoadScene("Game");
         }
 
         private void ContinueGame()
         {
             GameState.IsNewGame = false;
             GameState.GameStarted = true;
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            SceneManager.LoadScene("Game");
         }
 
         private Text CreateText(string content, int fontSize, Color color, Vector2 position, Transform parent)

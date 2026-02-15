@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
+using UnityEngine.SceneManagement;
 using Terranova.Terrain;
 using Terranova.Buildings;
 using Terranova.Camera;
@@ -14,38 +15,55 @@ namespace Terranova.Core
 {
     /// <summary>
     /// Auto-creates all required game systems at runtime if they are missing.
-    /// This avoids manual scene setup: just hit Play and everything works.
+    /// Uses SceneManager.sceneLoaded to bootstrap on EVERY scene load
+    /// (not just the first one), which guarantees clean state transitions
+    /// between MainMenu and Game scenes.
     ///
-    /// Execution order is set early (-100) so systems exist before other scripts
-    /// look for them. Each system is only created if not already present,
-    /// so manual scene setup always takes priority.
+    /// Scene layout:
+    ///   Scene 0 "MainMenu" – menu UI only
+    ///   Scene 1 "Game"     – full game world
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public static class GameBootstrapper
     {
+        private const string MAIN_MENU_SCENE = "MainMenu";
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
         {
-            // Defer actual creation to AfterSceneLoad so scene objects are available
+            // sceneLoaded fires on every SceneManager.LoadScene call,
+            // unlike [RuntimeInitializeOnLoadMethod(AfterSceneLoad)] which
+            // only fires once on application start.
+            SceneManager.sceneLoaded -= OnSceneLoaded; // Prevent double-subscribe on domain reload
+            SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void BootstrapAfterScene()
+        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            // Show main menu if game hasn't been started yet.
-            // Works in any scene – no separate MainMenu scene needed.
-            if (!GameState.GameStarted)
+            if (scene.name == MAIN_MENU_SCENE)
             {
-                EnsureMainMenu();
-                EnsureEventSystem();
-                Debug.Log("GameBootstrapper: Main menu ready.");
-                return;
+                BootstrapMainMenu();
             }
+            else
+            {
+                BootstrapGame();
+            }
+        }
 
-            // Game scene bootstrap
+        private static void BootstrapMainMenu()
+        {
+            EnsureMainMenu();
+            EnsureEventSystem();
+            Debug.Log("GameBootstrapper: Main menu ready.");
+        }
+
+        private static void BootstrapGame()
+        {
+            GameState.GameStarted = true;
+
             EnsureWorldManager();
             EnsureResourceManager();
-            EnsureMaterialInventory(); // MS4: Material system
+            EnsureMaterialInventory();
             EnsureBuildingRegistry();
             EnsureCamera();
             EnsureBuildingPlacer();
@@ -59,9 +77,9 @@ namespace Terranova.Core
             EnsureDebugTerrainModifier();
             EnsureSelectionManager();
             EnsureDiscoverySystem();
-            EnsureDayNightCycle(); // MS4: Day-night cycle
-            EnsureShelterSystem(); // Feature 5: Natural Shelters
-            EnsureTribeManager();  // Feature 6.4: Tribe Death & Restart
+            EnsureDayNightCycle();
+            EnsureShelterSystem();
+            EnsureTribeManager();
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
