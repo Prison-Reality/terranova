@@ -32,7 +32,9 @@ namespace Terranova.Terrain
 
         [Header("Generation")]
         [Tooltip("Seed for terrain generation. Same seed = same world.")]
-        [SerializeField] private int _seed = 42;
+        #pragma warning disable CS0414
+        [SerializeField] private int _seed = 42; // Inspector-only; runtime seed from GameState
+        #pragma warning restore CS0414
 
         [Header("Materials")]
         [Tooltip("Material for solid blocks (opaque, vertex colors). Auto-created if not assigned.")]

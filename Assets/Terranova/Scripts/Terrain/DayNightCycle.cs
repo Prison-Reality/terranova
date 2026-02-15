@@ -121,7 +121,6 @@ namespace Terranova.Terrain
             {
                 // Daytime
                 float dawnEnd = 0.30f;
-                float duskStart = 0.70f;
                 if (_timeOfDay < 0.35f)
                 {
                     float t = (_timeOfDay - dawnEnd) / 0.05f;

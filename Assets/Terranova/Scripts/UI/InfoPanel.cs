@@ -365,9 +365,7 @@ namespace Terranova.UI
 
             // Check all material types and report which can/cannot be gathered
             var allMaterials = MaterialDatabase.All;
-            bool canGatherWood = false;
             bool canGatherHardwood = false;
-            bool canGatherStone = false;
             bool canGatherGranite = false;
             bool canHunt = false;
 
@@ -376,20 +374,12 @@ namespace Terranova.UI
                 var mat = kvp.Value;
                 bool canGather = !mat.RequiresTool || toolQuality >= mat.MinToolQuality;
 
-                if (mat.Category == MaterialCategory.Wood)
-                {
-                    canGatherWood = true;
-                    if (mat.Id == "hardwood") canGatherHardwood = canGather;
-                }
-                else if (mat.Category == MaterialCategory.Stone)
-                {
-                    canGatherStone = true;
-                    if (mat.Id == "granite") canGatherGranite = canGather;
-                }
+                if (mat.Category == MaterialCategory.Wood && mat.Id == "hardwood")
+                    canGatherHardwood = canGather;
+                else if (mat.Category == MaterialCategory.Stone && mat.Id == "granite")
+                    canGatherGranite = canGather;
                 else if (mat.Category == MaterialCategory.Animal && mat.Id == "large_meat")
-                {
                     canHunt = canGather;
-                }
             }
 
             capabilities += $"\n  Gather wood: Yes";
