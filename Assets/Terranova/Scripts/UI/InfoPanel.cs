@@ -672,7 +672,7 @@ namespace Terranova.UI
             labelRect.offsetMax = Vector2.zero;
 
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.fontSize = 11;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleLeft;
@@ -803,7 +803,7 @@ namespace Terranova.UI
             nameRect.offsetMin = Vector2.zero;
             nameRect.offsetMax = Vector2.zero;
             _toolNameText = nameObj.AddComponent<Text>();
-            _toolNameText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _toolNameText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             _toolNameText.fontSize = FONT_SIZE_SMALL;
             _toolNameText.color = Color.white;
             _toolNameText.alignment = TextAnchor.MiddleLeft;
@@ -818,7 +818,7 @@ namespace Terranova.UI
             qualityRect.offsetMin = Vector2.zero;
             qualityRect.offsetMax = Vector2.zero;
             _toolQualityText = qualityObj.AddComponent<Text>();
-            _toolQualityText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _toolQualityText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             _toolQualityText.fontSize = FONT_SIZE_SMALL;
             _toolQualityText.color = Color.white;
             _toolQualityText.alignment = TextAnchor.MiddleRight;
@@ -868,7 +868,7 @@ namespace Terranova.UI
             labelRect.offsetMax = Vector2.zero;
 
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.fontSize = 11;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleLeft;
@@ -892,7 +892,7 @@ namespace Terranova.UI
             obj.AddComponent<RectTransform>();
 
             var text = obj.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.fontSize = fontSize;
             text.color = color;
             text.alignment = TextAnchor.UpperLeft;

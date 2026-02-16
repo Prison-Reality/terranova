@@ -149,7 +149,7 @@ namespace Terranova.UI
             labelRect.sizeDelta = Vector2.zero;
 
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.fontSize = 18;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleCenter;
@@ -242,7 +242,7 @@ namespace Terranova.UI
                 labelRect.offsetMax = new Vector2(-4, -4);
 
                 var label = labelObj.AddComponent<Text>();
-                label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 label.fontSize = FONT_SIZE;
                 label.color = Color.white;
                 label.alignment = TextAnchor.MiddleCenter;

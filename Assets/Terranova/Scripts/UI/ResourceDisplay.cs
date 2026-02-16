@@ -393,7 +393,7 @@ namespace Terranova.UI
             titleRect.pivot = new Vector2(0.5f, 0.5f);
             titleRect.sizeDelta = new Vector2(600, 60);
             var titleText = titleObj.AddComponent<Text>();
-            titleText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            titleText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             titleText.fontSize = 36;
             titleText.color = new Color(0.9f, 0.7f, 0.5f);
             titleText.alignment = TextAnchor.MiddleCenter;
@@ -407,7 +407,7 @@ namespace Terranova.UI
             subRect.pivot = new Vector2(0.5f, 0.5f);
             subRect.sizeDelta = new Vector2(600, 40);
             var subText = subObj.AddComponent<Text>();
-            subText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            subText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             subText.fontSize = 20;
             subText.color = new Color(0.7f, 0.7f, 0.7f);
             subText.alignment = TextAnchor.MiddleCenter;
@@ -442,7 +442,7 @@ namespace Terranova.UI
             titleRect.anchoredPosition = new Vector2(0, 60);
             titleRect.sizeDelta = new Vector2(600, 90);
             var titleText = titleObj.AddComponent<Text>();
-            titleText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            titleText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             titleText.fontSize = 56;
             titleText.color = new Color(1f, 0.35f, 0.3f);
             titleText.alignment = TextAnchor.MiddleCenter;
@@ -464,7 +464,7 @@ namespace Terranova.UI
             subRect.anchoredPosition = new Vector2(0, 5);
             subRect.sizeDelta = new Vector2(600, 50);
             var subText = subtitleObj.AddComponent<Text>();
-            subText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            subText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             subText.fontSize = 26;
             subText.color = Color.white;
             subText.alignment = TextAnchor.MiddleCenter;
@@ -496,7 +496,7 @@ namespace Terranova.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.sizeDelta = Vector2.zero;
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.fontSize = 28;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleCenter;
@@ -677,7 +677,7 @@ namespace Terranova.UI
                 labelRect.offsetMin = new Vector2(15, 0);
                 labelRect.offsetMax = Vector2.zero;
                 var labelText = labelObj.AddComponent<Text>();
-                labelText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                labelText.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 labelText.fontSize = 14;
                 labelText.color = Color.white;
                 labelText.alignment = TextAnchor.MiddleLeft;
@@ -747,7 +747,7 @@ namespace Terranova.UI
                 labelRect.sizeDelta = Vector2.zero;
 
                 var label = labelObj.AddComponent<Text>();
-                label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 label.fontSize = _fontSize - 4;
                 label.color = Color.white;
                 label.alignment = TextAnchor.MiddleCenter;
@@ -813,7 +813,7 @@ namespace Terranova.UI
             rectTransform.sizeDelta = size;
 
             var text = textObj.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = global::UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.fontSize = _fontSize;
             text.color = Color.white;
             text.alignment = alignment;
