@@ -9,13 +9,18 @@ namespace Terranova.UI
 {
     /// <summary>
     /// HUD showing day counter, categorized resource panel, speed controls,
-    /// event/tool-break/needs notifications, game over panel, and version label.
+    /// event/tool-break/needs notifications, game over panel, pause menu,
+    /// discovery modal overlays, and version label.
     ///
     /// MS4 Changes:
     ///   Feature 1.5 - "Day X" counter via DayNightCycle.Instance.DayCount.
     ///   Feature 2.4 - Categorized resource panel with expand/collapse per category.
     ///   Feature 3.4 - Tool break notifications.
     ///   Feature 4.5 - Warning notifications for critical thirst/hunger.
+    ///
+    /// v0.4.6 Changes:
+    ///   - Pause menu with Resume and Back to Main Menu.
+    ///   - Discovery modal overlay (tap OK to dismiss) replaces toast.
     ///
     /// Scene setup:
     ///   1. Create Canvas (Screen Space - Overlay)
@@ -74,6 +79,14 @@ namespace Terranova.UI
         private Button _plantButton;
         private Button _animalButton;
         private Button _otherButton;
+
+        // ─── Pause Menu ──────────────────────────────────────────
+        private GameObject _pauseMenuPanel;
+        private float _savedTimeScale = 1f;
+
+        // ─── Discovery Modal ─────────────────────────────────────
+        private GameObject _discoveryModalPanel;
+        private readonly Queue<DiscoveryMadeEvent> _discoveryQueue = new();
 
         // ─── Lifecycle ────────────────────────────────────────────
 
@@ -179,13 +192,14 @@ namespace Terranova.UI
         {
             // Track that categories may now show detail
             _discoveredCategories.Add(evt.DiscoveryName);
-
-            // Show toast with trigger reason so player understands WHY
-            string msg = string.IsNullOrEmpty(evt.Reason)
-                ? $"Discovery: {evt.DiscoveryName}!"
-                : $"Discovery: {evt.DiscoveryName}! ({evt.Reason})";
-            ShowEvent(msg, new Color(0.4f, 1f, 0.6f), 6f);
             UpdateDisplay();
+
+            // Queue discovery for modal display
+            _discoveryQueue.Enqueue(evt);
+
+            // Show immediately if no modal is currently active
+            if (_discoveryModalPanel == null)
+                ShowNextDiscoveryModal();
         }
 
         /// <summary>Feature 1.5: Day counter updated via event.</summary>
@@ -316,6 +330,258 @@ namespace Terranova.UI
         private void ToggleAnimal() { _animalExpanded = !_animalExpanded; UpdateDisplay(); }
         private void ToggleOther() { _otherExpanded = !_otherExpanded; UpdateDisplay(); }
 
+        // ═══════════════════════════════════════════════════════════
+        //
+        //  P A U S E   M E N U
+        //
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Show the pause menu overlay. Pauses the game and offers
+        /// Resume and Back to Main Menu options.
+        /// </summary>
+        private void ShowPauseMenu()
+        {
+            // Don't open if game over, discovery modal, or already paused
+            if (_gameOverPanel != null) return;
+            if (_discoveryModalPanel != null) return;
+            if (_pauseMenuPanel != null) return;
+
+            _savedTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+
+            // Full-screen dark overlay
+            _pauseMenuPanel = new GameObject("PauseMenuPanel");
+            _pauseMenuPanel.transform.SetParent(transform, false);
+            _pauseMenuPanel.transform.SetAsLastSibling();
+            var panelImage = _pauseMenuPanel.AddComponent<Image>();
+            panelImage.color = new Color(0f, 0f, 0f, 0.7f);
+            var panelRect = _pauseMenuPanel.GetComponent<RectTransform>();
+            panelRect.anchorMin = Vector2.zero;
+            panelRect.anchorMax = Vector2.one;
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+
+            // "PAUSED" title
+            var titleObj = CreateModalText(_pauseMenuPanel.transform, "PAUSED",
+                48, Color.white, new Vector2(0, 80), new Vector2(400, 70));
+            titleObj.fontStyle = FontStyle.Bold;
+
+            // Resume button
+            CreateModalButton(_pauseMenuPanel.transform, "Resume",
+                new Vector2(0, 0), new Vector2(250, 60),
+                new Color(0.2f, 0.5f, 0.3f, 0.95f), 28, HidePauseMenu);
+
+            // Back to Main Menu button
+            CreateModalButton(_pauseMenuPanel.transform, "Back to Main Menu",
+                new Vector2(0, -80), new Vector2(250, 60),
+                new Color(0.5f, 0.25f, 0.2f, 0.95f), 24, BackToMainMenu);
+        }
+
+        private void HidePauseMenu()
+        {
+            if (_pauseMenuPanel == null) return;
+            Destroy(_pauseMenuPanel);
+            _pauseMenuPanel = null;
+            Time.timeScale = _savedTimeScale;
+        }
+
+        private void BackToMainMenu()
+        {
+            if (_pauseMenuPanel != null)
+            {
+                Destroy(_pauseMenuPanel);
+                _pauseMenuPanel = null;
+            }
+            EventBus.Clear();
+            Time.timeScale = 1f;
+            GameState.GameStarted = false;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //
+        //  D I S C O V E R Y   M O D A L
+        //
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Show the next queued discovery as a modal overlay.
+        /// Pauses the game. Player must tap OK to dismiss.
+        /// </summary>
+        private void ShowNextDiscoveryModal()
+        {
+            if (_discoveryQueue.Count == 0) return;
+            if (_discoveryModalPanel != null) return;
+
+            var evt = _discoveryQueue.Dequeue();
+
+            // Pause game if not already paused
+            if (_pauseMenuPanel == null)
+            {
+                _savedTimeScale = Time.timeScale;
+                Time.timeScale = 0f;
+            }
+
+            // Full-screen dark overlay
+            _discoveryModalPanel = new GameObject("DiscoveryModalPanel");
+            _discoveryModalPanel.transform.SetParent(transform, false);
+            _discoveryModalPanel.transform.SetAsLastSibling();
+            var panelImage = _discoveryModalPanel.AddComponent<Image>();
+            panelImage.color = new Color(0f, 0f, 0f, 0.8f);
+            var panelRect = _discoveryModalPanel.GetComponent<RectTransform>();
+            panelRect.anchorMin = Vector2.zero;
+            panelRect.anchorMax = Vector2.one;
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+
+            // Inner card background
+            var cardObj = new GameObject("Card");
+            cardObj.transform.SetParent(_discoveryModalPanel.transform, false);
+            var cardImage = cardObj.AddComponent<Image>();
+            cardImage.color = new Color(0.12f, 0.15f, 0.10f, 0.95f);
+            var cardRect = cardObj.GetComponent<RectTransform>();
+            cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+            cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+            cardRect.pivot = new Vector2(0.5f, 0.5f);
+            cardRect.anchoredPosition = Vector2.zero;
+            cardRect.sizeDelta = new Vector2(600, 420);
+
+            // Border accent
+            var borderObj = new GameObject("Border");
+            borderObj.transform.SetParent(cardObj.transform, false);
+            var borderImage = borderObj.AddComponent<Image>();
+            borderImage.color = new Color(0.3f, 0.8f, 0.4f, 0.8f);
+            var borderRect = borderObj.GetComponent<RectTransform>();
+            borderRect.anchorMin = Vector2.zero;
+            borderRect.anchorMax = new Vector2(1f, 0f);
+            borderRect.pivot = new Vector2(0.5f, 0f);
+            borderRect.anchoredPosition = new Vector2(0, -3);
+            borderRect.sizeDelta = new Vector2(0, 3);
+
+            // "DISCOVERY!" header
+            var headerText = CreateModalText(cardObj.transform, "DISCOVERY!",
+                42, new Color(0.4f, 1f, 0.6f), new Vector2(0, 160), new Vector2(560, 60));
+            headerText.fontStyle = FontStyle.Bold;
+
+            // Discovery name
+            CreateModalText(cardObj.transform, evt.DiscoveryName,
+                32, Color.white, new Vector2(0, 100), new Vector2(560, 50));
+
+            // Description
+            if (!string.IsNullOrEmpty(evt.Description))
+            {
+                var descText = CreateModalText(cardObj.transform, evt.Description,
+                    20, new Color(0.85f, 0.85f, 0.85f), new Vector2(0, 40), new Vector2(540, 60));
+                descText.horizontalOverflow = HorizontalWrapMode.Wrap;
+                descText.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+
+            // Reason (who discovered it and why)
+            if (!string.IsNullOrEmpty(evt.Reason))
+            {
+                var reasonText = CreateModalText(cardObj.transform, evt.Reason,
+                    18, new Color(0.7f, 0.9f, 0.7f), new Vector2(0, -20), new Vector2(540, 40));
+                reasonText.fontStyle = FontStyle.Italic;
+                reasonText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            }
+
+            // Unlocks section
+            if (!string.IsNullOrEmpty(evt.Unlocks))
+            {
+                CreateModalText(cardObj.transform, "Unlocks:",
+                    18, new Color(1f, 0.85f, 0.3f), new Vector2(0, -60), new Vector2(540, 30));
+
+                var unlocksText = CreateModalText(cardObj.transform, evt.Unlocks,
+                    18, new Color(1f, 0.95f, 0.7f), new Vector2(0, -90), new Vector2(540, 50));
+                unlocksText.horizontalOverflow = HorizontalWrapMode.Wrap;
+                unlocksText.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+
+            // OK button
+            CreateModalButton(cardObj.transform, "OK",
+                new Vector2(0, -160), new Vector2(160, 50),
+                new Color(0.25f, 0.55f, 0.3f, 0.95f), 26, DismissDiscoveryModal);
+        }
+
+        private void DismissDiscoveryModal()
+        {
+            if (_discoveryModalPanel != null)
+            {
+                Destroy(_discoveryModalPanel);
+                _discoveryModalPanel = null;
+            }
+
+            // Show next queued discovery if any
+            if (_discoveryQueue.Count > 0)
+            {
+                ShowNextDiscoveryModal();
+            }
+            else if (_pauseMenuPanel == null)
+            {
+                // No more modals and no pause menu — restore time
+                Time.timeScale = _savedTimeScale;
+            }
+        }
+
+        // ─── Modal UI Helpers ────────────────────────────────────
+
+        private Text CreateModalText(Transform parent, string content, int fontSize,
+            Color color, Vector2 position, Vector2 size)
+        {
+            string goName = string.IsNullOrEmpty(content) ? "ModalText"
+                : content.Length > 20 ? content.Substring(0, 20) : content;
+            var go = new GameObject(goName);
+            go.transform.SetParent(parent, false);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+            var text = go.AddComponent<Text>();
+            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontSize = fontSize;
+            text.color = color;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.text = content ?? "";
+            return text;
+        }
+
+        private void CreateModalButton(Transform parent, string label, Vector2 pos,
+            Vector2 size, Color bgColor, int fontSize, UnityEngine.Events.UnityAction onClick)
+        {
+            var btnObj = new GameObject($"Btn_{label}");
+            btnObj.transform.SetParent(parent, false);
+            var btnRect = btnObj.AddComponent<RectTransform>();
+            btnRect.anchorMin = new Vector2(0.5f, 0.5f);
+            btnRect.anchorMax = new Vector2(0.5f, 0.5f);
+            btnRect.pivot = new Vector2(0.5f, 0.5f);
+            btnRect.anchoredPosition = pos;
+            btnRect.sizeDelta = size;
+
+            var img = btnObj.AddComponent<Image>();
+            img.color = bgColor;
+
+            var btn = btnObj.AddComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(onClick);
+
+            var labelObj = new GameObject("Label");
+            labelObj.transform.SetParent(btnObj.transform, false);
+            var labelRect = labelObj.AddComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.sizeDelta = Vector2.zero;
+            var text = labelObj.AddComponent<Text>();
+            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontSize = fontSize;
+            text.color = Color.white;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.fontStyle = FontStyle.Bold;
+            text.text = label;
+        }
+
         // ─── Game Over ────────────────────────────────────────────
 
         private void ShowGameOver()
@@ -326,6 +592,7 @@ namespace Terranova.UI
 
             _gameOverPanel = new GameObject("GameOverPanel");
             _gameOverPanel.transform.SetParent(transform, false);
+            _gameOverPanel.transform.SetAsLastSibling();
             var panelImage = _gameOverPanel.AddComponent<Image>();
             panelImage.color = new Color(0f, 0f, 0f, 0.75f);
             var panelRect = _gameOverPanel.GetComponent<RectTransform>();
@@ -373,12 +640,12 @@ namespace Terranova.UI
             float btnSize = _minTouchTarget * 2.5f;
             var btnObj = new GameObject("RestartButton");
             btnObj.transform.SetParent(_gameOverPanel.transform, false);
-            var btnRect = btnObj.AddComponent<RectTransform>();
-            btnRect.anchorMin = new Vector2(0.5f, 0.5f);
-            btnRect.anchorMax = new Vector2(0.5f, 0.5f);
-            btnRect.pivot = new Vector2(0.5f, 0.5f);
-            btnRect.anchoredPosition = new Vector2(0, -60);
-            btnRect.sizeDelta = new Vector2(btnSize, _minTouchTarget);
+            var btnRect2 = btnObj.AddComponent<RectTransform>();
+            btnRect2.anchorMin = new Vector2(0.5f, 0.5f);
+            btnRect2.anchorMax = new Vector2(0.5f, 0.5f);
+            btnRect2.pivot = new Vector2(0.5f, 0.5f);
+            btnRect2.anchoredPosition = new Vector2(0, -60);
+            btnRect2.sizeDelta = new Vector2(btnSize, _minTouchTarget);
             var btnImage = btnObj.AddComponent<Image>();
             btnImage.color = new Color(0.2f, 0.5f, 0.3f, 0.9f);
             var button = btnObj.AddComponent<Button>();
@@ -470,6 +737,9 @@ namespace Terranova.UI
             // Speed widget (top-right, below day counter)
             CreateSpeedWidget();
 
+            // Menu button (top-right, below speed widget)
+            CreateMenuButton();
+
             // Version label (bottom-right) with dark background
             var versionGo = new GameObject("VersionLabel");
             versionGo.transform.SetParent(transform, false);
@@ -493,7 +763,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.4.5";
+            versionText.text = "v0.4.6";
         }
 
         /// <summary>
@@ -646,10 +916,55 @@ namespace Terranova.UI
             UpdateSpeedButtons();
         }
 
+        // ─── Menu Button ──────────────────────────────────────────
+
+        /// <summary>
+        /// Create a "Menu" button below the speed widget.
+        /// Tapping it opens the pause menu overlay.
+        /// </summary>
+        private void CreateMenuButton()
+        {
+            float buttonWidth = 80f;
+            float buttonHeight = _minTouchTarget;
+
+            var btnObj = new GameObject("MenuButton");
+            btnObj.transform.SetParent(transform, false);
+
+            var btnRect = btnObj.AddComponent<RectTransform>();
+            btnRect.anchorMin = new Vector2(1, 1);
+            btnRect.anchorMax = new Vector2(1, 1);
+            btnRect.pivot = new Vector2(1, 1);
+            btnRect.anchoredPosition = new Vector2(-20, -112);
+            btnRect.sizeDelta = new Vector2(buttonWidth, buttonHeight);
+
+            var image = btnObj.AddComponent<Image>();
+            image.color = new Color(0.3f, 0.3f, 0.35f, 0.8f);
+
+            var button = btnObj.AddComponent<Button>();
+            button.targetGraphic = image;
+            button.onClick.AddListener(ShowPauseMenu);
+
+            var labelObj = new GameObject("Label");
+            labelObj.transform.SetParent(btnObj.transform, false);
+            var labelRect = labelObj.AddComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.sizeDelta = Vector2.zero;
+            var label = labelObj.AddComponent<Text>();
+            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = _fontSize - 4;
+            label.color = Color.white;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.fontStyle = FontStyle.Bold;
+            label.text = "Menu";
+        }
+
         private void SetSpeed(int speedIndex)
         {
             if (speedIndex < 0 || speedIndex >= SPEED_VALUES.Length) return;
             if (_gameOverPanel != null) return;
+            if (_pauseMenuPanel != null) return;
+            if (_discoveryModalPanel != null) return;
 
             _currentSpeedIndex = speedIndex;
             Time.timeScale = SPEED_VALUES[speedIndex];

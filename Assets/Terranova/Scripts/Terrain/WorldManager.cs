@@ -67,6 +67,12 @@ namespace Terranova.Terrain
         public int WorldBlocksX => _worldSizeX * ChunkData.WIDTH;
         public int WorldBlocksZ => _worldSizeZ * ChunkData.DEPTH;
 
+        /// <summary>
+        /// Center of the freshwater pond carved near spawn.
+        /// Settlers use this to find drinkable water (avoids ocean on Coast biome).
+        /// </summary>
+        public Vector3 FreshwaterCenter { get; private set; }
+
         private void Awake()
         {
             // Simple singleton – only one world at a time
@@ -184,74 +190,152 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
-        /// Carve an elevation-independent pond near the world center (spawn point).
-        /// Runs after all chunks exist so we can use world coordinates directly.
-        /// Uses solid height (skips existing water) to carve into actual terrain.
-        /// Pond is 15 blocks from center — settlers can walk there in seconds.
+        /// Carve a freshwater pond near the world center (spawn point).
+        /// Tries multiple candidate positions and picks the flattest terrain.
+        /// Uses a flat water surface at a consistent Y level so the pond looks
+        /// like a proper body of water on any seed and any biome.
+        /// Guaranteed within 25 blocks of spawn center.
         /// </summary>
         private void CarveSpawnPond()
         {
             int centerX = WorldBlocksX / 2;
             int centerZ = WorldBlocksZ / 2;
-
-            // Place pond 15 blocks east of center (same side as campfire facing)
-            int pondCX = centerX + 15;
-            int pondCZ = centerZ;
             int pondRadius = 5;
             int pondDepth = 3;
 
+            // Try multiple candidate positions within 10-25 blocks of center
+            var candidates = new (int x, int z)[]
+            {
+                (centerX + 15, centerZ),
+                (centerX - 15, centerZ),
+                (centerX, centerZ + 15),
+                (centerX, centerZ - 15),
+                (centerX + 12, centerZ + 12),
+                (centerX - 12, centerZ + 12),
+                (centerX + 12, centerZ - 12),
+                (centerX - 12, centerZ - 12),
+                (centerX + 20, centerZ),
+                (centerX, centerZ + 20),
+            };
+
+            int bestX = -1, bestZ = -1;
+            float bestScore = float.MaxValue;
+
+            foreach (var (cx, cz) in candidates)
+            {
+                // Bounds check
+                if (cx < pondRadius + 1 || cx >= WorldBlocksX - pondRadius - 1) continue;
+                if (cz < pondRadius + 1 || cz >= WorldBlocksZ - pondRadius - 1) continue;
+
+                int h = GetSolidHeightAtWorldPos(cx, cz);
+                if (h < 2) continue;
+
+                // Measure flatness: height variance across the pond footprint
+                float variance = 0;
+                int samples = 0;
+                for (int dx = -pondRadius; dx <= pondRadius; dx += pondRadius)
+                {
+                    for (int dz = -pondRadius; dz <= pondRadius; dz += pondRadius)
+                    {
+                        int nh = GetSolidHeightAtWorldPos(cx + dx, cz + dz);
+                        if (nh < 2) continue;
+                        variance += Mathf.Abs(nh - h);
+                        samples++;
+                    }
+                }
+                if (samples == 0) continue;
+                variance /= samples;
+
+                // Score: prefer flat areas at a reasonable height above sea level
+                float score = variance * 3f + Mathf.Abs(h - (TerrainGenerator.SEA_LEVEL + 4));
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestX = cx;
+                    bestZ = cz;
+                }
+            }
+
+            // Fallback: force center+15 if no good candidate found
+            if (bestX < 0)
+            {
+                bestX = Mathf.Clamp(centerX + 15, pondRadius + 1, WorldBlocksX - pondRadius - 2);
+                bestZ = centerZ;
+            }
+
+            // Carve the pond with a flat water surface
+            CarvePondAt(bestX, bestZ, pondRadius, pondDepth);
+
+            Debug.Log($"CarveSpawnPond: Pond at ({bestX},{bestZ}), " +
+                      $"{Mathf.Sqrt((bestX - centerX) * (bestX - centerX) + (bestZ - centerZ) * (bestZ - centerZ)):F0} blocks from center");
+        }
+
+        /// <summary>
+        /// Carve a bowl-shaped pond with a flat water surface at a consistent Y level.
+        /// All water blocks share the same Y, producing a natural-looking pond.
+        /// Sets FreshwaterCenter so settlers can locate drinkable water.
+        /// </summary>
+        private void CarvePondAt(int pondCX, int pondCZ, int radius, int depth)
+        {
             var affectedChunks = new HashSet<Vector2Int>();
 
-            // First, find what height the terrain is at the pond center
-            int refHeight = GetSolidHeightAtWorldPos(pondCX, pondCZ);
-            if (refHeight < 2) refHeight = GetSolidHeightAtWorldPos(centerX, centerZ);
-            if (refHeight < 2) refHeight = TerrainGenerator.SEA_LEVEL;
+            // Reference height at pond center = water surface level
+            int waterLevel = GetSolidHeightAtWorldPos(pondCX, pondCZ);
+            if (waterLevel < 2)
+                waterLevel = GetSolidHeightAtWorldPos(WorldBlocksX / 2, WorldBlocksZ / 2);
+            if (waterLevel < 2)
+                waterLevel = TerrainGenerator.SEA_LEVEL + 4;
+
+            // Store freshwater center for settler water search
+            FreshwaterCenter = new Vector3(pondCX + 0.5f, waterLevel, pondCZ + 0.5f);
 
             int carved = 0;
-            for (int wx = pondCX - pondRadius; wx <= pondCX + pondRadius; wx++)
+            for (int wx = pondCX - radius; wx <= pondCX + radius; wx++)
             {
-                for (int wz = pondCZ - pondRadius; wz <= pondCZ + pondRadius; wz++)
+                for (int wz = pondCZ - radius; wz <= pondCZ + radius; wz++)
                 {
                     int dx = wx - pondCX;
                     int dz = wz - pondCZ;
                     float dist = Mathf.Sqrt(dx * dx + dz * dz);
-                    if (dist > pondRadius) continue;
-
-                    // Use solid height (terrain, not water surface)
-                    int solidY = GetSolidHeightAtWorldPos(wx, wz);
-                    if (solidY < 1) continue;
+                    if (dist > radius) continue;
 
                     // Deeper in center, shallower at edge
-                    float t = 1f - (dist / pondRadius);
-                    int scoop = Mathf.Max(1, Mathf.RoundToInt(pondDepth * t));
+                    float t = 1f - (dist / radius);
+                    int scoop = Mathf.Max(1, Mathf.RoundToInt(depth * t));
+                    int localFloor = waterLevel - scoop;
 
-                    // Carve from surface down and fill with water
-                    for (int d = 0; d < scoop; d++)
+                    // Fill from floor to water surface with water (flat surface)
+                    for (int y = localFloor; y <= waterLevel; y++)
                     {
-                        int y = solidY - d;
-                        if (y < 1) break;
                         SetBlockInternal(wx, y, wz, VoxelType.Water, affectedChunks);
                     }
 
-                    // Also ensure air above the water surface for visibility
-                    for (int y = solidY + 1; y <= refHeight + 2; y++)
+                    // Sand bottom
+                    if (localFloor > 0)
+                        SetBlockInternal(wx, localFloor - 1, wz, VoxelType.Sand, affectedChunks);
+
+                    // Clear air above water surface so pond is visible
+                    for (int y = waterLevel + 1; y <= waterLevel + 5; y++)
                     {
                         var existing = GetBlockAtWorldPos(wx, y, wz);
                         if (existing != VoxelType.Air)
                             SetBlockInternal(wx, y, wz, VoxelType.Air, affectedChunks);
                     }
 
-                    // Sand bottom
-                    int bottomY = solidY - scoop;
-                    if (bottomY >= 0)
-                        SetBlockInternal(wx, bottomY, wz, VoxelType.Sand, affectedChunks);
-
                     carved++;
                 }
             }
 
-            Debug.Log($"CarveSpawnPond: Pond at ({pondCX},{pondCZ}), radius={pondRadius}, " +
-                      $"carved {carved} columns, 15 blocks from spawn center ({centerX},{centerZ})");
+            // Verify water was actually placed
+            int verifyCount = 0;
+            for (int wy = waterLevel - depth; wy <= waterLevel; wy++)
+            {
+                if (GetBlockAtWorldPos(pondCX, wy, pondCZ) == VoxelType.Water)
+                    verifyCount++;
+            }
+
+            Debug.Log($"CarvePondAt: ({pondCX},{pondCZ}), radius={radius}, " +
+                      $"waterLevel={waterLevel}, carved {carved} columns, verified {verifyCount} water blocks at center");
         }
 
         /// <summary>

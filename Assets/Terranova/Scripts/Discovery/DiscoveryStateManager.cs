@@ -85,12 +85,28 @@ namespace Terranova.Discovery
                     _unlockedBuildings.Add(bt);
             }
 
+            // Build unlocks description
+            string unlocks = "";
+            if (definition.UnlockedCapabilities != null && definition.UnlockedCapabilities.Length > 0)
+                unlocks += string.Join(", ", definition.UnlockedCapabilities);
+            if (definition.UnlockedBuildings != null && definition.UnlockedBuildings.Length > 0)
+            {
+                if (unlocks.Length > 0) unlocks += "\n";
+                unlocks += "Buildings: " + string.Join(", ", definition.UnlockedBuildings);
+            }
+            if (definition.UnlockedResources != null && definition.UnlockedResources.Length > 0)
+            {
+                if (unlocks.Length > 0) unlocks += "\n";
+                unlocks += "Resources: " + string.Join(", ", definition.UnlockedResources);
+            }
+
             // Fire event
             EventBus.Publish(new DiscoveryMadeEvent
             {
                 DiscoveryName = definition.DisplayName,
                 Description = definition.Description,
-                Reason = reason ?? ""
+                Reason = reason ?? "",
+                Unlocks = unlocks
             });
 
             Debug.Log($"[Discovery] Discovered: {definition.DisplayName} ({reason})");

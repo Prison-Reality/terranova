@@ -1215,8 +1215,10 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Search for the nearest water voxel in the world.
-        /// Scans in an expanding spiral from the settler's position.
+        /// Search for the nearest drinkable (freshwater) water source.
+        /// First searches around the carved freshwater pond center to avoid
+        /// ocean/saltwater on Coast biome. Falls back to general search only
+        /// if no freshwater center is available.
         /// </summary>
         private bool TryFindWaterSource(out Vector3 waterPosition)
         {
@@ -1225,39 +1227,55 @@ namespace Terranova.Population
             var world = WorldManager.Instance;
             if (world == null) return false;
 
-            Vector3 pos = transform.position;
-            int cx = Mathf.RoundToInt(pos.x);
-            int cz = Mathf.RoundToInt(pos.z);
-            int searchRadius = Mathf.CeilToInt(WATER_SEARCH_RADIUS);
+            // Always prefer freshwater pond (avoids saltwater ocean on Coast biome)
+            Vector3 freshCenter = world.FreshwaterCenter;
+            if (freshCenter != Vector3.zero)
+            {
+                if (TryFindWaterNear(freshCenter, 30, out waterPosition))
+                    return true;
+            }
+
+            // Fallback: search from settler position (for worlds without explicit freshwater)
+            return TryFindWaterNear(transform.position, Mathf.CeilToInt(WATER_SEARCH_RADIUS), out waterPosition);
+        }
+
+        /// <summary>
+        /// Search for water blocks in expanding rings from a given origin.
+        /// Returns true if a walkable position adjacent to water is found.
+        /// </summary>
+        private bool TryFindWaterNear(Vector3 origin, int searchRadius, out Vector3 waterPosition)
+        {
+            waterPosition = Vector3.zero;
+
+            var world = WorldManager.Instance;
+            if (world == null) return false;
+
+            int cx = Mathf.RoundToInt(origin.x);
+            int cz = Mathf.RoundToInt(origin.z);
 
             float bestDist = float.MaxValue;
             bool found = false;
 
-            // Scan in expanding rings for water blocks
             for (int r = 1; r <= searchRadius; r++)
             {
                 for (int dx = -r; dx <= r; dx++)
                 {
                     for (int dz = -r; dz <= r; dz++)
                     {
-                        // Only check perimeter of ring for efficiency
                         if (Mathf.Abs(dx) != r && Mathf.Abs(dz) != r) continue;
 
                         int wx = cx + dx;
                         int wz = cz + dz;
 
-                        // Check several y levels for water
                         for (int wy = 0; wy < 64; wy++)
                         {
                             VoxelType voxel = world.GetBlockAtWorldPos(wx, wy, wz);
                             if (voxel == VoxelType.Water)
                             {
-                                // Found water - check if we can reach a position adjacent to it
                                 Vector3 candidate = new Vector3(wx + 0.5f, wy + 1f, wz + 0.5f);
-                                float dist = Vector3.Distance(pos, candidate);
+                                float dist = Vector3.Distance(transform.position, candidate);
                                 if (dist < bestDist)
                                 {
-                                    // Find a walkable spot near the water
                                     if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, NAV_SAMPLE_RADIUS, NavMesh.AllAreas))
                                     {
                                         waterPosition = hit.position;
@@ -1265,13 +1283,12 @@ namespace Terranova.Population
                                         found = true;
                                     }
                                 }
-                                break; // Only need the surface water at this x,z
+                                break;
                             }
                         }
                     }
                 }
 
-                // If we found water in this ring, don't search further
                 if (found) return true;
             }
 
