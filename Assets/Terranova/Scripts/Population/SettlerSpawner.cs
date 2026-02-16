@@ -8,11 +8,13 @@ namespace Terranova.Population
     /// <summary>
     /// Spawns the initial settlers around the campfire at game start.
     ///
-    /// Flow:
-    ///   1. Wait for WorldManager to finish terrain generation
-    ///   2. Place campfire at world center
-    ///   3. Spawn 5 settlers in a circle around the campfire
-    ///   4. Fire PopulationChangedEvent so the UI updates
+    /// v0.4.7 flow:
+    ///   1. WorldManager.PrepareSettlementArea() flattens campfire zone + carves pond
+    ///      during terrain generation (before mesh building + NavMesh bake).
+    ///   2. This spawner waits for NavMesh to be ready.
+    ///   3. Places campfire visual at the pre-determined position (NO FlattenTerrain).
+    ///   4. Spawns settlers around the campfire.
+    ///   5. Publishes progress 1.0 so the loading screen hides.
     ///
     /// The settlers are placed at ~3 block radius from the campfire,
     /// evenly spaced in a circle. Each gets a unique color.
@@ -37,9 +39,13 @@ namespace Terranova.Population
             if (_hasSpawned)
                 return;
 
-            // Wait until terrain and NavMesh are ready (Story 2.0)
+            // Wait until terrain, NavMesh, and settlement area are ready
             var world = WorldManager.Instance;
             if (world == null || world.WorldBlocksX == 0 || !world.IsNavMeshReady)
+                return;
+
+            // WorldManager must have prepared the campfire position
+            if (world.CampfireBlockX == 0 && world.CampfireBlockZ == 0)
                 return;
 
             _hasSpawned = true;
@@ -50,38 +56,40 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Place the campfire and spawn settlers around it.
+        /// Place the campfire visual and spawn settlers around it.
+        /// Terrain is already flattened by WorldManager.PrepareSettlementArea().
+        /// Publishes progress 1.0 to dismiss the loading screen.
         /// </summary>
         private void SpawnSettlement(WorldManager world)
         {
-            // Place campfire at world center
+            // Place campfire at the pre-determined position (terrain already flat)
             Vector3 campfirePos = PlaceCampfire(world);
 
             // Spawn settlers in a circle around the campfire
             SpawnSettlers(world, campfirePos);
 
+            // Dismiss loading screen — everything is ready
+            EventBus.Publish(new WorldGenerationProgressEvent
+            {
+                Progress = 1f,
+                Status = "Ready!"
+            });
+
             Debug.Log($"SettlerSpawner: Placed campfire and {_initialSettlerCount} settlers " +
-                      $"at world center ({campfirePos.x:F0}, {campfirePos.z:F0}).");
+                      $"at ({campfirePos.x:F0}, {campfirePos.z:F0}).");
         }
 
         /// <summary>
-        /// Create the campfire at the center of the world.
+        /// Create the campfire visual at the position pre-determined by WorldManager.
+        /// Terrain is already flattened — no FlattenTerrain call needed.
         /// Returns the world position where it was placed.
         /// </summary>
         private Vector3 PlaceCampfire(WorldManager world)
         {
-            int centerX = world.WorldBlocksX / 2;
-            int centerZ = world.WorldBlocksZ / 2;
+            int centerX = world.CampfireBlockX;
+            int centerZ = world.CampfireBlockZ;
 
-            // Find solid ground near the world center, then flatten terrain
-            // so campfire and settlers all stand on level ground.
-            FindSolidGround(world, ref centerX, ref centerZ);
-
-            // Flatten terrain in a radius that covers the campfire + settler area.
-            // Settlers spawn at _spawnRadius (~3 blocks), so radius 4 covers everything.
-            world.FlattenTerrain(centerX, centerZ, Mathf.CeilToInt(_spawnRadius) + 1);
-
-            // Position on smooth mesh surface (re-query after flattening)
+            // Position on smooth mesh surface (meshes already built with flattened terrain)
             float y = world.GetSmoothedHeightAtWorldPos(centerX + 0.5f, centerZ + 0.5f);
             Vector3 position = new Vector3(centerX + 0.5f, y, centerZ + 0.5f);
 
@@ -211,51 +219,6 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Search outward from the given position for solid ground.
-        /// The terrain will be flattened afterwards, so we only need solid surface.
-        /// </summary>
-        private static void FindSolidGround(WorldManager world, ref int x, ref int z)
-        {
-            // Check the starting position first
-            if (IsSolid(world, x, z))
-                return;
-
-            // Search in expanding rings up to 32 blocks away
-            for (int radius = 1; radius <= 32; radius++)
-            {
-                for (int dx = -radius; dx <= radius; dx++)
-                {
-                    for (int dz = -radius; dz <= radius; dz++)
-                    {
-                        if (Mathf.Abs(dx) != radius && Mathf.Abs(dz) != radius)
-                            continue;
-
-                        int testX = x + dx;
-                        int testZ = z + dz;
-
-                        if (IsSolid(world, testX, testZ))
-                        {
-                            x = testX;
-                            z = testZ;
-                            return;
-                        }
-                    }
-                }
-            }
-
-            Debug.LogWarning("SettlerSpawner: Could not find solid ground near world center!");
-        }
-
-        /// <summary>
-        /// Check if the surface at (x,z) is solid ground.
-        /// </summary>
-        private static bool IsSolid(WorldManager world, int x, int z)
-        {
-            int h = world.GetHeightAtWorldPos(x, z);
-            return h >= 0 && world.GetSurfaceTypeAtWorldPos(x, z).IsSolid();
-        }
-
-        /// <summary>
         /// Create a simple cone mesh with base at y=0 and apex at y=height.
         /// </summary>
         private static Mesh CreateConeMesh(float radius, float height, int segments)
@@ -272,9 +235,9 @@ namespace Terranova.Population
             // Base ring vertices
             for (int i = 0; i < segments; i++)
             {
-                float angle = i * Mathf.PI * 2f / segments;
-                float x = Mathf.Cos(angle) * radius;
-                float z = Mathf.Sin(angle) * radius;
+                float a = i * Mathf.PI * 2f / segments;
+                float x = Mathf.Cos(a) * radius;
+                float z = Mathf.Sin(a) * radius;
                 verts[i + 1] = new Vector3(x, 0f, z);
 
                 // Approximate outward-up normal for the side

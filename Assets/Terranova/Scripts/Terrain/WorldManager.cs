@@ -73,6 +73,14 @@ namespace Terranova.Terrain
         /// </summary>
         public Vector3 FreshwaterCenter { get; private set; }
 
+        /// <summary>
+        /// Block coordinates of campfire location, determined during terrain generation.
+        /// SettlerSpawner uses this to place the visual campfire and spawn settlers.
+        /// Terrain is already flattened at this position.
+        /// </summary>
+        public int CampfireBlockX { get; private set; }
+        public int CampfireBlockZ { get; private set; }
+
         private void Awake()
         {
             // Simple singleton – only one world at a time
@@ -118,6 +126,10 @@ namespace Terranova.Terrain
         /// <summary>
         /// Generate the entire world as a coroutine, publishing progress events
         /// so a loading screen can display a progress bar.
+        ///
+        /// v0.4.7 flow: campfire flattening + pond carving happen BEFORE mesh building,
+        /// so meshes and NavMesh include all modifications. Only ONE NavMesh bake.
+        /// Loading screen stays until SettlerSpawner publishes progress 1.0.
         /// </summary>
         private IEnumerator GenerateWorldAsync()
         {
@@ -141,7 +153,6 @@ namespace Terranova.Terrain
                     CreateChunk(cx, cz);
                     processed++;
                 }
-                // Yield after each row to allow UI update
                 EventBus.Publish(new WorldGenerationProgressEvent
                 {
                     Progress = (float)processed / (totalChunks * 2),
@@ -150,11 +161,18 @@ namespace Terranova.Terrain
                 yield return null;
             }
 
-            // Phase 1.5: Carve pond near spawn (needs all chunks to exist)
-            CarveSpawnPond();
+            // Phase 1.5: Prepare settlement area — flatten campfire zone + carve pond.
+            // All block modifications happen BEFORE mesh building so meshes are correct.
+            EventBus.Publish(new WorldGenerationProgressEvent
+            {
+                Progress = 0.50f,
+                Status = "Preparing settlement..."
+            });
+            yield return null;
 
-            // Phase 2: Build meshes (done separately so neighbor lookups work
-            // across chunk boundaries – all data must exist first)
+            PrepareSettlementArea();
+
+            // Phase 2: Build meshes (includes flattened campfire area + carved pond)
             processed = 0;
             foreach (var chunk in _chunks.Values)
             {
@@ -162,7 +180,7 @@ namespace Terranova.Terrain
                 processed++;
                 EventBus.Publish(new WorldGenerationProgressEvent
                 {
-                    Progress = 0.5f + (float)processed / (totalChunks * 2),
+                    Progress = 0.52f + (float)processed / (totalChunks * 2.2f),
                     Status = $"Building meshes... {processed}/{totalChunks}"
                 });
                 yield return null;
@@ -171,8 +189,8 @@ namespace Terranova.Terrain
             Debug.Log($"World generated: {_worldSizeX}×{_worldSizeZ} chunks " +
                       $"({WorldBlocksX}×{WorldBlocksZ} blocks), seed={GameState.Seed}");
 
-            // Phase 3: NavMesh – must complete before loading screen dismisses
-            // because SettlerSpawner and ResourceSpawner check IsNavMeshReady.
+            // Phase 3: NavMesh — ONE bake that includes flattened camp + pond.
+            // No second bake needed because terrain modifications are already in the meshes.
             EventBus.Publish(new WorldGenerationProgressEvent
             {
                 Progress = 0.95f,
@@ -182,160 +200,180 @@ namespace Terranova.Terrain
 
             BakeNavMesh();
 
+            // Don't publish 1.0 yet — SettlerSpawner does that after spawning settlers.
+            // Loading screen stays visible until settlers appear.
             EventBus.Publish(new WorldGenerationProgressEvent
             {
-                Progress = 1f,
-                Status = "Ready!"
+                Progress = 0.98f,
+                Status = "Spawning settlers..."
             });
         }
 
         /// <summary>
-        /// Carve a freshwater pond near the world center (spawn point).
-        /// Tries multiple candidate positions and picks the flattest terrain.
-        /// Uses a flat water surface at a consistent Y level so the pond looks
-        /// like a proper body of water on any seed and any biome.
-        /// Guaranteed within 25 blocks of spawn center.
+        /// Prepare the settlement area during terrain generation (Phase 1.5).
+        /// Deterministic: campfire position → pond exactly 15-20 blocks away.
+        ///
+        /// Steps:
+        ///   1. Find solid ground near world center for campfire
+        ///   2. Flatten terrain at campfire location (block data only, no mesh rebuild)
+        ///   3. Pick random direction, walk 15-20 blocks, flatten + fill with water
+        ///   4. Assert distance < 30 blocks
+        ///
+        /// All block modifications happen BEFORE Phase 2 mesh building so meshes
+        /// and NavMesh include these changes. No second NavMesh bake needed.
         /// </summary>
-        private void CarveSpawnPond()
+        private void PrepareSettlementArea()
         {
-            int centerX = WorldBlocksX / 2;
-            int centerZ = WorldBlocksZ / 2;
-            int pondRadius = 5;
-            int pondDepth = 3;
+            int campX = WorldBlocksX / 2;
+            int campZ = WorldBlocksZ / 2;
 
-            // Try multiple candidate positions within 10-25 blocks of center
-            var candidates = new (int x, int z)[]
+            // Step 1: Find solid ground near center
+            FindSolidGroundNear(ref campX, ref campZ);
+            CampfireBlockX = campX;
+            CampfireBlockZ = campZ;
+
+            // Step 2: Flatten terrain for campfire + settler spawn area (radius 4)
+            FlattenBlockData(campX, campZ, 4);
+
+            // Step 3: Place freshwater pond 15-20 blocks from campfire
+            var rng = new System.Random(GameState.Seed);
+            float angle = (float)(rng.NextDouble() * 2.0 * Mathf.PI);
+            int distance = 15 + rng.Next(6); // 15 to 20
+            int pondX = campX + Mathf.RoundToInt(Mathf.Cos(angle) * distance);
+            int pondZ = campZ + Mathf.RoundToInt(Mathf.Sin(angle) * distance);
+
+            // Clamp to world bounds (leave 4-block margin)
+            pondX = Mathf.Clamp(pondX, 4, WorldBlocksX - 5);
+            pondZ = Mathf.Clamp(pondZ, 4, WorldBlocksZ - 5);
+
+            // Flatten pond area (5x5 = radius 2 from center)
+            FlattenBlockData(pondX, pondZ, 3);
+
+            // Get reference height at pond center after flattening
+            int pondHeight = GetSolidHeightAtWorldPos(pondX, pondZ);
+            if (pondHeight < 2)
             {
-                (centerX + 15, centerZ),
-                (centerX - 15, centerZ),
-                (centerX, centerZ + 15),
-                (centerX, centerZ - 15),
-                (centerX + 12, centerZ + 12),
-                (centerX - 12, centerZ + 12),
-                (centerX + 12, centerZ - 12),
-                (centerX - 12, centerZ - 12),
-                (centerX + 20, centerZ),
-                (centerX, centerZ + 20),
-            };
-
-            int bestX = -1, bestZ = -1;
-            float bestScore = float.MaxValue;
-
-            foreach (var (cx, cz) in candidates)
-            {
-                // Bounds check
-                if (cx < pondRadius + 1 || cx >= WorldBlocksX - pondRadius - 1) continue;
-                if (cz < pondRadius + 1 || cz >= WorldBlocksZ - pondRadius - 1) continue;
-
-                int h = GetSolidHeightAtWorldPos(cx, cz);
-                if (h < 2) continue;
-
-                // Measure flatness: height variance across the pond footprint
-                float variance = 0;
-                int samples = 0;
-                for (int dx = -pondRadius; dx <= pondRadius; dx += pondRadius)
-                {
-                    for (int dz = -pondRadius; dz <= pondRadius; dz += pondRadius)
-                    {
-                        int nh = GetSolidHeightAtWorldPos(cx + dx, cz + dz);
-                        if (nh < 2) continue;
-                        variance += Mathf.Abs(nh - h);
-                        samples++;
-                    }
-                }
-                if (samples == 0) continue;
-                variance /= samples;
-
-                // Score: prefer flat areas at a reasonable height above sea level
-                float score = variance * 3f + Mathf.Abs(h - (TerrainGenerator.SEA_LEVEL + 4));
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    bestX = cx;
-                    bestZ = cz;
-                }
+                pondHeight = GetSolidHeightAtWorldPos(campX, campZ);
+                if (pondHeight < 2) pondHeight = TerrainGenerator.SEA_LEVEL + 4;
             }
 
-            // Fallback: force center+15 if no good candidate found
-            if (bestX < 0)
-            {
-                bestX = Mathf.Clamp(centerX + 15, pondRadius + 1, WorldBlocksX - pondRadius - 2);
-                bestZ = centerZ;
-            }
-
-            // Carve the pond with a flat water surface
-            CarvePondAt(bestX, bestZ, pondRadius, pondDepth);
-
-            Debug.Log($"CarveSpawnPond: Pond at ({bestX},{bestZ}), " +
-                      $"{Mathf.Sqrt((bestX - centerX) * (bestX - centerX) + (bestZ - centerZ) * (bestZ - centerZ)):F0} blocks from center");
-        }
-
-        /// <summary>
-        /// Carve a bowl-shaped pond with a flat water surface at a consistent Y level.
-        /// All water blocks share the same Y, producing a natural-looking pond.
-        /// Sets FreshwaterCenter so settlers can locate drinkable water.
-        /// </summary>
-        private void CarvePondAt(int pondCX, int pondCZ, int radius, int depth)
-        {
+            // Fill 5x5 area with water (2 blocks deep, flat surface)
             var affectedChunks = new HashSet<Vector2Int>();
-
-            // Reference height at pond center = water surface level
-            int waterLevel = GetSolidHeightAtWorldPos(pondCX, pondCZ);
-            if (waterLevel < 2)
-                waterLevel = GetSolidHeightAtWorldPos(WorldBlocksX / 2, WorldBlocksZ / 2);
-            if (waterLevel < 2)
-                waterLevel = TerrainGenerator.SEA_LEVEL + 4;
-
-            // Store freshwater center for settler water search
-            FreshwaterCenter = new Vector3(pondCX + 0.5f, waterLevel, pondCZ + 0.5f);
-
-            int carved = 0;
-            for (int wx = pondCX - radius; wx <= pondCX + radius; wx++)
+            int pondHalf = 2; // -2 to +2 = 5x5
+            int waterPlaced = 0;
+            for (int wx = pondX - pondHalf; wx <= pondX + pondHalf; wx++)
             {
-                for (int wz = pondCZ - radius; wz <= pondCZ + radius; wz++)
+                for (int wz = pondZ - pondHalf; wz <= pondZ + pondHalf; wz++)
                 {
-                    int dx = wx - pondCX;
-                    int dz = wz - pondCZ;
-                    float dist = Mathf.Sqrt(dx * dx + dz * dz);
-                    if (dist > radius) continue;
-
-                    // Deeper in center, shallower at edge
-                    float t = 1f - (dist / radius);
-                    int scoop = Mathf.Max(1, Mathf.RoundToInt(depth * t));
-                    int localFloor = waterLevel - scoop;
-
-                    // Fill from floor to water surface with water (flat surface)
-                    for (int y = localFloor; y <= waterLevel; y++)
+                    // Water fills from (pondHeight-1) to pondHeight — flat surface
+                    for (int y = pondHeight - 1; y <= pondHeight; y++)
                     {
+                        if (y < 1) continue;
                         SetBlockInternal(wx, y, wz, VoxelType.Water, affectedChunks);
+                        waterPlaced++;
                     }
 
                     // Sand bottom
-                    if (localFloor > 0)
-                        SetBlockInternal(wx, localFloor - 1, wz, VoxelType.Sand, affectedChunks);
+                    if (pondHeight - 2 >= 0)
+                        SetBlockInternal(wx, pondHeight - 2, wz, VoxelType.Sand, affectedChunks);
 
-                    // Clear air above water surface so pond is visible
-                    for (int y = waterLevel + 1; y <= waterLevel + 5; y++)
+                    // Clear air above water so pond is visible
+                    for (int y = pondHeight + 1; y <= pondHeight + 4; y++)
                     {
-                        var existing = GetBlockAtWorldPos(wx, y, wz);
-                        if (existing != VoxelType.Air)
+                        if (GetBlockAtWorldPos(wx, y, wz) != VoxelType.Air)
                             SetBlockInternal(wx, y, wz, VoxelType.Air, affectedChunks);
                     }
-
-                    carved++;
                 }
             }
 
-            // Verify water was actually placed
+            // Store freshwater center for settler water search
+            FreshwaterCenter = new Vector3(pondX + 0.5f, pondHeight, pondZ + 0.5f);
+
+            // Step 4: Verify distance
+            float dist = Mathf.Sqrt(
+                (pondX - campX) * (pondX - campX) +
+                (pondZ - campZ) * (pondZ - campZ));
+
+            if (dist >= 30f)
+                Debug.LogError($"BLOCKER: Water pond too far from campfire! distance={dist:F1} blocks");
+
+            // Verify water was placed
             int verifyCount = 0;
-            for (int wy = waterLevel - depth; wy <= waterLevel; wy++)
+            for (int wy = pondHeight - 1; wy <= pondHeight; wy++)
             {
-                if (GetBlockAtWorldPos(pondCX, wy, pondCZ) == VoxelType.Water)
+                if (GetBlockAtWorldPos(pondX, wy, pondZ) == VoxelType.Water)
                     verifyCount++;
             }
 
-            Debug.Log($"CarvePondAt: ({pondCX},{pondCZ}), radius={radius}, " +
-                      $"waterLevel={waterLevel}, carved {carved} columns, verified {verifyCount} water blocks at center");
+            Debug.Log($"[Settlement] Campfire at ({campX},{campZ}), " +
+                      $"Pond at ({pondX},{pondZ}), distance: {dist:F1} blocks, " +
+                      $"water blocks placed: {waterPlaced}, verified at center: {verifyCount}");
+        }
+
+        /// <summary>
+        /// Search outward from (x,z) for solid ground. Modifies x,z in place.
+        /// Used during terrain generation before campfire placement.
+        /// </summary>
+        private void FindSolidGroundNear(ref int x, ref int z)
+        {
+            if (GetHeightAtWorldPos(x, z) >= 0 && GetSurfaceTypeAtWorldPos(x, z).IsSolid())
+                return;
+
+            for (int radius = 1; radius <= 32; radius++)
+            {
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    for (int dz = -radius; dz <= radius; dz++)
+                    {
+                        if (Mathf.Abs(dx) != radius && Mathf.Abs(dz) != radius) continue;
+                        int testX = x + dx;
+                        int testZ = z + dz;
+                        if (GetHeightAtWorldPos(testX, testZ) >= 0 &&
+                            GetSurfaceTypeAtWorldPos(testX, testZ).IsSolid())
+                        {
+                            x = testX;
+                            z = testZ;
+                            return;
+                        }
+                    }
+                }
+            }
+            Debug.LogWarning("WorldManager: Could not find solid ground near world center!");
+        }
+
+        /// <summary>
+        /// Flatten terrain by modifying block data ONLY (no mesh rebuild, no NavMesh rebake).
+        /// Used during terrain generation phase before mesh building.
+        /// </summary>
+        private void FlattenBlockData(int centerX, int centerZ, int radius)
+        {
+            int targetHeight = GetHeightAtWorldPos(centerX, centerZ);
+            if (targetHeight < 0) return;
+
+            VoxelType surfaceType = GetSurfaceTypeAtWorldPos(centerX, centerZ);
+            if (!surfaceType.IsSolid()) surfaceType = VoxelType.Grass;
+
+            var affectedChunks = new HashSet<Vector2Int>();
+            for (int x = centerX - radius; x <= centerX + radius; x++)
+            {
+                for (int z = centerZ - radius; z <= centerZ + radius; z++)
+                {
+                    int currentHeight = GetHeightAtWorldPos(x, z);
+                    if (currentHeight < 0) continue;
+
+                    if (currentHeight > targetHeight)
+                    {
+                        for (int y = targetHeight + 1; y <= currentHeight; y++)
+                            SetBlockInternal(x, y, z, VoxelType.Air, affectedChunks);
+                    }
+                    else if (currentHeight < targetHeight)
+                    {
+                        for (int y = currentHeight + 1; y <= targetHeight; y++)
+                            SetBlockInternal(x, y, z, surfaceType, affectedChunks);
+                    }
+                }
+            }
+            // No mesh rebuild — Phase 2 handles that
         }
 
         /// <summary>
