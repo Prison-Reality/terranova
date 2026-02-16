@@ -202,7 +202,7 @@ namespace Terranova.Discovery
                 // Roll against probability
                 if (Random.value < finalProb)
                 {
-                    string reason = BuildDiscoveryReason(discovery, tracker);
+                    string reason = BuildDiscoveryReason(discovery, activityTracker);
                     TriggerDiscovery(discovery, stateManager, reason);
                     anyDiscoveredThisCycle = true;
                     break; // One discovery per cycle
