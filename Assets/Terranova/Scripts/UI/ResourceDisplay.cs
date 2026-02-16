@@ -32,8 +32,8 @@ namespace Terranova.UI
         [SerializeField] private float _minTouchTarget = 44f;
 
         // ─── Speed Widget ─────────────────────────────────────────
-        private static readonly float[] SPEED_VALUES = { 0f, 1f, 2f, 3f };
-        private static readonly string[] SPEED_LABELS = { "\u275A\u275A", "1x", "2x", "3x" };
+        private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 5f };
+        private static readonly string[] SPEED_LABELS = { "\u275A\u275A", "1x", "3x", "5x" };
         private int _currentSpeedIndex = 1;
 
         // ─── Game State ───────────────────────────────────────────
@@ -399,8 +399,8 @@ namespace Terranova.UI
         {
             EventBus.Clear();
             Time.timeScale = 1f;
-            // Keep GameStarted true so bootstrapper goes straight to game (not menu)
-            GameState.GameStarted = true;
+            // Return to main menu so player can pick seed/biome
+            GameState.GameStarted = false;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
@@ -488,7 +488,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.4.3";
+            versionText.text = "v0.4.4";
         }
 
         /// <summary>

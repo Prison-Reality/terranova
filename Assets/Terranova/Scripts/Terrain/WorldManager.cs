@@ -116,8 +116,6 @@ namespace Terranova.Terrain
         private IEnumerator GenerateWorldAsync()
         {
             _generator = new TerrainGenerator(GameState.Seed, GameState.SelectedBiome);
-            // Tell generator where world center is so it can place a pond near spawn
-            _generator.SetWorldCenter(WorldBlocksX / 2, WorldBlocksZ / 2);
             int totalChunks = _worldSizeX * _worldSizeZ;
             int processed = 0;
 
@@ -144,6 +142,9 @@ namespace Terranova.Terrain
                 });
                 yield return null;
             }
+
+            // Phase 1.5: Carve pond near spawn (needs all chunks to exist)
+            CarveSpawnPond();
 
             // Phase 2: Build meshes (done separately so neighbor lookups work
             // across chunk boundaries – all data must exist first)
@@ -179,6 +180,58 @@ namespace Terranova.Terrain
                 Progress = 1f,
                 Status = "Ready!"
             });
+        }
+
+        /// <summary>
+        /// Carve an elevation-independent pond near the world center (spawn point).
+        /// Runs after all chunks exist so we can use world coordinates directly.
+        /// Offset 10 blocks from center — well within 30-block walking distance.
+        /// </summary>
+        private void CarveSpawnPond()
+        {
+            int centerX = WorldBlocksX / 2;
+            int centerZ = WorldBlocksZ / 2;
+            int pondCX = centerX + 10;
+            int pondCZ = centerZ + 6;
+            int pondRadius = 4;
+            int pondDepth = 3;
+
+            var affectedChunks = new HashSet<Vector2Int>();
+
+            for (int wx = pondCX - pondRadius; wx <= pondCX + pondRadius; wx++)
+            {
+                for (int wz = pondCZ - pondRadius; wz <= pondCZ + pondRadius; wz++)
+                {
+                    int dx = wx - pondCX;
+                    int dz = wz - pondCZ;
+                    float dist = Mathf.Sqrt(dx * dx + dz * dz);
+                    if (dist > pondRadius) continue;
+
+                    // Find the surface height at this world column
+                    int surfaceY = GetHeightAtWorldPos(wx, wz);
+                    if (surfaceY < 2) continue;
+
+                    // Deeper in center, shallower at edge
+                    float t = 1f - (dist / pondRadius);
+                    int scoop = Mathf.Max(1, Mathf.RoundToInt(pondDepth * t));
+
+                    // Carve terrain and fill with water
+                    for (int d = 0; d < scoop; d++)
+                    {
+                        int y = surfaceY - d;
+                        if (y < 1) break;
+                        SetBlockInternal(wx, y, wz, VoxelType.Water, affectedChunks);
+                    }
+
+                    // Sand bottom
+                    int bottomY = surfaceY - scoop;
+                    if (bottomY >= 0)
+                        SetBlockInternal(wx, bottomY, wz, VoxelType.Sand, affectedChunks);
+                }
+            }
+
+            Debug.Log($"CarveSpawnPond: Pond at ({pondCX},{pondCZ}), radius={pondRadius}, " +
+                      $"distance from spawn={Mathf.Sqrt(10*10 + 6*6):F0} blocks");
         }
 
         /// <summary>
