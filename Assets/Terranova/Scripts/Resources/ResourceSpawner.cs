@@ -20,7 +20,6 @@ namespace Terranova.Resources
     ///   - Water within 30 blocks (terrain handles via sea level)
     ///   - Food sources (berries in forest, roots near water, insects everywhere)
     ///   - Stone source (type varies by biome)
-    ///   - Shelter marker within 40 blocks (cave/overhang/undergrowth)
     ///
     /// Each node uses ResourceNode with a MaterialId from MaterialDatabase.
     /// Visual distinction via primitive shapes and colors per material type.
@@ -278,7 +277,7 @@ namespace Terranova.Resources
 
         /// <summary>
         /// Spawn guaranteed resources near world center so the player always has
-        /// food, stone, and shelter accessible at the start.
+        /// food and stone accessible at the start.
         /// </summary>
         private int SpawnGuaranteedStartResources(
             WorldManager world, System.Random rng, Transform parent,

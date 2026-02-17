@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 using Terranova.Buildings;
 using Terranova.Core;
 using Terranova.Terrain;
