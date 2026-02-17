@@ -159,20 +159,22 @@ namespace Terranova.UI
             _needsRoot.SetActive(true);
 
             // ─── Needs: Thirst bar (blue) ──────────────────────
+            // ThirstPercent: 1.0 = hydrated (full bar), 0.0 = dying (empty bar)
             float thirstPct = GetSettlerThirstPercent(settler);
-            _thirstBarFill.anchorMax = new Vector2(Mathf.Clamp01(1f - thirstPct), 1f);
+            _thirstBarFill.anchorMax = new Vector2(Mathf.Clamp01(thirstPct), 1f);
             _thirstBarFillImage.color = THIRST_COLOR;
             string thirstState = GetSettlerThirstState(settler);
             _thirstLabel.text = $"Thirst: {thirstState}";
 
             // ─── Needs: Hunger bar (orange) ────────────────────
+            // HungerPercent: 1.0 = sated (full bar), 0.0 = starving (empty bar)
             float hungerPct = settler.HungerPercent;
-            _hungerNeedsBarFill.anchorMax = new Vector2(Mathf.Clamp01(1f - hungerPct), 1f);
+            _hungerNeedsBarFill.anchorMax = new Vector2(Mathf.Clamp01(hungerPct), 1f);
 
-            // Color intensity based on hunger severity
-            if (hungerPct > 0.75f)
+            // Color intensity based on hunger severity (low = red, high = green)
+            if (hungerPct < 0.25f)
                 _hungerNeedsBarFillImage.color = DURABILITY_RED;
-            else if (hungerPct > 0.5f)
+            else if (hungerPct < 0.5f)
                 _hungerNeedsBarFillImage.color = HUNGER_COLOR;
             else
                 _hungerNeedsBarFillImage.color = HUNGER_COLOR;

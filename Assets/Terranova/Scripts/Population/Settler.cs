@@ -1167,22 +1167,23 @@ namespace Terranova.Population
             if (!TryFindWaterSource(out waterPos))
             {
                 // No water found - stay put and hope
-                Debug.Log($"[{name}] THIRSTY but no water source found nearby!");
+                Debug.Log($"[{name}] THIRSTY ({_thirst:F0}) but NO water source found! Will retry in 5s.");
                 _state = SettlerState.IdlePausing;
-                _stateTimer = 3f;
+                _stateTimer = 5f;
                 return;
             }
 
             if (!SetAgentDestination(waterPos))
             {
+                Debug.Log($"[{name}] THIRSTY ({_thirst:F0}) - water found at ({waterPos.x:F1},{waterPos.z:F1}) but NavMesh path FAILED!");
                 _state = SettlerState.IdlePausing;
-                _stateTimer = 2f;
+                _stateTimer = 3f;
                 return;
             }
 
             _agent.speed = GetEffectiveSpeed(TASK_WALK_SPEED);
             _state = SettlerState.WalkingToDrink;
-            Debug.Log($"[{name}] THIRSTY ({_thirst:F0}) - walking to water source");
+            Debug.Log($"[{name}] THIRSTY ({_thirst:F0}) - walking to water at ({waterPos.x:F1},{waterPos.z:F1}), dist={Vector3.Distance(transform.position, waterPos):F1}");
         }
 
         /// <summary>Walk to water source.</summary>
@@ -1190,6 +1191,32 @@ namespace Terranova.Population
         {
             if (HasReachedDestination())
             {
+                if (!_pathReachable)
+                {
+                    // Path was partial — check if close enough to a tagged water object
+                    var waterObjects = GameObject.FindGameObjectsWithTag("Water");
+                    bool closeEnough = false;
+                    if (waterObjects != null)
+                    {
+                        foreach (var wo in waterObjects)
+                        {
+                            if (wo != null && Vector3.Distance(transform.position, wo.transform.position) < 6f)
+                            {
+                                closeEnough = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!closeEnough)
+                    {
+                        Debug.Log($"[{name}] Water path incomplete and not close enough - retrying");
+                        _state = SettlerState.IdlePausing;
+                        _stateTimer = 2f;
+                        return;
+                    }
+                }
+
                 _agent.ResetPath();
                 _isMoving = false;
                 _state = SettlerState.Drinking;
@@ -1216,34 +1243,87 @@ namespace Terranova.Population
 
         /// <summary>
         /// Search for the nearest drinkable (freshwater) water source.
-        /// First searches around the carved freshwater pond center to avoid
-        /// ocean/saltwater on Coast biome. Falls back to general search only
-        /// if no freshwater center is available.
+        /// Priority 1: Tagged "Water" GameObjects (the freshwater pond primitive).
+        /// Priority 2: Voxel water blocks (fallback for worlds with carved water).
+        /// Logs detection results for debugging.
         /// </summary>
         private bool TryFindWaterSource(out Vector3 waterPosition)
         {
             waterPosition = Vector3.zero;
 
-            var world = WorldManager.Instance;
-            if (world == null) return false;
+            // Priority 1: Find tagged "Water" GameObjects (freshwater pond)
+            var waterObjects = GameObject.FindGameObjectsWithTag("Water");
+            if (waterObjects != null && waterObjects.Length > 0)
+            {
+                float bestDist = float.MaxValue;
+                GameObject bestWater = null;
 
-            // Always prefer freshwater pond (avoids saltwater ocean on Coast biome)
+                foreach (var wo in waterObjects)
+                {
+                    if (wo == null) continue;
+                    float dist = Vector3.Distance(transform.position, wo.transform.position);
+                    if (dist < WATER_SEARCH_RADIUS && dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestWater = wo;
+                    }
+                }
+
+                if (bestWater != null)
+                {
+                    // Sample NavMesh near the water object's edge (not center, which may be off-mesh)
+                    Vector3 waterCenter = bestWater.transform.position;
+                    Vector3 dirToWater = (waterCenter - transform.position).normalized;
+                    // Aim for the near edge of the pond (radius ~2.5 from center)
+                    Vector3 nearEdge = waterCenter - dirToWater * 2f;
+
+                    if (NavMesh.SamplePosition(nearEdge, out NavMeshHit hit, NAV_SAMPLE_RADIUS * 2f, NavMesh.AllAreas))
+                    {
+                        waterPosition = hit.position;
+                        Debug.Log($"[{name}] Water DETECTED: tagged object '{bestWater.name}' at dist={bestDist:F1}, pathfinding to ({hit.position.x:F1},{hit.position.z:F1})");
+                        return true;
+                    }
+
+                    // Try directly at water position with larger sample radius
+                    if (NavMesh.SamplePosition(waterCenter, out NavMeshHit hit2, NAV_SAMPLE_RADIUS * 3f, NavMesh.AllAreas))
+                    {
+                        waterPosition = hit2.position;
+                        Debug.Log($"[{name}] Water DETECTED: tagged object '{bestWater.name}' at dist={bestDist:F1}, pathfinding to center ({hit2.position.x:F1},{hit2.position.z:F1})");
+                        return true;
+                    }
+
+                    Debug.Log($"[{name}] Water object '{bestWater.name}' found at dist={bestDist:F1} but NO NavMesh path to it!");
+                }
+            }
+
+            // Priority 2: Voxel water blocks (fallback)
+            var world = WorldManager.Instance;
+            if (world == null)
+            {
+                Debug.Log($"[{name}] No water source found: no WorldManager");
+                return false;
+            }
+
+            // Search from freshwater center first, then from settler position
             Vector3 freshCenter = world.FreshwaterCenter;
             if (freshCenter != Vector3.zero)
             {
-                if (TryFindWaterNear(freshCenter, 30, out waterPosition))
+                if (TryFindVoxelWaterNear(freshCenter, 30, out waterPosition))
                     return true;
             }
 
-            // Fallback: search from settler position (for worlds without explicit freshwater)
-            return TryFindWaterNear(transform.position, Mathf.CeilToInt(WATER_SEARCH_RADIUS), out waterPosition);
+            bool found = TryFindVoxelWaterNear(transform.position, Mathf.CeilToInt(WATER_SEARCH_RADIUS), out waterPosition);
+            if (!found)
+                Debug.Log($"[{name}] No water source found anywhere within {WATER_SEARCH_RADIUS} blocks!");
+            return found;
         }
 
         /// <summary>
-        /// Search for water blocks in expanding rings from a given origin.
+        /// Search for voxel water blocks in expanding rings from a given origin.
         /// Returns true if a walkable position adjacent to water is found.
+        /// Fallback for worlds that use carved voxel water instead of primitives.
         /// </summary>
-        private bool TryFindWaterNear(Vector3 origin, int searchRadius, out Vector3 waterPosition)
+        private bool TryFindVoxelWaterNear(Vector3 origin, int searchRadius, out Vector3 waterPosition)
         {
             waterPosition = Vector3.zero;
 
