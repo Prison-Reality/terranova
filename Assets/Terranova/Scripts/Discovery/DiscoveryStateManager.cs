@@ -85,20 +85,24 @@ namespace Terranova.Discovery
                     _unlockedBuildings.Add(bt);
             }
 
-            // Build unlocks description
-            string unlocks = "";
-            if (definition.UnlockedCapabilities != null && definition.UnlockedCapabilities.Length > 0)
-                unlocks += string.Join(", ", definition.UnlockedCapabilities);
-            if (definition.UnlockedBuildings != null && definition.UnlockedBuildings.Length > 0)
+            // Build unlocks description — single unified list, no redundant labels
+            var unlockItems = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            if (definition.UnlockedCapabilities != null)
             {
-                if (unlocks.Length > 0) unlocks += "\n";
-                unlocks += "Buildings: " + string.Join(", ", definition.UnlockedBuildings);
+                foreach (var cap in definition.UnlockedCapabilities)
+                    unlockItems.Add(cap);
             }
-            if (definition.UnlockedResources != null && definition.UnlockedResources.Length > 0)
+            if (definition.UnlockedResources != null)
             {
-                if (unlocks.Length > 0) unlocks += "\n";
-                unlocks += "Resources: " + string.Join(", ", definition.UnlockedResources);
+                foreach (var res in definition.UnlockedResources)
+                    unlockItems.Add(res.ToString());
             }
+            if (definition.UnlockedBuildings != null)
+            {
+                foreach (var bt in definition.UnlockedBuildings)
+                    unlockItems.Add(bt.ToString());
+            }
+            string unlocks = unlockItems.Count > 0 ? string.Join(", ", unlockItems) : "";
 
             // Fire event
             EventBus.Publish(new DiscoveryMadeEvent

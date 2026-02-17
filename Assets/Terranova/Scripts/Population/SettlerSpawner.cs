@@ -8,7 +8,7 @@ namespace Terranova.Population
     /// <summary>
     /// Spawns the initial settlers around the campfire at game start.
     ///
-    /// v0.4.8 flow:
+    /// v0.4.9 flow:
     ///   1. WorldManager.PrepareSettlementArea() flattens campfire zone
     ///      during terrain generation (before mesh building + NavMesh bake).
     ///   2. This spawner waits for NavMesh to be ready.
@@ -231,27 +231,62 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Brute-force spawn a freshwater pond 15-20 blocks from campfire.
+        /// Brute-force spawn a freshwater pond 8-12 blocks from campfire.
         /// Creates a blue cylinder primitive tagged "Water". Not tied to terrain
         /// generation — works regardless of biome, seed, or terrain shape.
         /// Coast biome gets the same freshwater pond (ocean is not drinkable).
+        /// Flattens terrain under the pond and places it on NavMesh-reachable ground.
         /// </summary>
         private void SpawnFreshwaterPond(WorldManager world, Vector3 campfirePos)
         {
             var rng = new System.Random(GameState.Seed + 7);
-            float angle = (float)(rng.NextDouble() * 2.0 * Mathf.PI);
-            int distance = 15 + rng.Next(6); // 15 to 20 blocks
 
-            float pondX = campfirePos.x + Mathf.Cos(angle) * distance;
-            float pondZ = campfirePos.z + Mathf.Sin(angle) * distance;
+            Vector3 pondPos = Vector3.zero;
+            bool placed = false;
 
-            // Clamp to world bounds (leave 4-block margin)
-            pondX = Mathf.Clamp(pondX, 4f, world.WorldBlocksX - 5f);
-            pondZ = Mathf.Clamp(pondZ, 4f, world.WorldBlocksZ - 5f);
+            // Try several angles to find NavMesh-reachable ground
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                float angle = (float)((rng.NextDouble() + attempt * 0.25) * Mathf.PI * 2.0 / 12.0);
+                int distance = 8 + rng.Next(5); // 8 to 12 blocks (closer than before)
 
-            // Snap to terrain surface
-            float pondY = world.GetSmoothedHeightAtWorldPos(pondX, pondZ);
-            Vector3 pondPos = new Vector3(pondX, pondY, pondZ);
+                float pondX = campfirePos.x + Mathf.Cos(angle) * distance;
+                float pondZ = campfirePos.z + Mathf.Sin(angle) * distance;
+
+                // Clamp to world bounds (leave 4-block margin)
+                pondX = Mathf.Clamp(pondX, 4f, world.WorldBlocksX - 5f);
+                pondZ = Mathf.Clamp(pondZ, 4f, world.WorldBlocksZ - 5f);
+
+                // Flatten terrain under pond area
+                int blockX = Mathf.FloorToInt(pondX);
+                int blockZ = Mathf.FloorToInt(pondZ);
+                world.FlattenTerrain(blockX, blockZ, 3);
+
+                // Snap to terrain surface
+                float pondY = world.GetSmoothedHeightAtWorldPos(pondX, pondZ);
+                Vector3 candidate = new Vector3(pondX, pondY, pondZ);
+
+                // Verify NavMesh is reachable near the pond edge
+                Vector3 edgeTest = candidate + (campfirePos - candidate).normalized * 3f;
+                if (NavMesh.SamplePosition(edgeTest, out NavMeshHit hit, 5f, NavMesh.AllAreas))
+                {
+                    pondPos = candidate;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed)
+            {
+                // Fallback: place directly between campfire and center
+                float pondX = campfirePos.x + 10f;
+                float pondZ = campfirePos.z;
+                pondX = Mathf.Clamp(pondX, 4f, world.WorldBlocksX - 5f);
+                pondZ = Mathf.Clamp(pondZ, 4f, world.WorldBlocksZ - 5f);
+                float pondY = world.GetSmoothedHeightAtWorldPos(pondX, pondZ);
+                pondPos = new Vector3(pondX, pondY, pondZ);
+                Debug.LogWarning("[Water] Used fallback pond position — NavMesh check failed for all attempts");
+            }
 
             // Create blue cylinder primitive
             var pond = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -260,6 +295,16 @@ namespace Terranova.Population
             pond.transform.position = pondPos;
             // Flat disc: wide radius (2.5 blocks each side = 5 block diameter), shallow depth
             pond.transform.localScale = new Vector3(5f, 0.15f, 5f);
+
+            // Remove the default CapsuleCollider (cylinder collider) — it blocks NavMesh
+            var defaultCollider = pond.GetComponent<Collider>();
+            if (defaultCollider != null) Destroy(defaultCollider);
+
+            // Add a trigger collider instead (doesn't block pathfinding)
+            var triggerCol = pond.AddComponent<BoxCollider>();
+            triggerCol.isTrigger = true;
+            triggerCol.center = Vector3.zero;
+            triggerCol.size = new Vector3(1f, 0.5f, 1f);
 
             // Blue water material
             Shader shader = Shader.Find("Universal Render Pipeline/Lit")
@@ -286,10 +331,10 @@ namespace Terranova.Population
             // Verify distance
             float dist = Vector3.Distance(
                 new Vector3(campfirePos.x, 0, campfirePos.z),
-                new Vector3(pondX, 0, pondZ));
+                new Vector3(pondPos.x, 0, pondPos.z));
 
-            Debug.Log($"[Water] Freshwater pond at ({pondX:F1},{pondZ:F1}), " +
-                      $"distance from campfire: {dist:F1} blocks");
+            Debug.Log($"[Water] Freshwater pond at ({pondPos.x:F1},{pondPos.z:F1}), " +
+                      $"distance from campfire: {dist:F1} blocks, tag={pond.tag}");
 
             if (dist >= 30f)
                 Debug.LogError($"BLOCKER: Freshwater pond too far! distance={dist:F1} blocks (max 30)");
