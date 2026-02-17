@@ -2,6 +2,7 @@
     "name": "Terranova.UI",
     "rootNamespace": "Terranova.UI",
     "references": [
+        "Terranova.Camera",
         "Terranova.Core",
         "Terranova.Buildings",
         "Terranova.Discovery",
