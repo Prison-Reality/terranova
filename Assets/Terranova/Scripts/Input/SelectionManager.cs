@@ -216,6 +216,10 @@ namespace Terranova.Input
         /// </summary>
         private void TrySelect(Vector2 screenPos, bool isDetailView)
         {
+            // Don't process selection when a UI overlay is active (Klappbuch, etc.)
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                return;
+
             Ray ray = UnityEngine.Camera.main.ScreenPointToRay(screenPos);
 
             // QueryTriggerInteraction.Collide: settler body collider is a trigger

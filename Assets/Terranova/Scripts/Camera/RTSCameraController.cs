@@ -28,6 +28,14 @@ namespace Terranova.Camera
     [RequireComponent(typeof(UnityEngine.Camera))]
     public class RTSCameraController : MonoBehaviour
     {
+        /// <summary>
+        /// When true, all camera input is ignored (e.g. while Klappbuch UI is open).
+        /// </summary>
+        public static bool InputDisabled { get; set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetInputDisabled() { InputDisabled = false; }
+
         [Header("Movement")]
         [Tooltip("Camera pan speed in units/second.")]
         [SerializeField] private float _panSpeed = 30f;
@@ -138,10 +146,13 @@ namespace Terranova.Camera
                 }
             }
 
-            HandlePan();
-            HandleZoom();
-            HandleRotation();
-            HandleTouch();
+            if (!InputDisabled)
+            {
+                HandlePan();
+                HandleZoom();
+                HandleRotation();
+                HandleTouch();
+            }
             ClampToWorldBounds();
             UpdateCameraTransform();
         }

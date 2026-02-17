@@ -134,6 +134,26 @@ namespace Terranova.Orders
             Debug.Log($"[Order] Cancelled: {order.BuildSentence()} (id={orderId})");
         }
 
+        /// <summary>
+        /// Delete an order entirely from the list.
+        /// </summary>
+        public void DeleteOrder(int orderId)
+        {
+            var order = FindOrder(orderId);
+            if (order == null) return;
+
+            order.AssignedSettlers.Clear();
+            _orders.Remove(order);
+
+            EventBus.Publish(new OrderStatusChangedEvent
+            {
+                OrderId = orderId,
+                NewStatus = OrderStatus.Failed
+            });
+
+            Debug.Log($"[Order] Deleted: id={orderId}");
+        }
+
         /// <summary>Remove completed/failed orders from the list.</summary>
         public void CleanupFinished()
         {

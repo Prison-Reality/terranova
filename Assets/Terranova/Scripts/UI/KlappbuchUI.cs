@@ -8,80 +8,99 @@ using Terranova.Population;
 namespace Terranova.UI
 {
     /// <summary>
-    /// Feature 7.3: Klappbuch UI (3-Column Picker).
+    /// Feature 7.3 (v0.4.13): Klappbuch UI — iOS-style scroll-picker.
     ///
-    /// Inspired by children's flip-books (Klappbuch) where you flip head/body/legs
-    /// independently. Three scrollable columns side by side:
-    ///   Column 1 - WHO (Subject): All, Next Free, each settler by name
-    ///   Column 2 - DOES (Predicate): verbs with lock states
-    ///   Column 3 - WHAT/WHERE (Objects): context-dependent on predicate
+    /// Three columns (WHO / DOES / WHAT-WHERE) where the user scrolls each
+    /// column and the center item is the current selection (like UIPickerView).
     ///
-    /// Feature 7.4: Result line at bottom showing assembled sentence.
-    /// Feature 7.5: Contextual opening from taps.
+    /// Layout: 90 % of screen width, each column exactly 1/3 with 5 px padding.
+    /// Pauses game and disables camera input while open.
     /// </summary>
     public class KlappbuchUI : MonoBehaviour
     {
         public static KlappbuchUI Instance { get; private set; }
 
-        // ─── Layout Constants ────────────────────────────────
+        // ─── Fixed Layout Constants ─────────────────────────────
+        private const float ROW_HEIGHT = 44f;
+        private const float ROW_HEIGHT_LOCKED = 56f;
+        private const float SPACING = 2f;
+        private const float COL_PAD = 5f;
+        private const float TITLE_H = 40f;
+        private const float RESULT_H = 56f;
+        private const float BTN_H = 50f;
+        private const float CLOSE_SIZE = 44f;
+        private const int FONT_MIN = 14;
+        private const float SNAP_THRESHOLD = 80f;
+        private const float SNAP_SPEED = 12f;
 
-        private const float PANEL_WIDTH = 1040f;
-        private const float PANEL_HEIGHT = 560f;
-        private const float COLUMN_WIDTH = 320f;
-        private const float COLUMN_HEIGHT = 370f;
-        private const float ROW_HEIGHT = 52f;
-        private const float ROW_HEIGHT_LOCKED = 64f;
-        private const float HEADER_HEIGHT = 36f;
-        private const float RESULT_HEIGHT = 80f;
-        private const float BUTTON_HEIGHT = 50f;
-        private const float PADDING = 8f;
-
-        private static readonly Color BG_COLOR = new(0.08f, 0.10f, 0.08f, 0.95f);
-        private static readonly Color COLUMN_BG = new(0.12f, 0.14f, 0.12f, 0.9f);
-        private static readonly Color ROW_NORMAL = new(0.16f, 0.20f, 0.16f, 0.8f);
-        private static readonly Color ROW_SELECTED = new(0.25f, 0.50f, 0.30f, 0.95f);
-        private static readonly Color ROW_LOCKED = new(0.12f, 0.12f, 0.12f, 0.6f);
+        // ─── Colors ─────────────────────────────────────────────
+        private static readonly Color BG = new(0.08f, 0.10f, 0.08f, 0.95f);
+        private static readonly Color COL_BG = new(0.12f, 0.14f, 0.12f, 0.9f);
+        private static readonly Color BAND_COLOR = new(0.3f, 0.55f, 0.35f, 0.35f);
+        private static readonly Color ROW_N = new(0.16f, 0.20f, 0.16f, 0.8f);
+        private static readonly Color ROW_LOCK = new(0.12f, 0.12f, 0.12f, 0.6f);
         private static readonly Color ROW_BUSY = new(0.14f, 0.14f, 0.14f, 0.5f);
-        private static readonly Color TEXT_NORMAL = Color.white;
-        private static readonly Color TEXT_LOCKED = new(0.5f, 0.5f, 0.5f);
-        private static readonly Color TEXT_BUSY = new(0.6f, 0.6f, 0.6f);
-        private static readonly Color NEGATED_COLOR = new(0.9f, 0.25f, 0.25f);
-        private static readonly Color VALID_COLOR = new(0.3f, 0.9f, 0.4f);
-        private static readonly Color INVALID_COLOR = new(1f, 0.6f, 0.2f);
-        private static readonly Color CONFIRM_ACTIVE = new(0.2f, 0.55f, 0.3f, 0.95f);
-        private static readonly Color CONFIRM_INACTIVE = new(0.2f, 0.2f, 0.2f, 0.5f);
+        private static readonly Color TXT_N = Color.white;
+        private static readonly Color TXT_L = new(0.5f, 0.5f, 0.5f);
+        private static readonly Color TXT_B = new(0.6f, 0.6f, 0.6f);
+        private static readonly Color NEG_C = new(0.9f, 0.25f, 0.25f);
+        private static readonly Color VALID_C = new(0.3f, 0.9f, 0.4f);
+        private static readonly Color INVALID_C = new(1f, 0.6f, 0.2f);
+        private static readonly Color CONFIRM_ON = new(0.2f, 0.55f, 0.3f, 0.95f);
+        private static readonly Color CONFIRM_OFF = new(0.2f, 0.2f, 0.2f, 0.5f);
 
-        // ─── State ───────────────────────────────────────────
-
+        // ─── State ──────────────────────────────────────────────
         private GameObject _panel;
         private bool _isOpen;
-
-        // Selection state
-        private OrderSubject _selectedSubject = OrderSubject.All;
-        private string _selectedSettlerName;
-        private OrderPredicate _selectedPredicate = OrderPredicate.Gather;
-        private List<OrderObject> _selectedObjects = new();
+        private float _savedTimeScale;
         private bool _isNegated;
         private Vector3? _tapPosition;
 
-        // UI element references for rebuilding columns
-        private Transform _whoContent;
-        private Transform _doesContent;
-        private Transform _whatContent;
+        // Computed layout
+        private float _panelW, _panelH, _colW, _colH;
+
+        // Picker scroll rects and content rects
+        private ScrollRect _whoScroll, _doesScroll, _whatScroll;
+        private RectTransform _whoContentRect, _doesContentRect, _whatContentRect;
+
+        // Item data
+        private readonly List<WhoItem> _whoItems = new();
+        private readonly List<DoesItem> _doesItems = new();
+        private readonly List<WhatItem> _whatItems = new();
+
+        // Selected center indices
+        private int _whoIdx, _doesIdx, _whatIdx;
+        private int _prevDoesIdx = -1;
+
+        // UI refs
         private Text _resultText;
-        private Button _confirmButton;
         private Image _confirmBg;
-        private Text _confirmLabel;
+        private Button _confirmBtn;
+        private Image _negateImg;
 
-        // Track row GameObjects for selection highlight
-        private readonly List<(GameObject go, int index)> _whoRows = new();
-        private readonly List<(GameObject go, int index)> _doesRows = new();
-        private readonly List<(GameObject go, OrderObject obj)> _whatRows = new();
+        // ─── Data structs ───────────────────────────────────────
+        private struct WhoItem
+        {
+            public OrderSubject Subject;
+            public string SettlerName;
+            public bool IsBusy;
+            public string DisplayLabel;
+            public string Subtitle;
+        }
 
-        private int _whoSelectedIndex;
-        private int _doesSelectedIndex;
+        private struct DoesItem
+        {
+            public OrderPredicate Predicate;
+            public bool IsLocked;
+            public string RequiredDiscovery;
+        }
 
-        // ─── Lifecycle ───────────────────────────────────────
+        private struct WhatItem
+        {
+            public OrderObject Object;
+        }
+
+        // ─── Lifecycle ──────────────────────────────────────────
 
         private void Awake()
         {
@@ -106,90 +125,83 @@ namespace Terranova.UI
 
         private void Update()
         {
-            // ESC or back button closes
-            if (_isOpen && UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            if (!_isOpen) return;
+
+            if (UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            {
                 Close();
+                return;
+            }
+
+            // Snap each picker column to nearest valid item
+            SnapColumn(_whoScroll, _whoContentRect, _whoItems.Count, ROW_HEIGHT,
+                ref _whoIdx, null);
+            SnapDoesColumn();
+            SnapColumn(_whatScroll, _whatContentRect, _whatItems.Count, ROW_HEIGHT,
+                ref _whatIdx, null);
+
+            // Check if DOES selection changed → rebuild WHAT
+            if (_doesIdx != _prevDoesIdx)
+            {
+                _prevDoesIdx = _doesIdx;
+                RebuildWhatColumn();
+            }
+
+            UpdateResultLine();
         }
 
-        // ─── Open / Close ────────────────────────────────────
+        // ─── Open / Close ───────────────────────────────────────
 
-        private void OnOpenRequest(OpenKlappbuchEvent evt)
-        {
-            Open(evt);
-        }
+        private void OnOpenRequest(OpenKlappbuchEvent evt) => Open(evt);
 
-        /// <summary>Feature 7.5: Contextual opening.</summary>
         public void Open(OpenKlappbuchEvent context = default)
         {
             if (_isOpen) Close();
 
-            // Reset selection
-            _selectedSubject = OrderSubject.All;
-            _selectedSettlerName = null;
-            _selectedPredicate = OrderPredicate.Gather;
-            _selectedObjects.Clear();
+            // Pause game and disable camera
+            _savedTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+            Terranova.Camera.RTSCameraController.InputDisabled = true;
+
+            // Reset state
             _isNegated = false;
             _tapPosition = context.TapPosition;
-            _whoSelectedIndex = 0;
-            _doesSelectedIndex = 0;
+            _whoIdx = 0;
+            _doesIdx = 0;
+            _whatIdx = 0;
+            _prevDoesIdx = -1;
 
-            // Apply contextual pre-fills
-            if (!string.IsNullOrEmpty(context.SettlerName))
-            {
-                _selectedSubject = OrderSubject.Named;
-                _selectedSettlerName = context.SettlerName;
-            }
-
-            if (context.PredicateHint.HasValue)
-            {
-                _selectedPredicate = context.PredicateHint.Value;
-            }
-
-            if (context.TapPosition.HasValue && PredicateUsesLocations(_selectedPredicate))
-            {
-                var hereObj = new OrderObject("here", "Here", OrderObjectCategory.Location)
-                    { Position = context.TapPosition };
-                _selectedObjects.Add(hereObj);
-            }
-
-            if (!string.IsNullOrEmpty(context.ObjectId))
-            {
-                var vocab = OrderVocabulary.Instance;
-                if (vocab != null)
-                {
-                    foreach (var obj in vocab.UnlockedObjects)
-                    {
-                        if (obj.Id == context.ObjectId)
-                        {
-                            _selectedObjects.Add(obj);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            BuildPanel();
+            BuildPanel(context);
             _isOpen = true;
         }
 
         public void Close()
         {
-            if (_panel != null)
-                Destroy(_panel);
+            // Restore game state
+            Time.timeScale = _savedTimeScale;
+            Terranova.Camera.RTSCameraController.InputDisabled = false;
+
+            if (_panel != null) Destroy(_panel);
             _panel = null;
             _isOpen = false;
-            _whoRows.Clear();
-            _doesRows.Clear();
-            _whatRows.Clear();
+            _whoItems.Clear();
+            _doesItems.Clear();
+            _whatItems.Clear();
         }
 
         public bool IsOpen => _isOpen;
 
-        // ─── Panel Construction ──────────────────────────────
+        // ─── Panel Construction ─────────────────────────────────
 
-        private void BuildPanel()
+        private void BuildPanel(OpenKlappbuchEvent context)
         {
-            // Full-screen dark overlay
+            // Compute layout: 90 % screen width, capped height
+            _panelW = Screen.width * 0.9f;
+            _panelH = Mathf.Min(Screen.height * 0.85f, 600f);
+            _colW = (_panelW - COL_PAD * 4f) / 3f;
+            _colH = _panelH - TITLE_H - RESULT_H - BTN_H - 24f;
+
+            // Full-screen overlay
             _panel = new GameObject("KlappbuchPanel");
             _panel.transform.SetParent(transform, false);
             _panel.transform.SetAsLastSibling();
@@ -202,421 +214,505 @@ namespace Terranova.UI
             overlayRect.offsetMax = Vector2.zero;
 
             // Click overlay to close
-            var closeBtn = _panel.AddComponent<Button>();
-            closeBtn.onClick.AddListener(Close);
+            _panel.AddComponent<Button>().onClick.AddListener(Close);
 
-            // Main card (centered)
-            var card = CreateChild(_panel.transform, "Card", Vector2.zero,
-                new Vector2(PANEL_WIDTH, PANEL_HEIGHT));
-            var cardImg = card.AddComponent<Image>();
-            cardImg.color = BG_COLOR;
-            // Prevent click-through to overlay close button
-            card.AddComponent<Button>().onClick.AddListener(() => { });
+            // Main card
+            var card = MakeRect(_panel.transform, "Card", Vector2.zero,
+                new Vector2(_panelW, _panelH));
+            card.AddComponent<Image>().color = BG;
+            card.AddComponent<Button>().onClick.AddListener(() => { }); // block click-through
 
-            // Title bar
-            var titleObj = CreateChild(card.transform, "Title",
-                new Vector2(0, PANEL_HEIGHT / 2 - 20), new Vector2(PANEL_WIDTH - 100, 36));
-            var titleText = titleObj.AddComponent<Text>();
-            titleText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            titleText.fontSize = 22;
+            // ── Title bar ──
+            var titleGo = MakeRect(card.transform, "Title",
+                new Vector2(0, _panelH / 2 - TITLE_H / 2),
+                new Vector2(_panelW - CLOSE_SIZE - 20, TITLE_H));
+            var titleText = titleGo.AddComponent<Text>();
+            titleText.font = GetFont();
+            titleText.fontSize = 20;
             titleText.color = new Color(0.8f, 0.9f, 0.7f);
             titleText.alignment = TextAnchor.MiddleCenter;
             titleText.fontStyle = FontStyle.Bold;
             titleText.text = "ORDERS";
 
-            // Close button (X) top-right
-            var closeBtnObj = CreateChild(card.transform, "CloseX",
-                new Vector2(PANEL_WIDTH / 2 - 30, PANEL_HEIGHT / 2 - 20), new Vector2(40, 36));
-            var closeBtnImg = closeBtnObj.AddComponent<Image>();
-            closeBtnImg.color = new Color(0.5f, 0.2f, 0.2f, 0.8f);
-            var closeXBtn = closeBtnObj.AddComponent<Button>();
-            closeXBtn.targetGraphic = closeBtnImg;
-            closeXBtn.onClick.AddListener(Close);
-            var closeLabel = CreateChild(closeBtnObj.transform, "X", Vector2.zero, new Vector2(40, 36));
-            var closeLabelText = closeLabel.AddComponent<Text>();
-            closeLabelText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            closeLabelText.fontSize = 20;
-            closeLabelText.color = Color.white;
-            closeLabelText.alignment = TextAnchor.MiddleCenter;
-            closeLabelText.text = "X";
+            // ── Close [X] button (44 × 44) ──
+            var closeGo = MakeRect(card.transform, "CloseX",
+                new Vector2(_panelW / 2 - CLOSE_SIZE / 2 - 4, _panelH / 2 - CLOSE_SIZE / 2 - 2),
+                new Vector2(CLOSE_SIZE, CLOSE_SIZE));
+            closeGo.AddComponent<Image>().color = new Color(0.5f, 0.2f, 0.2f, 0.8f);
+            var closeBtn = closeGo.AddComponent<Button>();
+            closeBtn.onClick.AddListener(Close);
+            var closeLabel = MakeRect(closeGo.transform, "X", Vector2.zero,
+                new Vector2(CLOSE_SIZE, CLOSE_SIZE));
+            var closeTxt = closeLabel.AddComponent<Text>();
+            closeTxt.font = GetFont();
+            closeTxt.fontSize = 22;
+            closeTxt.color = Color.white;
+            closeTxt.alignment = TextAnchor.MiddleCenter;
+            closeTxt.fontStyle = FontStyle.Bold;
+            closeTxt.text = "X";
 
-            // Three columns
-            float columnsY = 20f;
-            float colSpacing = (PANEL_WIDTH - 3 * COLUMN_WIDTH) / 4f;
+            // ── Active Orders button (top-left) ──
+            var listBtnGo = MakeRect(card.transform, "ActiveOrdersBtn",
+                new Vector2(-_panelW / 2 + 70, _panelH / 2 - TITLE_H / 2),
+                new Vector2(120, 32));
+            listBtnGo.AddComponent<Image>().color = new Color(0.25f, 0.30f, 0.45f, 0.8f);
+            listBtnGo.AddComponent<Button>().onClick.AddListener(() =>
+            {
+                if (OrderListUI.Instance != null) OrderListUI.Instance.Toggle();
+            });
+            var listTxt = MakeRect(listBtnGo.transform, "T", Vector2.zero, new Vector2(120, 32));
+            var lt = listTxt.AddComponent<Text>();
+            lt.font = GetFont();
+            lt.fontSize = FONT_MIN;
+            lt.color = Color.white;
+            lt.alignment = TextAnchor.MiddleCenter;
+            lt.text = "Active Orders";
 
-            float col1X = -PANEL_WIDTH / 2 + colSpacing + COLUMN_WIDTH / 2;
-            float col2X = col1X + COLUMN_WIDTH + colSpacing;
-            float col3X = col2X + COLUMN_WIDTH + colSpacing;
+            // ── Three picker columns ──
+            float columnsY = (_panelH / 2 - TITLE_H) - _colH / 2 - 4;
+            float col1X = -_panelW / 2 + COL_PAD + _colW / 2;
+            float col2X = col1X + _colW + COL_PAD;
+            float col3X = col2X + _colW + COL_PAD;
 
-            BuildColumn(card.transform, "WHO", col1X, columnsY, BuildWhoColumn, out _whoContent);
-            BuildColumn(card.transform, "DOES", col2X, columnsY, BuildDoesColumn, out _doesContent);
-            BuildColumn(card.transform, "WHAT / WHERE", col3X, columnsY, BuildWhatColumn, out _whatContent);
+            PopulateWhoItems(context);
+            PopulateDoesItems(context);
+            PopulateWhatItems();
 
-            // Result line at bottom
-            float resultY = -PANEL_HEIGHT / 2 + RESULT_HEIGHT / 2 + BUTTON_HEIGHT + PADDING;
+            _whoScroll = BuildPickerColumn(card.transform, "WHO", col1X, columnsY,
+                _whoItems.Count, BuildWhoRows, out _whoContentRect);
+            _doesScroll = BuildPickerColumn(card.transform, "DOES", col2X, columnsY,
+                _doesItems.Count, BuildDoesRows, out _doesContentRect);
+            _whatScroll = BuildPickerColumn(card.transform, "WHAT / WHERE", col3X, columnsY,
+                _whatItems.Count, BuildWhatRows, out _whatContentRect);
+
+            // ── Result line ──
+            float resultY = -_panelH / 2 + BTN_H + RESULT_H / 2 + 8;
             BuildResultLine(card.transform, resultY);
 
-            // Confirm button at very bottom
-            float btnY = -PANEL_HEIGHT / 2 + BUTTON_HEIGHT / 2 + PADDING;
+            // ── Confirm button ──
+            float btnY = -_panelH / 2 + BTN_H / 2 + 4;
             BuildConfirmButton(card.transform, btnY);
+
+            // ── Scroll to context pre-fills ──
+            ApplyContextScroll(context);
+            _prevDoesIdx = _doesIdx;
 
             UpdateResultLine();
         }
 
-        private void BuildColumn(Transform parent, string header, float x, float y,
-            System.Action<Transform> populateContent, out Transform contentTransform)
+        // ─── Picker Column Builder ──────────────────────────────
+
+        private ScrollRect BuildPickerColumn(Transform parent, string header,
+            float x, float y, int itemCount,
+            System.Action<Transform> populateRows, out RectTransform contentRect)
         {
-            // Column container
-            var colObj = CreateChild(parent, $"Col_{header}",
-                new Vector2(x, y), new Vector2(COLUMN_WIDTH, COLUMN_HEIGHT + HEADER_HEIGHT));
+            float totalH = _colH + 28; // header + column
+            var col = MakeRect(parent, $"Col_{header}", new Vector2(x, y),
+                new Vector2(_colW, totalH));
 
             // Header
-            var headerObj = CreateChild(colObj.transform, "Header",
-                new Vector2(0, COLUMN_HEIGHT / 2 + HEADER_HEIGHT / 2 - 4),
-                new Vector2(COLUMN_WIDTH, HEADER_HEIGHT));
-            var headerText = headerObj.AddComponent<Text>();
-            headerText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            headerText.fontSize = 16;
-            headerText.color = new Color(0.7f, 0.8f, 0.6f);
-            headerText.alignment = TextAnchor.MiddleCenter;
-            headerText.fontStyle = FontStyle.Bold;
-            headerText.text = header;
+            var hdrGo = MakeRect(col.transform, "Header",
+                new Vector2(0, totalH / 2 - 14), new Vector2(_colW, 28));
+            var hdrTxt = hdrGo.AddComponent<Text>();
+            hdrTxt.font = GetFont();
+            hdrTxt.fontSize = 15;
+            hdrTxt.color = new Color(0.7f, 0.8f, 0.6f);
+            hdrTxt.alignment = TextAnchor.MiddleCenter;
+            hdrTxt.fontStyle = FontStyle.Bold;
+            hdrTxt.text = header;
 
-            // Scroll area background
-            var scrollBg = CreateChild(colObj.transform, "ScrollBg",
-                new Vector2(0, -HEADER_HEIGHT / 2 + 4),
-                new Vector2(COLUMN_WIDTH, COLUMN_HEIGHT));
-            scrollBg.AddComponent<Image>().color = COLUMN_BG;
-            scrollBg.AddComponent<RectMask2D>();
+            // Scroll viewport
+            var vpGo = MakeRect(col.transform, "Viewport",
+                new Vector2(0, -14), new Vector2(_colW, _colH));
+            vpGo.AddComponent<Image>().color = COL_BG;
+            vpGo.AddComponent<RectMask2D>();
+
+            // Highlight band (center selection indicator, non-interactive)
+            var band = MakeRect(vpGo.transform, "Band",
+                Vector2.zero, new Vector2(_colW, ROW_HEIGHT + 4));
+            var bandImg = band.AddComponent<Image>();
+            bandImg.color = BAND_COLOR;
+            bandImg.raycastTarget = false;
 
             // ScrollRect
-            var scrollRect = scrollBg.AddComponent<ScrollRect>();
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
-            scrollRect.movementType = ScrollRect.MovementType.Clamped;
-            scrollRect.scrollSensitivity = 30f;
+            var scroll = vpGo.AddComponent<ScrollRect>();
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Elastic;
+            scroll.elasticity = 0.1f;
+            scroll.inertia = true;
+            scroll.decelerationRate = 0.08f;
+            scroll.scrollSensitivity = 30f;
 
-            // Content container inside scroll
+            // Content container
             var content = new GameObject("Content");
-            content.transform.SetParent(scrollBg.transform, false);
-            var contentRect = content.AddComponent<RectTransform>();
+            content.transform.SetParent(vpGo.transform, false);
+            contentRect = content.AddComponent<RectTransform>();
             contentRect.anchorMin = new Vector2(0, 1);
             contentRect.anchorMax = new Vector2(1, 1);
             contentRect.pivot = new Vector2(0.5f, 1);
             contentRect.anchoredPosition = Vector2.zero;
-            // sizeDelta.y will be set by ContentSizeFitter
+
+            // Top/bottom padding so first/last items can scroll to center
+            float pad = Mathf.FloorToInt(_colH / 2f - ROW_HEIGHT / 2f);
 
             var layout = content.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 2;
-            layout.padding = new RectOffset(4, 4, 4, 4);
+            layout.spacing = SPACING;
+            layout.padding = new RectOffset(2, 2, (int)pad, (int)pad);
             layout.childAlignment = TextAnchor.UpperCenter;
             layout.childControlWidth = true;
             layout.childControlHeight = false;
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
 
-            var fitter = content.AddComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            content.AddComponent<ContentSizeFitter>().verticalFit =
+                ContentSizeFitter.FitMode.PreferredSize;
 
-            scrollRect.content = contentRect;
-            contentTransform = content.transform;
+            scroll.content = contentRect;
 
-            // Populate
-            populateContent(content.transform);
+            // Populate rows
+            populateRows(content.transform);
+
+            return scroll;
         }
 
-        // ─── WHO Column (Feature 7.3) ──────────────────────
+        // ─── WHO Items ──────────────────────────────────────────
 
-        private void BuildWhoColumn(Transform content)
+        private void PopulateWhoItems(OpenKlappbuchEvent context)
         {
-            _whoRows.Clear();
-            int index = 0;
+            _whoItems.Clear();
+            _whoItems.Add(new WhoItem
+            {
+                Subject = OrderSubject.All,
+                DisplayLabel = "All Settlers",
+                Subtitle = ""
+            });
+            _whoItems.Add(new WhoItem
+            {
+                Subject = OrderSubject.NextFree,
+                DisplayLabel = "Next Free",
+                Subtitle = ""
+            });
 
-            // "All" option
-            var allRow = CreateRow(content, "All", "", false, false, ROW_NORMAL, TEXT_NORMAL);
-            bool allSelected = _selectedSubject == OrderSubject.All;
-            if (allSelected) allRow.GetComponent<Image>().color = ROW_SELECTED;
-            int allIdx = index;
-            allRow.GetComponent<Button>().onClick.AddListener(() => SelectWho(OrderSubject.All, null, allIdx));
-            _whoRows.Add((allRow, index++));
-
-            // "Next Free" option
-            var nextRow = CreateRow(content, "Next Free", "", false, false, ROW_NORMAL, TEXT_NORMAL);
-            bool nextSelected = _selectedSubject == OrderSubject.NextFree;
-            if (nextSelected) nextRow.GetComponent<Image>().color = ROW_SELECTED;
-            int nextIdx = index;
-            nextRow.GetComponent<Button>().onClick.AddListener(() => SelectWho(OrderSubject.NextFree, null, nextIdx));
-            _whoRows.Add((nextRow, index++));
-
-            // Each settler by name
             var settlers = Object.FindObjectsByType<Settler>(FindObjectsSortMode.None);
-            foreach (var settler in settlers)
+            int contextIdx = -1;
+            for (int i = 0; i < settlers.Length; i++)
             {
-                string settlerName = settler.name;
-                string subtitle = settler.HasTask ? settler.StateName : "";
-                bool isBusy = settler.HasTask;
-                Color bgColor = isBusy ? ROW_BUSY : ROW_NORMAL;
-                Color textColor = isBusy ? TEXT_BUSY : TEXT_NORMAL;
+                var s = settlers[i];
+                bool busy = s.HasTask;
+                _whoItems.Add(new WhoItem
+                {
+                    Subject = OrderSubject.Named,
+                    SettlerName = s.name,
+                    IsBusy = busy,
+                    DisplayLabel = s.name,
+                    Subtitle = busy ? s.StateName : $"[{s.Trait.ToString()[0]}]"
+                });
 
-                var row = CreateRow(content, settlerName,
-                    isBusy ? $"({subtitle})" : $"[{settler.Trait.ToString()[0]}]",
-                    false, false, bgColor, textColor);
+                if (!string.IsNullOrEmpty(context.SettlerName) && s.name == context.SettlerName)
+                    contextIdx = _whoItems.Count - 1;
+            }
 
-                bool isSelected = _selectedSubject == OrderSubject.Named &&
-                                  _selectedSettlerName == settlerName;
-                if (isSelected) row.GetComponent<Image>().color = ROW_SELECTED;
+            if (contextIdx >= 0) _whoIdx = contextIdx;
+        }
 
-                int rowIdx = index;
-                row.GetComponent<Button>().onClick.AddListener(
-                    () => SelectWho(OrderSubject.Named, settlerName, rowIdx));
-                _whoRows.Add((row, index++));
+        private void BuildWhoRows(Transform content)
+        {
+            foreach (var item in _whoItems)
+            {
+                Color bg = item.IsBusy ? ROW_BUSY : ROW_N;
+                Color txt = item.IsBusy ? TXT_B : TXT_N;
+                CreatePickerRow(content, item.DisplayLabel, item.Subtitle,
+                    false, ROW_HEIGHT, bg, txt);
             }
         }
 
-        private void SelectWho(OrderSubject subject, string settlerName, int rowIndex)
+        // ─── DOES Items ─────────────────────────────────────────
+
+        private void PopulateDoesItems(OpenKlappbuchEvent context)
         {
-            _selectedSubject = subject;
-            _selectedSettlerName = settlerName;
-            _whoSelectedIndex = rowIndex;
-
-            // Update highlights
-            foreach (var (go, idx) in _whoRows)
-            {
-                if (go == null) continue;
-                var img = go.GetComponent<Image>();
-                img.color = idx == rowIndex ? ROW_SELECTED : ROW_NORMAL;
-            }
-
-            UpdateResultLine();
-        }
-
-        // ─── DOES Column (Feature 7.3) ─────────────────────
-
-        private void BuildDoesColumn(Transform content)
-        {
-            _doesRows.Clear();
+            _doesItems.Clear();
             var vocab = OrderVocabulary.Instance;
             if (vocab == null) return;
 
             var entries = vocab.GetAllPredicates();
-            int index = 0;
-            bool pastDivider = false;
-
+            int contextIdx = -1;
             foreach (var entry in entries)
             {
-                // Add divider between start vocab and discovery-locked vocab
-                if (!pastDivider && entry.RequiredDiscovery != null)
+                _doesItems.Add(new DoesItem
+                {
+                    Predicate = entry.Predicate,
+                    IsLocked = !entry.IsUnlocked,
+                    RequiredDiscovery = entry.RequiredDiscovery
+                });
+
+                if (context.PredicateHint.HasValue &&
+                    entry.Predicate == context.PredicateHint.Value && entry.IsUnlocked)
+                    contextIdx = _doesItems.Count - 1;
+            }
+
+            if (contextIdx >= 0) _doesIdx = contextIdx;
+        }
+
+        private void BuildDoesRows(Transform content)
+        {
+            bool pastDivider = false;
+            foreach (var item in _doesItems)
+            {
+                // Divider before first locked item
+                if (!pastDivider && item.IsLocked)
                 {
                     pastDivider = true;
 
-                    // Divider label
+                    // Label
                     var divLabel = new GameObject("DividerLabel");
                     divLabel.transform.SetParent(content, false);
-                    var dlLayout = divLabel.AddComponent<LayoutElement>();
-                    dlLayout.preferredHeight = 20;
-                    var dlText = divLabel.AddComponent<Text>();
-                    dlText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                    dlText.fontSize = 11;
-                    dlText.color = new Color(0.5f, 0.5f, 0.5f, 0.7f);
-                    dlText.alignment = TextAnchor.MiddleCenter;
-                    dlText.text = "-- locked --";
+                    divLabel.AddComponent<LayoutElement>().preferredHeight = 18;
+                    var dlTxt = divLabel.AddComponent<Text>();
+                    dlTxt.font = GetFont();
+                    dlTxt.fontSize = 11;
+                    dlTxt.color = new Color(0.5f, 0.5f, 0.5f, 0.7f);
+                    dlTxt.alignment = TextAnchor.MiddleCenter;
+                    dlTxt.text = "-- locked --";
 
-                    // Divider line
-                    var divider = new GameObject("Divider");
-                    divider.transform.SetParent(content, false);
-                    var divRect = divider.AddComponent<RectTransform>();
-                    divRect.sizeDelta = new Vector2(0, 2);
-                    var divImg = divider.AddComponent<Image>();
-                    divImg.color = new Color(0.4f, 0.5f, 0.4f, 0.6f);
-                    var divLayout = divider.AddComponent<LayoutElement>();
-                    divLayout.preferredHeight = 2;
+                    // Line
+                    var divLine = new GameObject("DividerLine");
+                    divLine.transform.SetParent(content, false);
+                    divLine.AddComponent<LayoutElement>().preferredHeight = 2;
+                    divLine.AddComponent<Image>().color = new Color(0.4f, 0.5f, 0.4f, 0.6f);
                 }
 
-                bool unlocked = entry.IsUnlocked;
-                string prefix = unlocked ? "" : "  ";
-                string label = entry.Predicate.ToString();
-                string subtitle = unlocked ? "" :
-                    $"Requires: {entry.RequiredDiscovery ?? "???"}";
+                string subtitle = item.IsLocked
+                    ? $"Requires: {item.RequiredDiscovery ?? "???"}"
+                    : "";
+                float h = (item.IsLocked && !string.IsNullOrEmpty(subtitle))
+                    ? ROW_HEIGHT_LOCKED : ROW_HEIGHT;
+                Color bg = item.IsLocked ? ROW_LOCK : ROW_N;
+                Color txt = item.IsLocked ? TXT_L : TXT_N;
 
-                Color bgColor = unlocked ? ROW_NORMAL : ROW_LOCKED;
-                Color textColor = unlocked ? TEXT_NORMAL : TEXT_LOCKED;
-
-                var row = CreateRow(content, label, subtitle, !unlocked, false, bgColor, textColor);
-
-                bool isSelected = entry.Predicate == _selectedPredicate && unlocked;
-                if (isSelected) row.GetComponent<Image>().color = ROW_SELECTED;
-
-                int rowIdx = index;
-                var predicate = entry.Predicate;
-                bool isUnlocked = unlocked;
-
-                row.GetComponent<Button>().onClick.AddListener(() =>
-                {
-                    if (!isUnlocked)
-                    {
-                        // Show lock tooltip (flash the requirement text)
-                        return;
-                    }
-                    SelectPredicate(predicate, rowIdx);
-                });
-
-                _doesRows.Add((row, index++));
+                CreatePickerRow(content, item.Predicate.ToString(), subtitle,
+                    item.IsLocked, h, bg, txt);
             }
         }
 
-        private void SelectPredicate(OrderPredicate predicate, int rowIndex)
+        // ─── WHAT Items ─────────────────────────────────────────
+
+        private void PopulateWhatItems()
         {
-            _selectedPredicate = predicate;
-            _doesSelectedIndex = rowIndex;
-
-            // Clear objects when predicate changes (context changes)
-            _selectedObjects.Clear();
-
-            // Re-apply tap position "here" only for predicates that use locations
-            if (_tapPosition.HasValue && PredicateUsesLocations(predicate))
-            {
-                _selectedObjects.Add(new OrderObject("here", "Here", OrderObjectCategory.Location)
-                    { Position = _tapPosition });
-            }
-
-            // Update does column highlights
-            foreach (var (go, idx) in _doesRows)
-            {
-                if (go == null) continue;
-                var img = go.GetComponent<Image>();
-                // Keep locked rows their locked color
-                if (img.color == ROW_LOCKED) continue;
-                img.color = idx == rowIndex ? ROW_SELECTED : ROW_NORMAL;
-            }
-
-            // Rebuild WHAT column (context-dependent)
-            RebuildWhatColumn();
-            UpdateResultLine();
-        }
-
-        /// <summary>Feature 7.3: Swipe left on predicate toggles NICHT.</summary>
-        public void ToggleNegation()
-        {
-            _isNegated = !_isNegated;
-            UpdateResultLine();
-        }
-
-        // ─── WHAT/WHERE Column (Feature 7.3) ───────────────
-
-        private void BuildWhatColumn(Transform content)
-        {
-            _whatRows.Clear();
+            _whatItems.Clear();
             var vocab = OrderVocabulary.Instance;
             if (vocab == null) return;
 
-            var objects = vocab.GetObjectsForPredicate(_selectedPredicate);
+            // Get predicate from current DOES selection
+            OrderPredicate pred = OrderPredicate.Gather;
+            if (_doesIdx >= 0 && _doesIdx < _doesItems.Count)
+                pred = _doesItems[_doesIdx].Predicate;
 
+            var objects = vocab.GetObjectsForPredicate(pred);
             foreach (var obj in objects)
+                _whatItems.Add(new WhatItem { Object = obj });
+        }
+
+        private void BuildWhatRows(Transform content)
+        {
+            if (_whatItems.Count == 0)
             {
-                bool isSelected = _selectedObjects.Exists(o => o.Id == obj.Id);
-                Color bgColor = isSelected ? ROW_SELECTED : ROW_NORMAL;
+                var emptyGo = new GameObject("Empty");
+                emptyGo.transform.SetParent(content, false);
+                emptyGo.AddComponent<LayoutElement>().preferredHeight = ROW_HEIGHT;
+                var et = emptyGo.AddComponent<Text>();
+                et.font = GetFont();
+                et.fontSize = FONT_MIN;
+                et.color = TXT_L;
+                et.alignment = TextAnchor.MiddleCenter;
+                et.text = "(none)";
+                return;
+            }
 
-                var row = CreateRow(content, obj.DisplayName, "", false, false, bgColor, TEXT_NORMAL);
-
-                var capturedObj = obj;
-                row.GetComponent<Button>().onClick.AddListener(() => ToggleObject(capturedObj));
-                _whatRows.Add((row, obj));
+            foreach (var item in _whatItems)
+            {
+                CreatePickerRow(content, item.Object.DisplayName, "",
+                    false, ROW_HEIGHT, ROW_N, TXT_N);
             }
         }
 
         private void RebuildWhatColumn()
         {
-            if (_whatContent == null) return;
+            if (_whatContentRect == null) return;
 
             // Destroy old rows
-            for (int i = _whatContent.childCount - 1; i >= 0; i--)
-                Destroy(_whatContent.GetChild(i).gameObject);
-            _whatRows.Clear();
+            for (int i = _whatContentRect.childCount - 1; i >= 0; i--)
+                Destroy(_whatContentRect.GetChild(i).gameObject);
 
-            BuildWhatColumn(_whatContent);
+            PopulateWhatItems();
+            BuildWhatRows(_whatContentRect);
+
+            // Reset scroll to top (index 0)
+            _whatIdx = 0;
+            if (_whatContentRect != null)
+                _whatContentRect.anchoredPosition = Vector2.zero;
         }
 
-        /// <summary>Feature 7.3: Multiple objects selectable.</summary>
-        private void ToggleObject(OrderObject obj)
-        {
-            int existingIdx = _selectedObjects.FindIndex(o => o.Id == obj.Id);
-            if (existingIdx >= 0)
-                _selectedObjects.RemoveAt(existingIdx);
-            else
-                _selectedObjects.Add(obj);
+        // ─── Snap-to-Center Logic ───────────────────────────────
 
-            // Update row highlights
-            foreach (var (go, rowObj) in _whatRows)
+        private void SnapColumn(ScrollRect scroll, RectTransform content,
+            int itemCount, float rowH, ref int selectedIdx,
+            System.Action<int> onChange)
+        {
+            if (scroll == null || content == null || itemCount == 0) return;
+
+            float step = rowH + SPACING;
+            float y = content.anchoredPosition.y;
+
+            // Calculate nearest item index
+            int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
+
+            // When velocity is low, snap to nearest
+            if (Mathf.Abs(scroll.velocity.y) < SNAP_THRESHOLD)
             {
-                if (go == null) continue;
-                bool selected = _selectedObjects.Exists(o => o.Id == rowObj.Id);
-                go.GetComponent<Image>().color = selected ? ROW_SELECTED : ROW_NORMAL;
+                float targetY = nearest * step;
+                float newY = Mathf.MoveTowards(y, targetY,
+                    Time.unscaledDeltaTime * SNAP_SPEED * step);
+                content.anchoredPosition = new Vector2(content.anchoredPosition.x, newY);
+
+                if (Mathf.Abs(newY - targetY) < 0.5f)
+                {
+                    content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
+                    scroll.velocity = Vector2.zero;
+                }
             }
 
-            UpdateResultLine();
+            if (nearest != selectedIdx)
+            {
+                selectedIdx = nearest;
+                onChange?.Invoke(nearest);
+            }
         }
 
-        // ─── Result Line (Feature 7.4) ──────────────────────
+        /// <summary>
+        /// Snap DOES column with special logic: skip locked items.
+        /// </summary>
+        private void SnapDoesColumn()
+        {
+            if (_doesScroll == null || _doesContentRect == null || _doesItems.Count == 0) return;
+
+            // DOES column has mixed row heights (locked vs unlocked) and divider elements.
+            // Use uniform step based on ROW_HEIGHT for snapping since most items are unlocked.
+            // The divider adds offset, but snapping to nearest unlocked is more important.
+            float step = ROW_HEIGHT + SPACING;
+            float y = _doesContentRect.anchoredPosition.y;
+            int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, _doesItems.Count - 1);
+
+            // If nearest is locked, find closest unlocked
+            if (nearest < _doesItems.Count && _doesItems[nearest].IsLocked)
+            {
+                int below = nearest - 1;
+                int above = nearest + 1;
+                while (below >= 0 || above < _doesItems.Count)
+                {
+                    if (below >= 0 && !_doesItems[below].IsLocked) { nearest = below; break; }
+                    if (above < _doesItems.Count && !_doesItems[above].IsLocked) { nearest = above; break; }
+                    below--;
+                    above++;
+                }
+            }
+
+            if (Mathf.Abs(_doesScroll.velocity.y) < SNAP_THRESHOLD)
+            {
+                float targetY = nearest * step;
+                float newY = Mathf.MoveTowards(y, targetY,
+                    Time.unscaledDeltaTime * SNAP_SPEED * step);
+                _doesContentRect.anchoredPosition =
+                    new Vector2(_doesContentRect.anchoredPosition.x, newY);
+
+                if (Mathf.Abs(newY - targetY) < 0.5f)
+                {
+                    _doesContentRect.anchoredPosition =
+                        new Vector2(_doesContentRect.anchoredPosition.x, targetY);
+                    _doesScroll.velocity = Vector2.zero;
+                }
+            }
+
+            _doesIdx = nearest;
+        }
+
+        // ─── Context Pre-Scroll ─────────────────────────────────
+
+        private void ApplyContextScroll(OpenKlappbuchEvent context)
+        {
+            float step = ROW_HEIGHT + SPACING;
+
+            // WHO
+            if (_whoContentRect != null && _whoIdx > 0)
+                _whoContentRect.anchoredPosition = new Vector2(0, _whoIdx * step);
+
+            // DOES
+            if (_doesContentRect != null && _doesIdx > 0)
+                _doesContentRect.anchoredPosition = new Vector2(0, _doesIdx * step);
+
+            // WHAT
+            if (_whatContentRect != null && _whatIdx > 0)
+                _whatContentRect.anchoredPosition = new Vector2(0, _whatIdx * step);
+        }
+
+        // ─── Result Line ────────────────────────────────────────
 
         private void BuildResultLine(Transform parent, float y)
         {
-            var resultBg = CreateChild(parent, "ResultLine",
-                new Vector2(0, y), new Vector2(PANEL_WIDTH - 40, RESULT_HEIGHT));
-            resultBg.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.06f, 0.9f);
+            var bg = MakeRect(parent, "ResultLine",
+                new Vector2(0, y), new Vector2(_panelW - 40, RESULT_H));
+            bg.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.06f, 0.9f);
 
-            var textObj = CreateChild(resultBg.transform, "ResultText",
-                Vector2.zero, new Vector2(PANEL_WIDTH - 60, RESULT_HEIGHT - 10));
-            _resultText = textObj.AddComponent<Text>();
-            _resultText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _resultText.fontSize = 20;
-            _resultText.color = INVALID_COLOR;
+            // Result text
+            var txt = MakeRect(bg.transform, "Text",
+                new Vector2(30, 0), new Vector2(_panelW - 140, RESULT_H - 8));
+            _resultText = txt.AddComponent<Text>();
+            _resultText.font = GetFont();
+            _resultText.fontSize = 18;
+            _resultText.color = INVALID_C;
             _resultText.alignment = TextAnchor.MiddleCenter;
             _resultText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _resultText.verticalOverflow = VerticalWrapMode.Overflow;
 
-            // Negation toggle button (left of result)
-            var negateBtnObj = CreateChild(parent, "NegateBtn",
-                new Vector2(-PANEL_WIDTH / 2 + 50, y), new Vector2(70, 36));
-            var negateImg = negateBtnObj.AddComponent<Image>();
-            negateImg.color = _isNegated ? NEGATED_COLOR : new Color(0.3f, 0.3f, 0.3f, 0.7f);
-            var negateBtn = negateBtnObj.AddComponent<Button>();
-            negateBtn.targetGraphic = negateImg;
-            negateBtn.onClick.AddListener(() =>
+            // NICHT toggle (left)
+            var negGo = MakeRect(parent, "NegateBtn",
+                new Vector2(-_panelW / 2 + 50, y), new Vector2(70, CLOSE_SIZE));
+            _negateImg = negGo.AddComponent<Image>();
+            _negateImg.color = _isNegated ? NEG_C : new Color(0.3f, 0.3f, 0.3f, 0.7f);
+            negGo.AddComponent<Button>().onClick.AddListener(() =>
             {
                 _isNegated = !_isNegated;
-                negateImg.color = _isNegated ? NEGATED_COLOR : new Color(0.3f, 0.3f, 0.3f, 0.7f);
+                _negateImg.color = _isNegated ? NEG_C : new Color(0.3f, 0.3f, 0.3f, 0.7f);
                 UpdateResultLine();
             });
-            var negateLabel = CreateChild(negateBtnObj.transform, "Label",
-                Vector2.zero, new Vector2(70, 36));
-            var negateText = negateLabel.AddComponent<Text>();
-            negateText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            negateText.fontSize = 14;
-            negateText.color = Color.white;
-            negateText.alignment = TextAnchor.MiddleCenter;
-            negateText.fontStyle = FontStyle.Bold;
-            negateText.text = "NICHT";
+            var negLabel = MakeRect(negGo.transform, "L", Vector2.zero, new Vector2(70, CLOSE_SIZE));
+            var nt = negLabel.AddComponent<Text>();
+            nt.font = GetFont();
+            nt.fontSize = FONT_MIN;
+            nt.color = Color.white;
+            nt.alignment = TextAnchor.MiddleCenter;
+            nt.fontStyle = FontStyle.Bold;
+            nt.text = "NICHT";
         }
 
         private void BuildConfirmButton(Transform parent, float y)
         {
-            var btnObj = CreateChild(parent, "ConfirmBtn",
-                new Vector2(0, y), new Vector2(220, BUTTON_HEIGHT));
-            _confirmBg = btnObj.AddComponent<Image>();
-            _confirmBg.color = CONFIRM_INACTIVE;
-            _confirmButton = btnObj.AddComponent<Button>();
-            _confirmButton.targetGraphic = _confirmBg;
-            _confirmButton.onClick.AddListener(ConfirmOrder);
+            var btn = MakeRect(parent, "ConfirmBtn",
+                new Vector2(0, y), new Vector2(220, BTN_H));
+            _confirmBg = btn.AddComponent<Image>();
+            _confirmBg.color = CONFIRM_OFF;
+            _confirmBtn = btn.AddComponent<Button>();
+            _confirmBtn.targetGraphic = _confirmBg;
+            _confirmBtn.onClick.AddListener(ConfirmOrder);
 
-            var labelObj = CreateChild(btnObj.transform, "Label",
-                Vector2.zero, new Vector2(220, BUTTON_HEIGHT));
-            _confirmLabel = labelObj.AddComponent<Text>();
-            _confirmLabel.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _confirmLabel.fontSize = 22;
-            _confirmLabel.color = Color.white;
-            _confirmLabel.alignment = TextAnchor.MiddleCenter;
-            _confirmLabel.fontStyle = FontStyle.Bold;
-            _confirmLabel.text = "Give Order";
+            var label = MakeRect(btn.transform, "L", Vector2.zero, new Vector2(220, BTN_H));
+            var lt = label.AddComponent<Text>();
+            lt.font = GetFont();
+            lt.fontSize = 20;
+            lt.color = Color.white;
+            lt.alignment = TextAnchor.MiddleCenter;
+            lt.fontStyle = FontStyle.Bold;
+            lt.text = "Give Order";
         }
 
         private void UpdateResultLine()
@@ -624,136 +720,135 @@ namespace Terranova.UI
             if (_resultText == null) return;
 
             var order = BuildCurrentOrder();
+            if (order == null)
+            {
+                _resultText.text = "...";
+                _resultText.color = INVALID_C;
+                _confirmBg.color = CONFIRM_OFF;
+                _confirmBtn.interactable = false;
+                return;
+            }
+
             string sentence = order.BuildSentence();
             bool valid = order.IsValid();
 
             _resultText.text = sentence;
-            _resultText.color = valid ? VALID_COLOR : INVALID_COLOR;
+            _resultText.color = valid ? VALID_C : INVALID_C;
+            _resultText.fontStyle = _isNegated ? FontStyle.Italic : FontStyle.Normal;
 
-            if (_isNegated)
-                _resultText.fontStyle = FontStyle.Italic;
-            else
-                _resultText.fontStyle = FontStyle.Normal;
-
-            _confirmBg.color = valid ? CONFIRM_ACTIVE : CONFIRM_INACTIVE;
-            _confirmButton.interactable = valid;
+            _confirmBg.color = valid ? CONFIRM_ON : CONFIRM_OFF;
+            _confirmBtn.interactable = valid;
         }
 
-        // ─── Order Construction ──────────────────────────────
+        // ─── Order Construction ─────────────────────────────────
 
         private OrderDefinition BuildCurrentOrder()
         {
+            if (_doesIdx < 0 || _doesIdx >= _doesItems.Count) return null;
+            var doesItem = _doesItems[_doesIdx];
+            if (doesItem.IsLocked) return null;
+
             var order = new OrderDefinition
             {
-                Subject = _selectedSubject,
-                SettlerName = _selectedSettlerName,
-                Predicate = _selectedPredicate,
+                Predicate = doesItem.Predicate,
                 Negated = _isNegated,
                 TargetPosition = _tapPosition
             };
 
-            foreach (var obj in _selectedObjects)
-                order.Objects.Add(obj);
+            // WHO
+            if (_whoIdx >= 0 && _whoIdx < _whoItems.Count)
+            {
+                var who = _whoItems[_whoIdx];
+                order.Subject = who.Subject;
+                order.SettlerName = who.SettlerName;
+            }
+
+            // WHAT (single selection from picker)
+            if (_whatIdx >= 0 && _whatIdx < _whatItems.Count)
+                order.Objects.Add(_whatItems[_whatIdx].Object);
 
             return order;
         }
 
-        /// <summary>Feature 7.4: Confirm and create the order.</summary>
         private void ConfirmOrder()
         {
             var order = BuildCurrentOrder();
-            if (!order.IsValid()) return;
+            if (order == null || !order.IsValid()) return;
 
-            var manager = OrderManager.Instance;
-            if (manager != null)
-            {
-                manager.CreateOrder(order);
-            }
-
+            OrderManager.Instance?.CreateOrder(order);
             Close();
         }
 
-        // ─── UI Helpers ──────────────────────────────────────
+        // ─── Row Builder ────────────────────────────────────────
 
-        private GameObject CreateRow(Transform parent, string label, string subtitle,
-            bool isLocked, bool isBusy, Color bgColor, Color textColor)
+        private void CreatePickerRow(Transform parent, string label, string subtitle,
+            bool isLocked, float height, Color bgColor, Color textColor)
         {
-            bool hasSubtitle = !string.IsNullOrEmpty(subtitle);
-            float rowH = (isLocked && hasSubtitle) ? ROW_HEIGHT_LOCKED : ROW_HEIGHT;
-
+            bool hasSub = !string.IsNullOrEmpty(subtitle);
             var row = new GameObject($"Row_{label}");
             row.transform.SetParent(parent, false);
 
-            var rowLayout = row.AddComponent<LayoutElement>();
-            rowLayout.preferredHeight = rowH;
-            rowLayout.minHeight = rowH;
+            row.AddComponent<LayoutElement>().preferredHeight = height;
+            row.AddComponent<Image>().color = bgColor;
 
-            var rowImg = row.AddComponent<Image>();
-            rowImg.color = bgColor;
-
-            var rowBtn = row.AddComponent<Button>();
-            rowBtn.targetGraphic = rowImg;
-
-            float rightPad = isLocked ? 36 : 8;
+            float rightPad = isLocked ? 30 : 4;
 
             // Main label
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(row.transform, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = new Vector2(0, hasSubtitle ? 0.42f : 0);
-            labelRect.anchorMax = Vector2.one;
-            labelRect.offsetMin = new Vector2(10, 0);
-            labelRect.offsetMax = new Vector2(-rightPad, -2);
-            var labelText = labelObj.AddComponent<Text>();
-            labelText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            labelText.fontSize = 17;
-            labelText.color = textColor;
-            labelText.alignment = TextAnchor.MiddleLeft;
-            labelText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            labelText.verticalOverflow = VerticalWrapMode.Truncate;
-            labelText.text = label;
+            var labelGo = new GameObject("Label");
+            labelGo.transform.SetParent(row.transform, false);
+            var lr = labelGo.AddComponent<RectTransform>();
+            lr.anchorMin = new Vector2(0, hasSub ? 0.42f : 0);
+            lr.anchorMax = Vector2.one;
+            lr.offsetMin = new Vector2(8, 0);
+            lr.offsetMax = new Vector2(-rightPad, -2);
+            var lt = labelGo.AddComponent<Text>();
+            lt.font = GetFont();
+            lt.fontSize = FONT_MIN;
+            lt.color = textColor;
+            lt.alignment = TextAnchor.MiddleLeft;
+            lt.horizontalOverflow = HorizontalWrapMode.Wrap;
+            lt.verticalOverflow = VerticalWrapMode.Truncate;
+            lt.text = label;
 
-            // Lock icon for locked predicates
+            // Lock icon
             if (isLocked)
             {
-                var lockObj = new GameObject("LockIcon");
-                lockObj.transform.SetParent(row.transform, false);
-                var lockRect = lockObj.AddComponent<RectTransform>();
-                lockRect.anchorMin = new Vector2(1, 0.5f);
-                lockRect.anchorMax = new Vector2(1, 0.5f);
-                lockRect.pivot = new Vector2(1, 0.5f);
-                lockRect.anchoredPosition = new Vector2(-6, 0);
-                lockRect.sizeDelta = new Vector2(22, 22);
-                var lockImg = lockObj.AddComponent<Image>();
-                lockImg.color = new Color(0.6f, 0.4f, 0.2f, 0.8f);
+                var lockGo = new GameObject("Lock");
+                lockGo.transform.SetParent(row.transform, false);
+                var lkr = lockGo.AddComponent<RectTransform>();
+                lkr.anchorMin = new Vector2(1, 0.5f);
+                lkr.anchorMax = new Vector2(1, 0.5f);
+                lkr.pivot = new Vector2(1, 0.5f);
+                lkr.anchoredPosition = new Vector2(-4, 0);
+                lkr.sizeDelta = new Vector2(20, 20);
+                lockGo.AddComponent<Image>().color = new Color(0.6f, 0.4f, 0.2f, 0.8f);
             }
 
-            // Subtitle (trait, busy state, requirement)
-            if (hasSubtitle)
+            // Subtitle
+            if (hasSub)
             {
-                var subObj = new GameObject("Subtitle");
-                subObj.transform.SetParent(row.transform, false);
-                var subRect = subObj.AddComponent<RectTransform>();
-                subRect.anchorMin = Vector2.zero;
-                subRect.anchorMax = new Vector2(1, 0.42f);
-                subRect.offsetMin = new Vector2(10, 2);
-                subRect.offsetMax = new Vector2(-rightPad, 0);
-                var subText = subObj.AddComponent<Text>();
-                subText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                subText.fontSize = 13;
-                subText.color = isLocked ? new Color(0.7f, 0.5f, 0.3f) : TEXT_BUSY;
-                subText.alignment = TextAnchor.MiddleLeft;
-                subText.horizontalOverflow = HorizontalWrapMode.Wrap;
-                subText.text = subtitle;
+                var subGo = new GameObject("Sub");
+                subGo.transform.SetParent(row.transform, false);
+                var sr = subGo.AddComponent<RectTransform>();
+                sr.anchorMin = Vector2.zero;
+                sr.anchorMax = new Vector2(1, 0.42f);
+                sr.offsetMin = new Vector2(8, 2);
+                sr.offsetMax = new Vector2(-rightPad, 0);
+                var st = subGo.AddComponent<Text>();
+                st.font = GetFont();
+                st.fontSize = FONT_MIN - 1;
+                st.color = isLocked ? new Color(0.7f, 0.5f, 0.3f) : TXT_B;
+                st.alignment = TextAnchor.MiddleLeft;
+                st.horizontalOverflow = HorizontalWrapMode.Wrap;
+                st.text = subtitle;
             }
-
-            return row;
         }
 
-        /// <summary>Check if a predicate shows Location objects in its WHAT column.</summary>
-        private static bool PredicateUsesLocations(OrderPredicate predicate)
+        // ─── Helpers ────────────────────────────────────────────
+
+        private static bool PredicateUsesLocations(OrderPredicate pred)
         {
-            return predicate switch
+            return pred switch
             {
                 OrderPredicate.Gather => true,
                 OrderPredicate.Explore => true,
@@ -761,21 +856,26 @@ namespace Terranova.UI
                 OrderPredicate.Hunt => true,
                 OrderPredicate.Fell => true,
                 OrderPredicate.Dig => true,
-                // Build, Cook, Smoke, Craft use structures/resources, not locations
                 _ => false
             };
         }
 
-        private GameObject CreateChild(Transform parent, string name, Vector2 pos, Vector2 size)
+        private static Font GetFont()
+        {
+            return UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+
+        private static GameObject MakeRect(Transform parent, string name,
+            Vector2 pos, Vector2 size)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            var rect = go.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = pos;
-            rect.sizeDelta = size;
+            var r = go.AddComponent<RectTransform>();
+            r.anchorMin = new Vector2(0.5f, 0.5f);
+            r.anchorMax = new Vector2(0.5f, 0.5f);
+            r.pivot = new Vector2(0.5f, 0.5f);
+            r.anchoredPosition = pos;
+            r.sizeDelta = size;
             return go;
         }
     }
