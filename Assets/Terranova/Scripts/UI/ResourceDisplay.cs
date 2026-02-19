@@ -3,7 +3,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using Terranova.Core;
+using Terranova.Discovery;
 using Terranova.Orders;
+using Terranova.Population;
 using Terranova.Terrain;
 
 namespace Terranova.UI
@@ -637,24 +639,45 @@ namespace Terranova.UI
             subText.alignment = TextAnchor.MiddleCenter;
             subText.text = $"All settlers perished on Day {dayCount}";
 
-            // Restart button
             float btnSize = _minTouchTarget * 2.5f;
+
+            // v0.5.1: "New Tribe" button — fog resets, terrain persists
+            var newTribeObj = new GameObject("NewTribeButton");
+            newTribeObj.transform.SetParent(_gameOverPanel.transform, false);
+            var ntRect = newTribeObj.AddComponent<RectTransform>();
+            ntRect.anchorMin = new Vector2(0.5f, 0.5f);
+            ntRect.anchorMax = new Vector2(0.5f, 0.5f);
+            ntRect.pivot = new Vector2(0.5f, 0.5f);
+            ntRect.anchoredPosition = new Vector2(0, -50);
+            ntRect.sizeDelta = new Vector2(btnSize, _minTouchTarget);
+            var ntImage = newTribeObj.AddComponent<Image>();
+            ntImage.color = new Color(0.5f, 0.35f, 0.15f, 0.95f);
+            var ntButton = newTribeObj.AddComponent<Button>();
+            ntButton.targetGraphic = ntImage;
+            ntButton.onClick.AddListener(SpawnNewTribe);
+            CreateButtonLabel(newTribeObj.transform, "NEW TRIBE");
+
+            // Restart button (full reset)
             var btnObj = new GameObject("RestartButton");
             btnObj.transform.SetParent(_gameOverPanel.transform, false);
             var btnRect2 = btnObj.AddComponent<RectTransform>();
             btnRect2.anchorMin = new Vector2(0.5f, 0.5f);
             btnRect2.anchorMax = new Vector2(0.5f, 0.5f);
             btnRect2.pivot = new Vector2(0.5f, 0.5f);
-            btnRect2.anchoredPosition = new Vector2(0, -60);
+            btnRect2.anchoredPosition = new Vector2(0, -110);
             btnRect2.sizeDelta = new Vector2(btnSize, _minTouchTarget);
             var btnImage = btnObj.AddComponent<Image>();
             btnImage.color = new Color(0.2f, 0.5f, 0.3f, 0.9f);
             var button = btnObj.AddComponent<Button>();
             button.targetGraphic = btnImage;
             button.onClick.AddListener(RestartGame);
+            CreateButtonLabel(btnObj.transform, "RESTART");
+        }
 
+        private void CreateButtonLabel(Transform parent, string text)
+        {
             var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(btnObj.transform, false);
+            labelObj.transform.SetParent(parent, false);
             var labelRect = labelObj.AddComponent<RectTransform>();
             labelRect.anchorMin = Vector2.zero;
             labelRect.anchorMax = Vector2.one;
@@ -665,7 +688,61 @@ namespace Terranova.UI
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleCenter;
             label.fontStyle = FontStyle.Bold;
-            label.text = "RESTART";
+            label.text = text;
+        }
+
+        /// <summary>
+        /// v0.5.1: Spawn a new tribe at the same campfire.
+        /// Terrain changes persist (paths, stumps, structures).
+        /// Fog of war and discoveries reset.
+        /// </summary>
+        private void SpawnNewTribe()
+        {
+            Time.timeScale = 1f;
+
+            // Reset fog of war
+            var fog = FogOfWar.Instance;
+            if (fog != null) fog.ResetFog();
+
+            // Notify persistent systems
+            var paths = TrampledPaths.Instance;
+            if (paths != null) paths.OnTribeDeath();
+
+            var deformation = TerrainDeformation.Instance;
+            if (deformation != null) deformation.OnTribeDeath();
+
+            // Reset discoveries
+            var stateManager = DiscoveryStateManager.Instance;
+            if (stateManager != null) stateManager.ResetAll();
+
+            // Reset day count
+            GameState.DayCount = 1;
+            GameState.GameTimeSeconds = 0f;
+            var dnc = DayNightCycle.Instance;
+            if (dnc != null) dnc.ResetDay();
+
+            // Increment tribe generation
+            GameState.TribeGeneration++;
+
+            // Cancel all orders
+            if (OrderManager.Instance != null)
+            {
+                foreach (var order in OrderManager.Instance.AllOrders)
+                    OrderManager.Instance.CancelOrder(order.Id);
+            }
+
+            // Spawn new settlers at campfire
+            var spawner = Object.FindFirstObjectByType<SettlerSpawner>();
+            if (spawner != null) spawner.RespawnSettlers();
+
+            // Remove game over panel
+            if (_gameOverPanel != null)
+            {
+                Destroy(_gameOverPanel);
+                _gameOverPanel = null;
+            }
+
+            Debug.Log($"[ResourceDisplay] New tribe spawned! Generation {GameState.TribeGeneration}");
         }
 
         private void RestartGame()
@@ -767,7 +844,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.4.20";
+            versionText.text = "v0.5.1";
         }
 
         /// <summary>

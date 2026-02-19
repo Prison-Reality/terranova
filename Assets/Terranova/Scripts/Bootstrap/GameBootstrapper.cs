@@ -80,6 +80,10 @@ namespace Terranova.Core
             EnsureConstructionTaskAssigner();
             EnsureBuildingFunctionManager();
             EnsureDebugTerrainModifier();
+            EnsureTerrainDecorator(); // v0.5.0: Trees, rocks, bushes, shelters
+            EnsureFogOfWar(); // v0.5.1: Fog of war
+            EnsureTrampledPaths(); // v0.5.1: Trampled paths
+            EnsureTerrainDeformation(); // v0.5.1: Stumps, pits
             EnsureSelectionManager();
             EnsureDiscoverySystem();
             EnsureDayNightCycle(); // MS4: Day-night cycle
@@ -280,6 +284,58 @@ namespace Terranova.Core
             var go = new GameObject("BuildingFunctionManager");
             go.AddComponent<BuildingFunctionManager>();
             Debug.Log("GameBootstrapper: Created BuildingFunctionManager.");
+        }
+
+        /// <summary>
+        /// v0.5.0: Terrain decoration (trees, rocks, bushes, ground variation, natural shelters).
+        /// </summary>
+        private static void EnsureTerrainDecorator()
+        {
+            if (Object.FindFirstObjectByType<TerrainDecorator>() != null)
+                return;
+
+            var go = new GameObject("TerrainDecorator");
+            go.AddComponent<TerrainDecorator>();
+            Debug.Log("GameBootstrapper: Created TerrainDecorator.");
+        }
+
+        /// <summary>
+        /// v0.5.1: Fog of war — dark overlay cleared by settler exploration.
+        /// </summary>
+        private static void EnsureFogOfWar()
+        {
+            if (Object.FindFirstObjectByType<FogOfWar>() != null)
+                return;
+
+            var go = new GameObject("FogOfWar");
+            go.AddComponent<FogOfWar>();
+            Debug.Log("GameBootstrapper: Created FogOfWar.");
+        }
+
+        /// <summary>
+        /// v0.5.1: Trampled paths — settlers create visible paths from repeated walking.
+        /// </summary>
+        private static void EnsureTrampledPaths()
+        {
+            if (Object.FindFirstObjectByType<TrampledPaths>() != null)
+                return;
+
+            var go = new GameObject("TrampledPaths");
+            go.AddComponent<TrampledPaths>();
+            Debug.Log("GameBootstrapper: Created TrampledPaths.");
+        }
+
+        /// <summary>
+        /// v0.5.1: Terrain deformation — stumps from gathered trees, campfire clearing.
+        /// </summary>
+        private static void EnsureTerrainDeformation()
+        {
+            if (Object.FindFirstObjectByType<TerrainDeformation>() != null)
+                return;
+
+            var go = new GameObject("TerrainDeformation");
+            go.AddComponent<TerrainDeformation>();
+            Debug.Log("GameBootstrapper: Created TerrainDeformation.");
         }
 
         /// <summary>

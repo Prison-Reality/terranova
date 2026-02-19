@@ -5,7 +5,8 @@
         "Terranova.Core",
         "Terranova.Terrain",
         "Terranova.Buildings",
-        "Terranova.Resources"
+        "Terranova.Resources",
+        "Terranova.Population"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

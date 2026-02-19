@@ -14,6 +14,12 @@ namespace Terranova.Core
         public static float GameTimeSeconds { get; set; }
 
         /// <summary>
+        /// v0.5.1: Tribe generation counter. Increments when a new tribe
+        /// spawns after all settlers die. Terrain persists, fog resets.
+        /// </summary>
+        public static int TribeGeneration { get; set; } = 1;
+
+        /// <summary>
         /// Set to true by MainMenuUI before loading the game scene.
         /// Reset to false on every fresh Play via SubsystemRegistration.
         /// The bootstrapper checks this to decide: menu vs game systems.
@@ -37,6 +43,7 @@ namespace Terranova.Core
             GameTimeSeconds = 0f;
             GameStarted = false;
             LaunchGameCallback = null;
+            TribeGeneration = 1;
         }
     }
 }

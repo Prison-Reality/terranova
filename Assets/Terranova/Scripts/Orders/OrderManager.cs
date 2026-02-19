@@ -3,6 +3,7 @@ using UnityEngine;
 using Terranova.Core;
 using Terranova.Population;
 using Terranova.Resources;
+using Terranova.Terrain;
 
 namespace Terranova.Orders
 {
@@ -345,6 +346,10 @@ namespace Terranova.Orders
         /// </summary>
         private bool TryExecuteOrder(OrderDefinition order, Settler settler, Vector3 basePos)
         {
+            // v0.5.1: Handle Explore orders — settler walks in direction, clearing fog
+            if (order.Predicate == OrderPredicate.Explore)
+                return TryExecuteExplore(order, settler, basePos);
+
             var taskType = order.ToTaskType();
             if (taskType == SettlerTaskType.None) return false;
 
@@ -413,6 +418,86 @@ namespace Terranova.Orders
                 targetResource.Release();
 
             Debug.Log($"[Order] {settler.name} REJECTED order '{order.BuildSentence()}' (state={settler.StateName})");
+            return false;
+        }
+
+        // ─── Explore Execution (v0.5.1) ─────────────────────
+
+        /// <summary>
+        /// v0.5.1: Execute Explore order — settler walks toward a direction
+        /// to reveal fog of war. Targets unexplored territory preferentially.
+        /// </summary>
+        private bool TryExecuteExplore(OrderDefinition order, Settler settler, Vector3 basePos)
+        {
+            Vector3 direction = Vector3.forward; // Default north
+            if (order.Objects.Count > 0)
+            {
+                string dirId = order.Objects[0].Id;
+                direction = dirId switch
+                {
+                    "north" => Vector3.forward,
+                    "south" => Vector3.back,
+                    "east" => Vector3.right,
+                    "west" => Vector3.left,
+                    _ => Vector3.forward
+                };
+            }
+
+            // Walk 40 blocks in that direction from settler
+            float exploreDistance = 40f;
+            Vector3 settlerPos = settler.transform.position;
+            Vector3 rawTarget = settlerPos + direction * exploreDistance;
+
+            // Clamp to world bounds
+            var world = WorldManager.Instance;
+            if (world != null)
+            {
+                rawTarget.x = Mathf.Clamp(rawTarget.x, 6f, world.WorldBlocksX - 7f);
+                rawTarget.z = Mathf.Clamp(rawTarget.z, 6f, world.WorldBlocksZ - 7f);
+
+                // Adjust to terrain height
+                rawTarget.y = world.GetSmoothedHeightAtWorldPos(rawTarget.x, rawTarget.z);
+            }
+
+            // Try to find the furthest unexplored point along this line
+            var fog = FogOfWar.Instance;
+            if (fog != null)
+            {
+                Vector3 bestTarget = rawTarget;
+                for (float d = exploreDistance; d >= 10f; d -= 5f)
+                {
+                    Vector3 probe = settlerPos + direction * d;
+                    if (world != null)
+                    {
+                        probe.x = Mathf.Clamp(probe.x, 6f, world.WorldBlocksX - 7f);
+                        probe.z = Mathf.Clamp(probe.z, 6f, world.WorldBlocksZ - 7f);
+                    }
+                    int bx = Mathf.FloorToInt(probe.x);
+                    int bz = Mathf.FloorToInt(probe.z);
+                    if (!fog.IsExplored(bx, bz))
+                    {
+                        if (world != null)
+                            probe.y = world.GetSmoothedHeightAtWorldPos(probe.x, probe.z);
+                        bestTarget = probe;
+                        break;
+                    }
+                }
+                rawTarget = bestTarget;
+            }
+
+            // Create a GatherMaterial task (settler walks there, short "work" = looking around)
+            var task = new SettlerTask(SettlerTaskType.GatherMaterial, rawTarget, basePos, 3f);
+            task.OrderId = order.Id;
+
+            if (settler.AssignTask(task))
+            {
+                order.AssignedSettlers.Add(settler.name);
+                if (order.Subject == OrderSubject.NextFree)
+                    order.Status = OrderStatus.Complete;
+
+                Debug.Log($"[Order] EXPLORE assigned to {settler.name}: walking {direction} to ({rawTarget.x:F0}, {rawTarget.z:F0})");
+                return true;
+            }
             return false;
         }
 

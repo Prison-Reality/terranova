@@ -168,6 +168,16 @@ namespace Terranova.Terrain
             _temperature = Mathf.Lerp(8f, 24f, altNorm);
         }
 
+        /// <summary>
+        /// v0.5.1: Reset day count for new tribe.
+        /// </summary>
+        public void ResetDay()
+        {
+            _dayCount = 1;
+            _timeOfDay = 0.30f; // Early morning
+            GameState.DayCount = 1;
+        }
+
         private void OnDestroy()
         {
             if (Instance == this) Instance = null;
