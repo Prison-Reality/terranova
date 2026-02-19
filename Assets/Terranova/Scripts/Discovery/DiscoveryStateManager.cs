@@ -122,5 +122,17 @@ namespace Terranova.Discovery
 
         /// <summary>All completed discovery names (for serialization/UI).</summary>
         public IReadOnlyCollection<string> CompletedDiscoveries => _completedDiscoveries;
+
+        /// <summary>
+        /// v0.5.1: Reset all discoveries for new tribe. New tribe doesn't
+        /// inherit knowledge from the previous tribe.
+        /// </summary>
+        public void ResetAll()
+        {
+            _completedDiscoveries.Clear();
+            _unlockedCapabilities.Clear();
+            _unlockedBuildings.Clear();
+            Debug.Log("[DiscoveryStateManager] All discoveries reset for new tribe.");
+        }
     }
 }

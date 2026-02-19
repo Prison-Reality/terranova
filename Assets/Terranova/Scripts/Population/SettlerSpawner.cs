@@ -93,6 +93,31 @@ namespace Terranova.Population
         }
 
         /// <summary>
+        /// v0.5.1: Respawn settlers for a new tribe at the existing campfire.
+        /// Called when "New Tribe" is selected after game over.
+        /// Campfire and water already exist — just spawn new settlers.
+        /// </summary>
+        public void RespawnSettlers()
+        {
+            var world = WorldManager.Instance;
+            if (world == null) return;
+
+            // Get campfire position from WorldManager (campfire always at these coords)
+            float cx = world.CampfireBlockX + 0.5f;
+            float cz = world.CampfireBlockZ + 0.5f;
+            float cy = world.GetSmoothedHeightAtWorldPos(cx, cz);
+            Vector3 campfirePos = new Vector3(cx, cy, cz);
+
+            // Release all natural shelter claims from dead settlers
+            NaturalShelter.ReleaseAllOccupants();
+
+            SpawnSettlers(world, campfirePos);
+
+            Debug.Log($"SettlerSpawner: Respawned {_initialSettlerCount} settlers for new tribe " +
+                      $"(generation {GameState.TribeGeneration}).");
+        }
+
+        /// <summary>
         /// Create the campfire visual at the position pre-determined by WorldManager.
         /// Terrain is already flattened — no FlattenTerrain call needed.
         /// Returns the world position where it was placed.

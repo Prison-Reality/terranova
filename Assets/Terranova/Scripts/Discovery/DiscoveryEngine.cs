@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
+using Terranova.Population;
 using Terranova.Terrain;
 
 namespace Terranova.Discovery
@@ -190,6 +191,12 @@ namespace Terranova.Discovery
                 // Apply repetition bonus
                 int cycles = _eligibleCycles[discovery.DisplayName];
                 float finalProb = probability + cycles * discovery.RepetitionBonus;
+
+                // v0.5.1: Exploration bonus — settlers in unexplored territory
+                // boost discovery chance by 50%
+                if (IsAnySettlerExploring())
+                    finalProb *= 1.5f;
+
                 finalProb = Mathf.Clamp01(finalProb);
 
                 // Track best candidate for bad luck protection
@@ -346,6 +353,28 @@ namespace Terranova.Discovery
         /// Scan terrain biomes in a radius around the campfire.
         /// Returns the set of unique biome types found.
         /// </summary>
+        /// <summary>
+        /// v0.5.1: Check if any settler is currently in unexplored territory.
+        /// Used to boost discovery chance during exploration.
+        /// </summary>
+        private bool IsAnySettlerExploring()
+        {
+            var fog = FogOfWar.Instance;
+            if (fog == null) return false;
+
+            var settlers = Object.FindObjectsByType<Settler>(FindObjectsSortMode.None);
+            foreach (var settler in settlers)
+            {
+                Vector3 pos = settler.transform.position;
+                int bx = Mathf.FloorToInt(pos.x);
+                int bz = Mathf.FloorToInt(pos.z);
+                // Check if settler is near unexplored territory (within 15 blocks)
+                if (fog.IsAreaUnexplored(bx, bz, 15))
+                    return true;
+            }
+            return false;
+        }
+
         private HashSet<VoxelType> ScanBiomesAroundCampfire()
         {
             var biomes = new HashSet<VoxelType>();

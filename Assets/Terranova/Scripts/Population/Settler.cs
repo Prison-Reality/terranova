@@ -329,6 +329,11 @@ namespace Terranova.Population
         private Vector3 _nightShelterTarget;
         private NaturalShelter _claimedShelter;
 
+        // v0.5.1: Fog of war + trampled paths tracking
+        private float _fogPathTimer;
+        private const float FOG_PATH_INTERVAL = 0.3f;
+        private Vector3 _lastTrackedPos;
+
         /// <summary>Current shelter state.</summary>
         public ShelterState CurrentShelterState => _shelterState;
 
@@ -675,6 +680,40 @@ namespace Terranova.Population
                     UpdateRestingAtCampfire();
                     break;
             }
+
+            // v0.5.1: Fog of war clearing + trampled path recording
+            UpdateFogAndPaths();
+        }
+
+        /// <summary>
+        /// v0.5.1: Periodically clear fog around settler and record footsteps.
+        /// Curious trait reveals 15-block radius instead of 10.
+        /// </summary>
+        private void UpdateFogAndPaths()
+        {
+            _fogPathTimer -= Time.deltaTime;
+            if (_fogPathTimer > 0f) return;
+            _fogPathTimer = FOG_PATH_INTERVAL;
+
+            Vector3 pos = transform.position;
+
+            // Fog of war: reveal area around settler
+            var fog = FogOfWar.Instance;
+            if (fog != null)
+            {
+                int radius = _trait == SettlerTrait.Curious
+                    ? FogOfWar.CURIOUS_REVEAL_RADIUS
+                    : FogOfWar.SETTLER_REVEAL_RADIUS;
+                fog.RevealAtWorldPos(pos, radius);
+            }
+
+            // Trampled paths: record step if we've moved
+            if (_agent != null && _agent.velocity.sqrMagnitude > 0.5f)
+            {
+                var paths = TrampledPaths.Instance;
+                if (paths != null)
+                    paths.RecordStep(pos);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -711,6 +750,12 @@ namespace Terranova.Population
 
             // Use the worst penalty
             float mult = Mathf.Min(hungerMult, thirstMult);
+
+            // v0.5.1: Speed bonus on trampled paths
+            var paths = TrampledPaths.Instance;
+            if (paths != null)
+                mult *= paths.GetSpeedMultiplier(transform.position);
+
             return baseSpeed * mult;
         }
 
