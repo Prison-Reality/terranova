@@ -229,21 +229,29 @@ namespace Terranova.UI
         {
             var row = new GameObject($"Order_{order.Id}");
             row.transform.SetParent(_listContent, false);
+            var rowRect = row.AddComponent<RectTransform>();
             row.AddComponent<LayoutElement>().preferredHeight = ROW_HEIGHT;
             row.AddComponent<Image>().color = ROW_BG;
 
-            // Status icon
+            // Use HorizontalLayoutGroup so all children are laid out reliably
+            var rowLayout = row.AddComponent<HorizontalLayoutGroup>();
+            rowLayout.spacing = 4;
+            rowLayout.padding = new RectOffset(4, 4, 4, 4);
+            rowLayout.childAlignment = TextAnchor.MiddleCenter;
+            rowLayout.childControlWidth = true;
+            rowLayout.childControlHeight = true;
+            rowLayout.childForceExpandWidth = false;
+            rowLayout.childForceExpandHeight = true;
+
+            // Status icon — fixed 30px width
             string icon = order.Status == OrderStatus.Active ? ">>" : "||";
             Color iconColor = order.Status == OrderStatus.Active ? STATUS_ACTIVE : STATUS_PAUSED;
-
             var iconObj = new GameObject("StatusIcon");
             iconObj.transform.SetParent(row.transform, false);
-            var iconRect = iconObj.AddComponent<RectTransform>();
-            iconRect.anchorMin = new Vector2(0, 0);
-            iconRect.anchorMax = new Vector2(0, 1);
-            iconRect.pivot = new Vector2(0, 0.5f);
-            iconRect.anchoredPosition = new Vector2(6, 0);
-            iconRect.sizeDelta = new Vector2(30, 0);
+            iconObj.AddComponent<RectTransform>();
+            var iconLE = iconObj.AddComponent<LayoutElement>();
+            iconLE.preferredWidth = 30;
+            iconLE.minWidth = 30;
             var iconText = iconObj.AddComponent<Text>();
             iconText.font = GetFont();
             iconText.fontSize = 14;
@@ -252,15 +260,12 @@ namespace Terranova.UI
             iconText.fontStyle = FontStyle.Bold;
             iconText.text = icon;
 
-            // Sentence text (fills middle area, leaving room for 2 buttons on right)
-            float buttonsWidth = TOUCH_SIZE * 2 + 8;
+            // Sentence text — fills remaining space
             var sentenceObj = new GameObject("Sentence");
             sentenceObj.transform.SetParent(row.transform, false);
-            var sentenceRect = sentenceObj.AddComponent<RectTransform>();
-            sentenceRect.anchorMin = new Vector2(0, 0);
-            sentenceRect.anchorMax = new Vector2(1, 1);
-            sentenceRect.offsetMin = new Vector2(38, 2);
-            sentenceRect.offsetMax = new Vector2(-buttonsWidth - 4, -2);
+            sentenceObj.AddComponent<RectTransform>();
+            var sentenceLE = sentenceObj.AddComponent<LayoutElement>();
+            sentenceLE.flexibleWidth = 1f;
             var sentenceText = sentenceObj.AddComponent<Text>();
             sentenceText.font = GetFont();
             sentenceText.fontSize = 14;
@@ -271,17 +276,20 @@ namespace Terranova.UI
 
             int orderId = order.Id;
 
-            // Pause button — 44 × 44
+            // Pause button — fixed 44x44
             var pauseObj = new GameObject("PauseBtn");
             pauseObj.transform.SetParent(row.transform, false);
-            var pauseRect = pauseObj.AddComponent<RectTransform>();
-            pauseRect.anchorMin = new Vector2(1, 0.5f);
-            pauseRect.anchorMax = new Vector2(1, 0.5f);
-            pauseRect.pivot = new Vector2(1, 0.5f);
-            pauseRect.anchoredPosition = new Vector2(-TOUCH_SIZE - 4, 0);
-            pauseRect.sizeDelta = new Vector2(TOUCH_SIZE, TOUCH_SIZE);
-            pauseObj.AddComponent<Image>().color = new Color(0.3f, 0.3f, 0.5f, 0.8f);
-            pauseObj.AddComponent<Button>().onClick.AddListener(() =>
+            pauseObj.AddComponent<RectTransform>();
+            var pauseLE = pauseObj.AddComponent<LayoutElement>();
+            pauseLE.preferredWidth = TOUCH_SIZE;
+            pauseLE.minWidth = TOUCH_SIZE;
+            pauseLE.preferredHeight = TOUCH_SIZE;
+            pauseLE.minHeight = TOUCH_SIZE;
+            var pauseImg = pauseObj.AddComponent<Image>();
+            pauseImg.color = new Color(0.3f, 0.3f, 0.5f, 0.8f);
+            var pauseBtn = pauseObj.AddComponent<Button>();
+            pauseBtn.targetGraphic = pauseImg;
+            pauseBtn.onClick.AddListener(() =>
             {
                 OrderManager.Instance?.TogglePause(orderId);
                 _dirty = true;
@@ -291,7 +299,8 @@ namespace Terranova.UI
             var plRect = pauseLabel.AddComponent<RectTransform>();
             plRect.anchorMin = Vector2.zero;
             plRect.anchorMax = Vector2.one;
-            plRect.sizeDelta = Vector2.zero;
+            plRect.offsetMin = Vector2.zero;
+            plRect.offsetMax = Vector2.zero;
             var plText = pauseLabel.AddComponent<Text>();
             plText.font = GetFont();
             plText.fontSize = 16;
@@ -300,29 +309,26 @@ namespace Terranova.UI
             plText.fontStyle = FontStyle.Bold;
             plText.text = order.Status == OrderStatus.Paused ? ">" : "||";
 
-            // Cancel button — 44 × 44 (bright red X, cancels order + removes marker + frees settlers)
+            // ══ CANCEL BUTTON ══ — fixed 44x44, bright red, white X
             var cancelObj = new GameObject("CancelBtn");
             cancelObj.transform.SetParent(row.transform, false);
-            var cancelRect = cancelObj.AddComponent<RectTransform>();
-            cancelRect.anchorMin = new Vector2(1, 0.5f);
-            cancelRect.anchorMax = new Vector2(1, 0.5f);
-            cancelRect.pivot = new Vector2(1, 0.5f);
-            cancelRect.anchoredPosition = new Vector2(-2, 0);
-            cancelRect.sizeDelta = new Vector2(TOUCH_SIZE, TOUCH_SIZE);
-
-            // Bright red background with full opacity
+            cancelObj.AddComponent<RectTransform>();
+            var cancelLE = cancelObj.AddComponent<LayoutElement>();
+            cancelLE.preferredWidth = TOUCH_SIZE;
+            cancelLE.minWidth = TOUCH_SIZE;
+            cancelLE.preferredHeight = TOUCH_SIZE;
+            cancelLE.minHeight = TOUCH_SIZE;
             var cancelImg = cancelObj.AddComponent<Image>();
             cancelImg.color = new Color(0.85f, 0.08f, 0.08f, 1f);
-
             var cancelBtn = cancelObj.AddComponent<Button>();
             cancelBtn.targetGraphic = cancelImg;
             cancelBtn.onClick.AddListener(() =>
             {
+                Debug.Log($"[OrderListUI] Cancel button clicked for order {orderId}");
                 OrderManager.Instance?.CancelOrder(orderId);
                 _dirty = true;
             });
-
-            // White "X" label — stretched to fill, explicit offsets
+            // White "X" label
             var cancelLabel = new GameObject("CL");
             cancelLabel.transform.SetParent(cancelObj.transform, false);
             var clRect = cancelLabel.AddComponent<RectTransform>();
@@ -337,10 +343,11 @@ namespace Terranova.UI
             clText.alignment = TextAnchor.MiddleCenter;
             clText.fontStyle = FontStyle.Bold;
             clText.text = "X";
-            // Outline for visibility
             var clOutline = cancelLabel.AddComponent<Outline>();
             clOutline.effectColor = new Color(0, 0, 0, 0.8f);
             clOutline.effectDistance = new Vector2(1, -1);
+
+            Debug.Log($"[OrderListUI] Created row for order {orderId}: '{order.BuildSentence()}' with pause + cancel buttons");
         }
 
         // ─── Helpers ─────────────────────────────────────────
