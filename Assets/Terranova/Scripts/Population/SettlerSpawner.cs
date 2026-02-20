@@ -33,7 +33,7 @@ namespace Terranova.Population
 
         // Track whether we've already spawned (to avoid double-spawning)
         private bool _hasSpawned;
-        private static Mesh _cachedFlameConeMesh;
+        // v0.5.2: _cachedFlameConeMesh removed (campfire now uses prefab)
 
         // We wait for WorldManager in Update because terrain generates in Start
         // and we can't guarantee execution order between different Start methods.
@@ -118,7 +118,7 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Create the campfire visual at the position pre-determined by WorldManager.
+        /// v0.5.2: Create the campfire using Explorer Stoneage Camp_Fire prefab + Fire_1A particle.
         /// Terrain is already flattened — no FlattenTerrain call needed.
         /// Returns the world position where it was placed.
         /// </summary>
@@ -127,57 +127,42 @@ namespace Terranova.Population
             int centerX = world.CampfireBlockX;
             int centerZ = world.CampfireBlockZ;
 
-            // Position on smooth mesh surface (meshes already built with flattened terrain)
             float y = world.GetSmoothedHeightAtWorldPos(centerX + 0.5f, centerZ + 0.5f);
             Vector3 position = new Vector3(centerX + 0.5f, y, centerZ + 0.5f);
 
-            // Create campfire visual: stone ring + flame cone
-            var campfire = new GameObject("Campfire");
-            campfire.transform.position = position;
+            // v0.5.2: Use Camp_Fire prefab from Explorer Stoneage
+            var campfire = AssetPrefabRegistry.InstantiateRandom(
+                AssetPrefabRegistry.CampFires, position,
+                new System.Random(GameState.Seed + 100), null, 1.0f, 1.0f);
 
-            var stoneMat = TerrainShaderLibrary.CreateCampfireStoneMaterial();
-            var flameMat = TerrainShaderLibrary.CreateFlameMaterial();
-            var glowMat  = TerrainShaderLibrary.CreateGlowMaterial();
-
-            // Stone ring: 6 small cubes
-            for (int s = 0; s < 6; s++)
+            if (campfire == null)
             {
-                float sAngle = s * Mathf.PI * 2f / 6f;
-                var stone = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                stone.name = $"Stone_{s}";
-                stone.transform.SetParent(campfire.transform, false);
-                stone.transform.localScale = new Vector3(0.2f, 0.15f, 0.2f);
-                stone.transform.localPosition = new Vector3(
-                    Mathf.Cos(sAngle) * 0.35f, 0.07f, Mathf.Sin(sAngle) * 0.35f);
-                stone.transform.localRotation = Quaternion.Euler(0f, sAngle * Mathf.Rad2Deg + 15f, 0f);
-                var sCol = stone.GetComponent<Collider>();
-                if (sCol != null) Destroy(sCol);
-                stone.GetComponent<MeshRenderer>().sharedMaterial = stoneMat;
+                // Fallback: create minimal campfire if prefab missing
+                campfire = new GameObject("Campfire");
+                campfire.transform.position = position;
             }
+            else
+            {
+                campfire.transform.SetParent(null);
+                campfire.transform.position = position;
+            }
+            campfire.name = "Campfire";
 
-            // Flame cone (center) – cache mesh for reuse
-            if (_cachedFlameConeMesh == null)
-                _cachedFlameConeMesh = CreateConeMesh(0.15f, 0.6f, 6);
-            var flameConeMesh = _cachedFlameConeMesh;
-            var flame = new GameObject("Flame");
-            flame.transform.SetParent(campfire.transform, false);
-            flame.transform.localPosition = new Vector3(0f, 0.05f, 0f);
-            var flameMF = flame.AddComponent<MeshFilter>();
-            flameMF.sharedMesh = flameConeMesh;
-            var flameMR = flame.AddComponent<MeshRenderer>();
-            flameMR.sharedMaterial = flameMat;
+            // v0.5.2: Add Fire_1A particle effect on top of campfire
+            var fireFx = AssetPrefabRegistry.InstantiateSpecific(
+                AssetPrefabRegistry.FireParticle,
+                position + new Vector3(0f, 0.1f, 0f),
+                Quaternion.identity, campfire.transform);
+            if (fireFx != null) fireFx.name = "FireFX";
 
-            // Inner glow cone
-            var glow = new GameObject("Glow");
-            glow.transform.SetParent(campfire.transform, false);
-            glow.transform.localPosition = new Vector3(0f, 0.05f, 0f);
-            glow.transform.localScale = new Vector3(0.5f, 0.75f, 0.5f);
-            var glowMF = glow.AddComponent<MeshFilter>();
-            glowMF.sharedMesh = flameConeMesh;
-            var glowMR = glow.AddComponent<MeshRenderer>();
-            glowMR.sharedMaterial = glowMat;
+            // v0.5.2: Add Fireflies_1A near campfire (visible at night)
+            var fireflyFx = AssetPrefabRegistry.InstantiateSpecific(
+                AssetPrefabRegistry.FirefliesParticle,
+                position + new Vector3(2f, 1f, 2f),
+                Quaternion.identity, campfire.transform);
+            if (fireflyFx != null) fireflyFx.name = "FirefliesFX";
 
-            // v0.5.0: Orange point light for campfire glow (visible at night)
+            // Point light for campfire glow
             var lightObj = new GameObject("CampfireLight");
             lightObj.transform.SetParent(campfire.transform, false);
             lightObj.transform.localPosition = new Vector3(0f, 0.5f, 0f);
@@ -188,10 +173,7 @@ namespace Terranova.Population
             pointLight.range = 15f;
             pointLight.shadows = LightShadows.Soft;
 
-            // v0.5.1: Campfire particle system (flame + embers + smoke)
-            CreateCampfireParticles(campfire.transform, position);
-
-            // v0.5.1: Scorch/burn texture around campfire base
+            // Scorch/burn texture around campfire base
             var scorchQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             scorchQuad.name = "Scorch";
             scorchQuad.transform.SetParent(campfire.transform, false);
@@ -204,9 +186,12 @@ namespace Terranova.Population
             scorchMr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
             // Box collider on root for selection
-            var rootCol = campfire.AddComponent<BoxCollider>();
-            rootCol.center = new Vector3(0f, 0.3f, 0f);
-            rootCol.size = new Vector3(0.9f, 0.6f, 0.9f);
+            if (campfire.GetComponent<Collider>() == null)
+            {
+                var rootCol = campfire.AddComponent<BoxCollider>();
+                rootCol.center = new Vector3(0f, 0.3f, 0f);
+                rootCol.size = new Vector3(0.9f, 0.6f, 0.9f);
+            }
 
             // Attach Building component so campfire is a real building in the system
             var campfireDef = BuildingRegistry.Instance?.CampfireDefinition;
@@ -224,103 +209,6 @@ namespace Terranova.Population
             });
 
             return position;
-        }
-
-        /// <summary>
-        /// v0.5.1: Create particle systems for campfire flame, embers, and smoke.
-        /// </summary>
-        private void CreateCampfireParticles(Transform campfireRoot, Vector3 position)
-        {
-            // ── Flame particles ──
-            var flameObj = new GameObject("FlameParticles");
-            flameObj.transform.SetParent(campfireRoot, false);
-            flameObj.transform.localPosition = new Vector3(0f, 0.15f, 0f);
-            var flameParts = flameObj.AddComponent<ParticleSystem>();
-            var flameMain = flameParts.main;
-            flameMain.startLifetime = 0.6f;
-            flameMain.startSpeed = 0.8f;
-            flameMain.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.2f);
-            flameMain.startColor = new ParticleSystem.MinMaxGradient(
-                new Color(1f, 0.6f, 0.1f, 1f), new Color(1f, 0.3f, 0.05f, 0.8f));
-            flameMain.maxParticles = 30;
-            flameMain.simulationSpace = ParticleSystemSimulationSpace.World;
-            var flameEmit = flameParts.emission;
-            flameEmit.rateOverTime = 20f;
-            var flameShape = flameParts.shape;
-            flameShape.shapeType = ParticleSystemShapeType.Cone;
-            flameShape.radius = 0.1f;
-            flameShape.angle = 15f;
-            var flameSizeOverLife = flameParts.sizeOverLifetime;
-            flameSizeOverLife.enabled = true;
-            flameSizeOverLife.size = new ParticleSystem.MinMaxCurve(1f,
-                new AnimationCurve(new Keyframe(0f, 1f), new Keyframe(1f, 0f)));
-            var flameColorOverLife = flameParts.colorOverLifetime;
-            flameColorOverLife.enabled = true;
-            var flameGrad = new Gradient();
-            flameGrad.SetKeys(
-                new[] { new GradientColorKey(new Color(1f, 0.8f, 0.3f), 0f), new GradientColorKey(new Color(1f, 0.2f, 0f), 1f) },
-                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) });
-            flameColorOverLife.color = flameGrad;
-            var particleMat = TerrainShaderLibrary.CreateParticleMaterial();
-
-            var flameRenderer = flameObj.GetComponent<ParticleSystemRenderer>();
-            flameRenderer.renderMode = ParticleSystemRenderMode.Billboard;
-            flameRenderer.sharedMaterial = particleMat;
-
-            // ── Ember particles ──
-            var emberObj = new GameObject("EmberParticles");
-            emberObj.transform.SetParent(campfireRoot, false);
-            emberObj.transform.localPosition = new Vector3(0f, 0.3f, 0f);
-            var emberParts = emberObj.AddComponent<ParticleSystem>();
-            var emberMain = emberParts.main;
-            emberMain.startLifetime = new ParticleSystem.MinMaxCurve(1f, 2.5f);
-            emberMain.startSpeed = new ParticleSystem.MinMaxCurve(0.3f, 1.0f);
-            emberMain.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.05f);
-            emberMain.startColor = new Color(1f, 0.5f, 0.1f, 1f);
-            emberMain.maxParticles = 15;
-            emberMain.simulationSpace = ParticleSystemSimulationSpace.World;
-            emberMain.gravityModifier = -0.1f;
-            var emberEmit = emberParts.emission;
-            emberEmit.rateOverTime = 5f;
-            var emberShape = emberParts.shape;
-            emberShape.shapeType = ParticleSystemShapeType.Sphere;
-            emberShape.radius = 0.15f;
-            var emberRenderer = emberObj.GetComponent<ParticleSystemRenderer>();
-            emberRenderer.sharedMaterial = particleMat;
-
-            // ── Smoke particles ──
-            var smokeObj = new GameObject("SmokeParticles");
-            smokeObj.transform.SetParent(campfireRoot, false);
-            smokeObj.transform.localPosition = new Vector3(0f, 0.5f, 0f);
-            var smokeParts = smokeObj.AddComponent<ParticleSystem>();
-            var smokeMain = smokeParts.main;
-            smokeMain.startLifetime = new ParticleSystem.MinMaxCurve(2f, 4f);
-            smokeMain.startSpeed = new ParticleSystem.MinMaxCurve(0.2f, 0.5f);
-            smokeMain.startSize = new ParticleSystem.MinMaxCurve(0.15f, 0.4f);
-            smokeMain.startColor = new ParticleSystem.MinMaxGradient(
-                new Color(0.3f, 0.3f, 0.3f, 0.2f), new Color(0.5f, 0.5f, 0.5f, 0.1f));
-            smokeMain.maxParticles = 20;
-            smokeMain.simulationSpace = ParticleSystemSimulationSpace.World;
-            smokeMain.gravityModifier = -0.05f;
-            var smokeEmit = smokeParts.emission;
-            smokeEmit.rateOverTime = 3f;
-            var smokeShape = smokeParts.shape;
-            smokeShape.shapeType = ParticleSystemShapeType.Cone;
-            smokeShape.radius = 0.05f;
-            smokeShape.angle = 10f;
-            var smokeSizeOverLife = smokeParts.sizeOverLifetime;
-            smokeSizeOverLife.enabled = true;
-            smokeSizeOverLife.size = new ParticleSystem.MinMaxCurve(1f,
-                new AnimationCurve(new Keyframe(0f, 0.5f), new Keyframe(1f, 2f)));
-            var smokeColorOverLife = smokeParts.colorOverLifetime;
-            smokeColorOverLife.enabled = true;
-            var smokeGrad = new Gradient();
-            smokeGrad.SetKeys(
-                new[] { new GradientColorKey(new Color(0.4f, 0.4f, 0.4f), 0f), new GradientColorKey(new Color(0.6f, 0.6f, 0.6f), 1f) },
-                new[] { new GradientAlphaKey(0.15f, 0f), new GradientAlphaKey(0f, 1f) });
-            smokeColorOverLife.color = smokeGrad;
-            var smokeRenderer = smokeObj.GetComponent<ParticleSystemRenderer>();
-            smokeRenderer.sharedMaterial = particleMat;
         }
 
         /// <summary>
@@ -471,59 +359,6 @@ namespace Terranova.Population
                 Debug.LogError($"BLOCKER: Freshwater pond too far! distance={dist:F1} blocks (max 30)");
         }
 
-        /// <summary>
-        /// Create a simple cone mesh with base at y=0 and apex at y=height.
-        /// </summary>
-        private static Mesh CreateConeMesh(float radius, float height, int segments)
-        {
-            var mesh = new Mesh();
-            int vertCount = segments + 2; // base ring + apex + base center
-            var verts = new Vector3[vertCount];
-            var normals = new Vector3[vertCount];
-
-            // Base center vertex
-            verts[0] = Vector3.zero;
-            normals[0] = Vector3.down;
-
-            // Base ring vertices
-            for (int i = 0; i < segments; i++)
-            {
-                float a = i * Mathf.PI * 2f / segments;
-                float x = Mathf.Cos(a) * radius;
-                float z = Mathf.Sin(a) * radius;
-                verts[i + 1] = new Vector3(x, 0f, z);
-
-                // Approximate outward-up normal for the side
-                Vector3 outward = new Vector3(x, 0f, z).normalized;
-                normals[i + 1] = Vector3.Lerp(outward, Vector3.up, 0.5f).normalized;
-            }
-
-            // Apex vertex
-            verts[segments + 1] = new Vector3(0f, height, 0f);
-            normals[segments + 1] = Vector3.up;
-
-            // Triangles: base disk + side cone
-            var tris = new int[segments * 6];
-            for (int i = 0; i < segments; i++)
-            {
-                int next = (i + 1) % segments;
-
-                // Base triangle (facing down)
-                tris[i * 6 + 0] = 0;
-                tris[i * 6 + 1] = next + 1;
-                tris[i * 6 + 2] = i + 1;
-
-                // Side triangle (facing outward)
-                tris[i * 6 + 3] = i + 1;
-                tris[i * 6 + 4] = next + 1;
-                tris[i * 6 + 5] = segments + 1;
-            }
-
-            mesh.vertices = verts;
-            mesh.normals = normals;
-            mesh.triangles = tris;
-            mesh.RecalculateBounds();
-            return mesh;
-        }
+        // v0.5.2: CreateConeMesh removed (campfire now uses prefab)
     }
 }

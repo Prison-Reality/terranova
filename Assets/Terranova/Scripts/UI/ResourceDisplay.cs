@@ -641,7 +641,7 @@ namespace Terranova.UI
 
             float btnSize = _minTouchTarget * 2.5f;
 
-            // v0.5.1: "New Tribe" button — fog resets, terrain persists
+            // v0.5.2: "New Tribe" button — fog resets, terrain persists
             var newTribeObj = new GameObject("NewTribeButton");
             newTribeObj.transform.SetParent(_gameOverPanel.transform, false);
             var ntRect = newTribeObj.AddComponent<RectTransform>();
@@ -692,7 +692,7 @@ namespace Terranova.UI
         }
 
         /// <summary>
-        /// v0.5.1: Spawn a new tribe at the same campfire.
+        /// v0.5.2: Spawn a new tribe at the same campfire.
         /// Terrain changes persist (paths, stumps, structures).
         /// Fog of war and discoveries reset.
         /// </summary>
@@ -844,7 +844,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.1";
+            versionText.text = "v0.5.2";
         }
 
         /// <summary>

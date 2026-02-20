@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
 using Terranova.Terrain;
+using APR = Terranova.Terrain.AssetPrefabRegistry;
 
 namespace Terranova.Resources
 {
@@ -390,8 +391,13 @@ namespace Terranova.Resources
         // ─── Visual prop creation ───────────────────────────────────
 
         /// <summary>
-        /// Create a visible prop GameObject for the given material at the given position.
-        /// Uses primitive shapes with distinct colors per material type.
+        /// v0.5.2: Create a visible prop GameObject for the given material at the given position.
+        /// Uses Explorer Stoneage prefabs where available, falls back to primitive shapes.
+        ///
+        /// GATHERABLE resources with prefabs:
+        ///   deadwood → Tree_Log / Twigs prefabs
+        ///   river_stone/flint/granite/limestone/sandstone → Rock_Small prefabs
+        /// Other resources keep their previous primitive shapes.
         /// </summary>
         private GameObject CreateResourceProp(
             string materialId, Vector3 position, System.Random rng, Transform parent, BiomeType biome)
@@ -402,26 +408,29 @@ namespace Terranova.Resources
             switch (materialId)
             {
                 case "deadwood":
-                    return CreateWoodProp(position, sizeVariation, yRotation, parent, biome);
+                    return CreatePrefabResourceProp(
+                        rng.Next(3) == 0 ? APR.Twigs : APR.TreeLogs,
+                        position, rng, parent, biome == BiomeType.Coast ? "Driftwood" : "Deadwood",
+                        0.6f, 1.0f);
+
+                case "river_stone":
+                case "sandstone":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Stone", 0.5f, 0.8f);
+
+                case "flint":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Flint", 0.4f, 0.7f);
+
+                case "granite":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Granite", 0.6f, 0.9f);
+
+                case "limestone":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Limestone", 0.5f, 0.8f);
 
                 case "berries_safe":
                     return CreateBerryProp(position, sizeVariation, yRotation, parent, false);
 
                 case "berries_poison":
                     return CreateBerryProp(position, sizeVariation, yRotation, parent, true);
-
-                case "river_stone":
-                case "sandstone":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matStone, "Stone");
-
-                case "flint":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matFlint, "Flint");
-
-                case "granite":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matGranite, "Granite");
-
-                case "limestone":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matLimestone, "Limestone");
 
                 case "grasses_reeds":
                     return CreateReedsProp(position, sizeVariation, yRotation, parent);
@@ -448,9 +457,43 @@ namespace Terranova.Resources
                     return CreateReedsProp(position, sizeVariation * 0.7f, yRotation, parent);
 
                 default:
-                    // Fallback: small grey cube
                     return CreateGenericProp(position, sizeVariation, yRotation, parent, materialId);
             }
+        }
+
+        /// <summary>
+        /// v0.5.2: Create a gatherable resource prop using an Explorer Stoneage prefab.
+        /// Falls back to a simple cube if the prefab can't be loaded.
+        /// </summary>
+        private GameObject CreatePrefabResourceProp(
+            string[] prefabPool, Vector3 position, System.Random rng, Transform parent,
+            string label, float minScale, float maxScale)
+        {
+            var go = APR.InstantiateRandom(prefabPool, position, rng, parent, minScale, maxScale);
+            if (go != null)
+            {
+                go.name = label;
+                // Ensure there's a collider for selection
+                if (go.GetComponent<Collider>() == null && go.GetComponentInChildren<Collider>() == null)
+                {
+                    var col = go.AddComponent<BoxCollider>();
+                    col.isTrigger = true;
+                    col.size = new Vector3(0.5f, 0.5f, 0.5f);
+                    col.center = new Vector3(0f, 0.25f, 0f);
+                }
+                else
+                {
+                    // Make existing colliders triggers
+                    foreach (var col in go.GetComponentsInChildren<Collider>())
+                        col.isTrigger = true;
+                }
+                return go;
+            }
+
+            // Fallback: primitive cube
+            float sizeVariation = minScale + (float)rng.NextDouble() * (maxScale - minScale);
+            float yRotation = (float)rng.NextDouble() * 360f;
+            return CreateGenericProp(position, sizeVariation, yRotation, parent, label);
         }
 
         // ─── Individual prop builders ───────────────────────────────
