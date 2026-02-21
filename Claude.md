@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-02-21 | Current version: v0.5.2 | Milestone: MS4
+> Last updated: 2026-02-21 | Current version: v0.5.3 | Milestone: MS4
 
 ---
 
@@ -126,7 +126,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.5.2
+**Current version:** v0.5.3
 
 #### Implemented Features (MS4)
 

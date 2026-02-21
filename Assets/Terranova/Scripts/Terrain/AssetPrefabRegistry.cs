@@ -280,51 +280,31 @@ namespace Terranova.Terrain
 
             string testPath = "Vegetation/Trees/Pine_Tree_1A";
 
-            Debug.Log($"[AssetPrefabRegistry] ═══ PREFAB LOADING VALIDATION ═══");
 #if UNITY_EDITOR
-            Debug.Log($"[AssetPrefabRegistry] Mode: UNITY_EDITOR (AssetDatabase)");
             string fullTestPath = BASE + testPath + ".prefab";
-            Debug.Log($"[AssetPrefabRegistry] Test path: {fullTestPath}");
             var testPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(fullTestPath);
-            if (testPrefab != null)
-            {
-                Debug.Log($"[AssetPrefabRegistry] Validation PASSED — '{testPrefab.name}' loaded successfully");
-                int rendererCount = testPrefab.GetComponentsInChildren<Renderer>(true).Length;
-                Debug.Log($"[AssetPrefabRegistry]   Renderers in prefab: {rendererCount}");
-            }
-            else
+            if (testPrefab == null)
             {
                 Debug.LogError($"[AssetPrefabRegistry] Validation FAILED — AssetDatabase returned null for: {fullTestPath}");
                 string[] guids = UnityEditor.AssetDatabase.FindAssets("Pine_Tree_1A t:Prefab");
                 if (guids.Length > 0)
                 {
                     string foundPath = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[0]);
-                    Debug.LogError($"[AssetPrefabRegistry]   FindAssets found it at: {foundPath}");
-                    Debug.LogError($"[AssetPrefabRegistry]   Expected path was:      {fullTestPath}");
-                }
-                else
-                {
-                    Debug.LogError($"[AssetPrefabRegistry]   FindAssets found NO prefab named 'Pine_Tree_1A'!");
+                    Debug.LogError($"[AssetPrefabRegistry]   Found at: {foundPath} (expected: {fullTestPath})");
                 }
             }
 #else
-            Debug.Log($"[AssetPrefabRegistry] Mode: RUNTIME (PrefabDatabase)");
             var db = PrefabDatabase.Instance;
-            if (db != null)
+            if (db == null)
             {
-                var testPrefab = db.Get(testPath);
-                if (testPrefab != null)
-                    Debug.Log($"[AssetPrefabRegistry] Validation PASSED — PrefabDatabase has {db.Count} entries, test='{testPrefab.name}'");
-                else
-                    Debug.LogError($"[AssetPrefabRegistry] Validation FAILED — PrefabDatabase loaded ({db.Count} entries) but '{testPath}' not found!");
+                Debug.LogError("[AssetPrefabRegistry] PrefabDatabase.asset not found in Resources! " +
+                               "Run 'Terranova > Rebuild Prefab Database' in Unity Editor before building.");
             }
-            else
+            else if (db.GetPrefab(testPath) == null)
             {
-                Debug.LogError($"[AssetPrefabRegistry] Validation FAILED — PrefabDatabase.asset not found in Resources!");
-                Debug.LogError($"[AssetPrefabRegistry]   Run 'Terranova > Rebuild Prefab Database' in Unity Editor before building.");
+                Debug.LogError($"[AssetPrefabRegistry] PrefabDatabase loaded ({db.Count} entries) but test prefab '{testPath}' not found!");
             }
 #endif
-            Debug.Log($"[AssetPrefabRegistry] ═══════════════════════════════════");
         }
 
         /// <summary>
@@ -352,7 +332,7 @@ namespace Terranova.Terrain
             // Runtime: load from PrefabDatabase (ScriptableObject with direct references)
             var db = PrefabDatabase.Instance;
             if (db != null)
-                prefab = db.Get(subPath);
+                prefab = db.GetPrefab(subPath);
 #endif
 
             if (prefab != null)
@@ -378,11 +358,11 @@ namespace Terranova.Terrain
         /// <summary>Log summary of load attempts. Call after bulk loading is done.</summary>
         public static void LogLoadSummary()
         {
-            int total = _loadSuccessCount + _loadFailCount;
             if (_loadFailCount > 0)
+            {
+                int total = _loadSuccessCount + _loadFailCount;
                 Debug.LogError($"[AssetPrefabRegistry] LOAD SUMMARY: {_loadSuccessCount}/{total} succeeded, {_loadFailCount} FAILED");
-            else
-                Debug.Log($"[AssetPrefabRegistry] LOAD SUMMARY: {_loadSuccessCount}/{total} succeeded — all OK");
+            }
         }
 
         /// <summary>

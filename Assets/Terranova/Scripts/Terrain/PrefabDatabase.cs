@@ -34,7 +34,7 @@ namespace Terranova.Terrain
         /// Find a prefab by its registry key (e.g. "Vegetation/Trees/Pine_Tree_1A"
         /// or "Assets/EXPLORER - Stone Age/Particles/Fire_1A").
         /// </summary>
-        public GameObject Get(string key)
+        public GameObject GetPrefab(string key)
         {
             if (_lookup == null) BuildLookup();
             _lookup.TryGetValue(key, out var prefab);
