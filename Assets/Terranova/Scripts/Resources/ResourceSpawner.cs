@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Terranova.Core;
 using Terranova.Terrain;
+using APR = Terranova.Terrain.AssetPrefabRegistry;
 
 namespace Terranova.Resources
 {
@@ -22,7 +23,8 @@ namespace Terranova.Resources
     ///   - Stone source (type varies by biome)
     ///
     /// Each node uses ResourceNode with a MaterialId from MaterialDatabase.
-    /// Visual distinction via primitive shapes and colors per material type.
+    /// v0.5.2: Wood and stone resources use Explorer Stoneage prefabs;
+    /// other resources use primitive shapes with custom materials.
     /// </summary>
     public class ResourceSpawner : MonoBehaviour
     {
@@ -44,11 +46,8 @@ namespace Terranova.Resources
 
         // ─── Cached materials (created once, reused) ───────────────
 
-        private static Material _matWood;
         private static Material _matBerry;
         private static Material _matBerryPoison;
-        private static Material _matStone;
-        private static Material _matFlint;
         private static Material _matReeds;
         private static Material _matResin;
         private static Material _matClay;
@@ -56,19 +55,13 @@ namespace Terranova.Resources
         private static Material _matInsects;
         private static Material _matRoots;
         private static Material _matHoney;
-        private static Material _matDriftwood;
-        private static Material _matGranite;
-        private static Material _matLimestone;
 
         /// <summary>Reset static state when domain reload is disabled.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
-            _matWood = null;
             _matBerry = null;
             _matBerryPoison = null;
-            _matStone = null;
-            _matFlint = null;
             _matReeds = null;
             _matResin = null;
             _matClay = null;
@@ -76,9 +69,6 @@ namespace Terranova.Resources
             _matInsects = null;
             _matRoots = null;
             _matHoney = null;
-            _matDriftwood = null;
-            _matGranite = null;
-            _matLimestone = null;
         }
 
         // ─── Biome spawn tables ─────────────────────────────────────
@@ -390,8 +380,13 @@ namespace Terranova.Resources
         // ─── Visual prop creation ───────────────────────────────────
 
         /// <summary>
-        /// Create a visible prop GameObject for the given material at the given position.
-        /// Uses primitive shapes with distinct colors per material type.
+        /// v0.5.2: Create a visible prop GameObject for the given material at the given position.
+        /// Uses Explorer Stoneage prefabs where available, falls back to primitive shapes.
+        ///
+        /// GATHERABLE resources with prefabs:
+        ///   deadwood → Tree_Log / Twigs prefabs
+        ///   river_stone/flint/granite/limestone/sandstone → Rock_Small prefabs
+        /// Other resources keep their previous primitive shapes.
         /// </summary>
         private GameObject CreateResourceProp(
             string materialId, Vector3 position, System.Random rng, Transform parent, BiomeType biome)
@@ -402,26 +397,29 @@ namespace Terranova.Resources
             switch (materialId)
             {
                 case "deadwood":
-                    return CreateWoodProp(position, sizeVariation, yRotation, parent, biome);
+                    return CreatePrefabResourceProp(
+                        rng.Next(3) == 0 ? APR.Twigs : APR.TreeLogs,
+                        position, rng, parent, biome == BiomeType.Coast ? "Driftwood" : "Deadwood",
+                        0.6f, 1.0f);
+
+                case "river_stone":
+                case "sandstone":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Stone", 0.5f, 0.8f);
+
+                case "flint":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Flint", 0.4f, 0.7f);
+
+                case "granite":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Granite", 0.6f, 0.9f);
+
+                case "limestone":
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Limestone", 0.5f, 0.8f);
 
                 case "berries_safe":
                     return CreateBerryProp(position, sizeVariation, yRotation, parent, false);
 
                 case "berries_poison":
                     return CreateBerryProp(position, sizeVariation, yRotation, parent, true);
-
-                case "river_stone":
-                case "sandstone":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matStone, "Stone");
-
-                case "flint":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matFlint, "Flint");
-
-                case "granite":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matGranite, "Granite");
-
-                case "limestone":
-                    return CreateStoneProp(position, sizeVariation, yRotation, parent, _matLimestone, "Limestone");
 
                 case "grasses_reeds":
                     return CreateReedsProp(position, sizeVariation, yRotation, parent);
@@ -448,45 +446,46 @@ namespace Terranova.Resources
                     return CreateReedsProp(position, sizeVariation * 0.7f, yRotation, parent);
 
                 default:
-                    // Fallback: small grey cube
                     return CreateGenericProp(position, sizeVariation, yRotation, parent, materialId);
             }
         }
 
-        // ─── Individual prop builders ───────────────────────────────
-
-        /// <summary>Wood/Deadwood: brown cube.</summary>
-        private GameObject CreateWoodProp(Vector3 pos, float scale, float yRot, Transform parent, BiomeType biome)
+        /// <summary>
+        /// v0.5.2: Create a gatherable resource prop using an Explorer Stoneage prefab.
+        /// Falls back to a simple cube if the prefab can't be loaded.
+        /// </summary>
+        private GameObject CreatePrefabResourceProp(
+            string[] prefabPool, Vector3 position, System.Random rng, Transform parent,
+            string label, float minScale, float maxScale)
         {
-            // In coast biome, deadwood is driftwood (slightly different color)
-            Material mat = biome == BiomeType.Coast ? _matDriftwood : _matWood;
-            string label = biome == BiomeType.Coast ? "Driftwood" : "Deadwood";
+            var go = APR.InstantiateRandom(prefabPool, position, rng, parent, minScale, maxScale);
+            if (go != null)
+            {
+                go.name = label;
+                // Ensure there's a collider for selection
+                if (go.GetComponent<Collider>() == null && go.GetComponentInChildren<Collider>() == null)
+                {
+                    var col = go.AddComponent<BoxCollider>();
+                    col.isTrigger = true;
+                    col.size = new Vector3(0.5f, 0.5f, 0.5f);
+                    col.center = new Vector3(0f, 0.25f, 0f);
+                }
+                else
+                {
+                    // Make existing colliders triggers
+                    foreach (var col in go.GetComponentsInChildren<Collider>())
+                        col.isTrigger = true;
+                }
+                return go;
+            }
 
-            var go = new GameObject(label);
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "Mesh";
-            cube.transform.SetParent(go.transform, false);
-            // Elongated log shape
-            float length = 0.6f * scale;
-            float height = 0.2f * scale;
-            float width = 0.2f * scale;
-            cube.transform.localScale = new Vector3(length, height, width);
-            cube.transform.localPosition = new Vector3(0f, height * 0.5f, 0f);
-            // Slight tilt for natural look
-            cube.transform.localRotation = Quaternion.Euler(0f, 0f, (float)(new System.Random((int)(pos.x * 100)).NextDouble()) * 10f - 5f);
-
-            if (mat != null)
-                cube.GetComponent<MeshRenderer>().sharedMaterial = mat;
-
-            var col = cube.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
+            // Fallback: primitive cube
+            float sizeVariation = minScale + (float)rng.NextDouble() * (maxScale - minScale);
+            float yRotation = (float)rng.NextDouble() * 360f;
+            return CreateGenericProp(position, sizeVariation, yRotation, parent, label);
         }
+
+        // ─── Individual prop builders ───────────────────────────────
 
         /// <summary>Berry bush: small green sphere with red/dark top spheres.</summary>
         private GameObject CreateBerryProp(Vector3 pos, float scale, float yRot, Transform parent, bool poisonous)
@@ -533,37 +532,6 @@ namespace Terranova.Resources
                 var berryCol = berry.GetComponent<Collider>();
                 if (berryCol != null) Object.Destroy(berryCol);
             }
-
-            return go;
-        }
-
-        /// <summary>Stone/Flint/Granite/Limestone: gray cube with color variation.</summary>
-        private GameObject CreateStoneProp(Vector3 pos, float scale, float yRot, Transform parent, Material mat, string label)
-        {
-            var go = new GameObject(label);
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(
-                (float)(new System.Random((int)(pos.x * 73)).NextDouble()) * 15f,
-                yRot,
-                (float)(new System.Random((int)(pos.z * 97)).NextDouble()) * 15f);
-
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "Mesh";
-            cube.transform.SetParent(go.transform, false);
-            float sz = 0.35f * scale;
-            // Slightly irregular dimensions
-            cube.transform.localScale = new Vector3(
-                sz * (0.8f + (float)(new System.Random((int)(pos.x * 37)).NextDouble()) * 0.4f),
-                sz * (0.6f + (float)(new System.Random((int)(pos.z * 41)).NextDouble()) * 0.4f),
-                sz * (0.8f + (float)(new System.Random((int)(pos.x * 53 + pos.z)).NextDouble()) * 0.4f));
-            cube.transform.localPosition = new Vector3(0f, sz * 0.3f, 0f);
-
-            if (mat != null)
-                cube.GetComponent<MeshRenderer>().sharedMaterial = mat;
-
-            var col = cube.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
 
             return go;
         }
@@ -771,22 +739,13 @@ namespace Terranova.Resources
 
         private static void EnsureMaterials()
         {
-            if (_matWood != null) return;
-
-            _matWood      = TerrainShaderLibrary.CreateWoodMaterial("Wood_Mat",      new Color(0.50f, 0.30f, 0.15f));
-            _matDriftwood = TerrainShaderLibrary.CreateWoodMaterial("Driftwood_Mat", new Color(0.55f, 0.45f, 0.35f));
+            if (_matBerry != null) return;
 
             // Berries: emissive red/purple glow so visible from distance
             _matBerry       = TerrainShaderLibrary.CreateEmissivePropMaterial("Berry_Mat",
                 new Color(0.80f, 0.20f, 0.20f), new Color(0.25f, 0.03f, 0.03f), 0.35f);
             _matBerryPoison = TerrainShaderLibrary.CreateEmissivePropMaterial("BerryPoison_Mat",
                 new Color(0.45f, 0.10f, 0.35f), new Color(0.12f, 0.02f, 0.08f), 0.35f);
-
-            // Stones: low smoothness, varying roughness
-            _matStone     = TerrainShaderLibrary.CreateRockMaterial("Stone_Mat",     new Color(0.50f, 0.50f, 0.55f));
-            _matFlint     = TerrainShaderLibrary.CreateRockMaterial("Flint_Mat",     new Color(0.35f, 0.35f, 0.40f));
-            _matGranite   = TerrainShaderLibrary.CreateGraniteMaterial("Granite_Mat",  new Color(0.60f, 0.58f, 0.55f));
-            _matLimestone = TerrainShaderLibrary.CreateRockMaterial("Limestone_Mat", new Color(0.75f, 0.72f, 0.65f));
 
             // Vegetation: foliage shader with wind
             _matReeds     = TerrainShaderLibrary.CreateFoliageMaterial("Reeds_Mat", new Color(0.30f, 0.55f, 0.20f), 0.25f, 0.15f, 2.0f);

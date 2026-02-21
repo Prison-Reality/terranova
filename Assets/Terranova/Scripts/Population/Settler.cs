@@ -11,7 +11,7 @@ namespace Terranova.Population
     /// <summary>
     /// Represents a single settler in the world.
     ///
-    /// Story 1.1: Colored capsule standing on terrain.
+    /// Story 1.1: v0.5.2 — Prehistoric avatar prefabs from Explorer Stoneage.
     /// Story 1.2: Idle wander behavior around the campfire.
     /// Story 1.3: Task system (can receive and hold one task).
     /// Story 1.4: Work cycle (walk to target -> work -> return -> deliver -> repeat).
@@ -361,6 +361,7 @@ namespace Terranova.Population
         private MaterialPropertyBlock _headPropBlock;
         private MeshRenderer _bodyRenderer;
         private MeshRenderer _headRenderer;
+        private SkinnedMeshRenderer _skinnedRenderer; // v0.5.2: For prefab avatars with skinned meshes
         private int _colorIndex;
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
@@ -2272,58 +2273,66 @@ namespace Terranova.Population
         {
             EnsureSharedMaterial();
 
-            // Body: cylinder (torso)
-            var body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            body.name = "Body";
-            body.transform.SetParent(transform, false);
-            body.transform.localScale = new Vector3(0.3f, 0.35f, 0.2f);
-            body.transform.localPosition = new Vector3(0f, 0.35f, 0f);
-            var bodyCol = body.GetComponent<Collider>();
-            if (bodyCol != null) Destroy(bodyCol);
+            // v0.5.2: Use Explorer Stoneage character prefabs instead of primitives.
+            // Alternate between male and female avatars based on color index.
+            string[] avatarPool = (_colorIndex % 2 == 0)
+                ? AssetPrefabRegistry.MaleAvatars
+                : AssetPrefabRegistry.FemaleAvatars;
 
-            _bodyRenderer = body.GetComponent<MeshRenderer>();
-            _bodyRenderer.sharedMaterial = _sharedMaterial;
+            // Pick a unique variant based on index (wraps around 4 variants)
+            int variantIndex = (_colorIndex / 2) % avatarPool.Length;
+            string avatarPath = avatarPool[variantIndex];
+
+            var prefab = AssetPrefabRegistry.LoadPrefab(avatarPath);
+            if (prefab != null)
+            {
+                var avatar = Instantiate(prefab, transform, false);
+                avatar.name = "Avatar";
+                avatar.transform.localPosition = Vector3.zero;
+                avatar.transform.localRotation = Quaternion.identity;
+
+                // Find renderers for color tinting (hunger/thirst state)
+                _bodyRenderer = avatar.GetComponentInChildren<MeshRenderer>();
+                if (_bodyRenderer == null)
+                {
+                    var skinnedRenderer = avatar.GetComponentInChildren<SkinnedMeshRenderer>();
+                    if (skinnedRenderer != null)
+                    {
+                        // SkinnedMeshRenderer can't be stored in MeshRenderer ref,
+                        // but we track it separately for color updates
+                        _skinnedRenderer = skinnedRenderer;
+                    }
+                }
+
+                // Find head renderer (second renderer if available)
+                var renderers = avatar.GetComponentsInChildren<MeshRenderer>();
+                if (renderers.Length > 1)
+                    _headRenderer = renderers[1];
+                else
+                    _headRenderer = _bodyRenderer;
+
+                // Remove any colliders from the prefab (we add our own)
+                foreach (var col in avatar.GetComponentsInChildren<Collider>())
+                    Destroy(col);
+            }
+            else
+            {
+                // Fallback: simple cylinder if prefab fails to load
+                var body = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                body.name = "Body";
+                body.transform.SetParent(transform, false);
+                body.transform.localScale = new Vector3(0.3f, 0.35f, 0.2f);
+                body.transform.localPosition = new Vector3(0f, 0.35f, 0f);
+                var bodyCol = body.GetComponent<Collider>();
+                if (bodyCol != null) Destroy(bodyCol);
+
+                _bodyRenderer = body.GetComponent<MeshRenderer>();
+                _bodyRenderer.sharedMaterial = _sharedMaterial;
+                _headRenderer = _bodyRenderer;
+            }
 
             _propBlock = new MaterialPropertyBlock();
-            Color bodyColor = SETTLER_COLORS[_colorIndex % SETTLER_COLORS.Length];
-            _propBlock.SetColor(ColorID, bodyColor);
-            _bodyRenderer.SetPropertyBlock(_propBlock);
-
-            // Head: sphere
-            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            head.name = "Head";
-            head.transform.SetParent(transform, false);
-            head.transform.localScale = new Vector3(0.22f, 0.22f, 0.22f);
-            head.transform.localPosition = new Vector3(0f, 0.81f, 0f);
-            var headCol = head.GetComponent<Collider>();
-            if (headCol != null) Destroy(headCol);
-
-            _headRenderer = head.GetComponent<MeshRenderer>();
-            _headRenderer.sharedMaterial = _sharedMaterial;
-
             _headPropBlock = new MaterialPropertyBlock();
-            Color headColor = Color.Lerp(bodyColor, Color.white, 0.35f);
-            _headPropBlock.SetColor(ColorID, headColor);
-            _headRenderer.SetPropertyBlock(_headPropBlock);
-
-            // Legs: two small cylinders
-            for (int i = 0; i < 2; i++)
-            {
-                var leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-                leg.name = $"Leg_{i}";
-                leg.transform.SetParent(transform, false);
-                float xOff = i == 0 ? -0.08f : 0.08f;
-                leg.transform.localScale = new Vector3(0.1f, 0.15f, 0.1f);
-                leg.transform.localPosition = new Vector3(xOff, 0.08f, 0f);
-                var legCol = leg.GetComponent<Collider>();
-                if (legCol != null) Destroy(legCol);
-
-                var legRenderer = leg.GetComponent<MeshRenderer>();
-                legRenderer.sharedMaterial = _sharedMaterial;
-                var legPb = new MaterialPropertyBlock();
-                legPb.SetColor(ColorID, bodyColor * 0.7f);
-                legRenderer.SetPropertyBlock(legPb);
-            }
 
             // Selection collider
             var selectionCol = gameObject.AddComponent<BoxCollider>();
@@ -2338,7 +2347,8 @@ namespace Terranova.Population
         /// </summary>
         private void UpdateVisualColor()
         {
-            if (_bodyRenderer == null || _propBlock == null) return;
+            if (_propBlock == null) return;
+            if (_bodyRenderer == null && _skinnedRenderer == null) return;
 
             // Critical hunger or thirst overrides everything
             bool isCritical = CurrentHungerState == HungerState.Exhausted
@@ -2348,13 +2358,7 @@ namespace Terranova.Population
 
             if (isCritical)
             {
-                _propBlock.SetColor(ColorID, HUNGRY_COLOR);
-                _bodyRenderer.SetPropertyBlock(_propBlock);
-                if (_headRenderer != null && _headPropBlock != null)
-                {
-                    _headPropBlock.SetColor(ColorID, HUNGRY_COLOR);
-                    _headRenderer.SetPropertyBlock(_headPropBlock);
-                }
+                ApplyColorToRenderers(HUNGRY_COLOR);
                 return;
             }
 
@@ -2366,13 +2370,22 @@ namespace Terranova.Population
             }
             else
             {
-                _propBlock.SetColor(ColorID, GATHERER_ACCENT);
-                _bodyRenderer.SetPropertyBlock(_propBlock);
-                if (_headRenderer != null && _headPropBlock != null)
-                {
-                    _headPropBlock.SetColor(ColorID, GATHERER_ACCENT);
-                    _headRenderer.SetPropertyBlock(_headPropBlock);
-                }
+                ApplyColorToRenderers(GATHERER_ACCENT);
+            }
+        }
+
+        private void ApplyColorToRenderers(Color color)
+        {
+            if (_propBlock == null) return;
+
+            _propBlock.SetColor(ColorID, color);
+            if (_bodyRenderer != null) _bodyRenderer.SetPropertyBlock(_propBlock);
+            if (_skinnedRenderer != null) _skinnedRenderer.SetPropertyBlock(_propBlock);
+
+            if (_headPropBlock != null)
+            {
+                _headPropBlock.SetColor(ColorID, color);
+                if (_headRenderer != null) _headRenderer.SetPropertyBlock(_headPropBlock);
             }
         }
 
@@ -2388,16 +2401,7 @@ namespace Terranova.Population
                 _ => GATHERER_ACCENT
             };
 
-            if (_bodyRenderer != null && _propBlock != null)
-            {
-                _propBlock.SetColor(ColorID, accent);
-                _bodyRenderer.SetPropertyBlock(_propBlock);
-            }
-            if (_headRenderer != null && _headPropBlock != null)
-            {
-                _headPropBlock.SetColor(ColorID, accent);
-                _headRenderer.SetPropertyBlock(_headPropBlock);
-            }
+            ApplyColorToRenderers(accent);
         }
 
         private static void EnsureSharedMaterial()
