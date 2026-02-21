@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-02-21 | Current version: v0.5.3 | Milestone: MS4
+> Last updated: 2026-02-21 | Current version: v0.5.2 | Milestone: MS4
 
 ---
 
@@ -33,8 +33,8 @@ Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+)
 
 | Step | Who | Tool |
 |------|-----|------|
-| Code changes | Claude Code | Git push to `main` branch directly |
-| Pull latest | Producer | `git pull origin main` |
+| Code changes | Claude Code | Git push to `claude/*` branch (e.g. `claude/v0.5.3-fixes`) |
+| Merge to main | Producer | `git checkout main && git pull && git merge claude/[branch] && git push` |
 | Build iOS project | Producer | Unity → File → Build Settings → iOS |
 | Deploy to iPad | Producer | Xcode → Run on device |
 
@@ -51,8 +51,9 @@ Terranova is a **real-time strategy/economy simulation** for tablets (iPad, M4+)
 
 ### Git Workflow
 
-- Claude Code pushes directly to `main` branch
-- Producer pulls, builds, and deploys
+- `main` is protected – Claude Code cannot push directly to main (403)
+- Always push to a `claude/*` branch (e.g. `claude/v0.5.3-terrain-fix`)
+- Producer merges locally: `git checkout main && git pull && git merge claude/[branch] && git push`
 - After push, always state the version number (e.g. "Bump to v0.5.3")
 
 ---
@@ -126,7 +127,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.5.3
+**Current version:** v0.5.2
 
 #### Implemented Features (MS4)
 
