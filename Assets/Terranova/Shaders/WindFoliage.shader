@@ -104,8 +104,9 @@ Shader "Terranova/WindFoliage"
                 float colorVar = hash(floor(input.positionWS.xz * 0.5)) * 0.15;
                 float3 leafColor = _BaseColor.rgb + float3(-colorVar, colorVar * 0.5, -colorVar * 0.5);
 
-                float3 ambient = leafColor * 0.35;
-                float3 diffuse = leafColor * totalLight * mainLight.color.rgb * 0.65;
+                // Ambient from spherical harmonics (environment lighting)
+                float3 ambient = SampleSH(normalWS) * leafColor;
+                float3 diffuse = leafColor * totalLight * mainLight.color.rgb;
 
                 return half4(ambient + diffuse, 1.0);
             }
