@@ -354,10 +354,12 @@ namespace Terranova.Terrain
             var replacement = new Material(targetShader);
             replacement.name = "URP_" + original.name;
 
-            // Copy base color from original (BiRP uses _Color, URP uses _BaseColor)
+            // Copy base color from original (BiRP Standard uses _Color, EXPLORER Wind uses _Tint)
             Color baseColor = Color.white;
             if (original.HasProperty("_Color"))
                 baseColor = original.GetColor("_Color");
+            else if (original.HasProperty("_Tint"))
+                baseColor = original.GetColor("_Tint");
             replacement.SetColor("_BaseColor", baseColor);
 
             // Copy main texture (preserves visual detail from EXPLORER assets)
@@ -369,7 +371,12 @@ namespace Terranova.Terrain
 
             if (isFoliage)
             {
-                replacement.SetFloat("_Cutoff", 0.35f);
+                // Preserve original cutoff — EXPLORER assets use _Cutoff = 0.9 to clip
+                // the green background of leaf texture atlases. Lowering it causes the
+                // background to bleed through, showing leaf planes as green squares.
+                float cutoff = original.HasProperty("_Cutoff")
+                    ? original.GetFloat("_Cutoff") : 0.5f;
+                replacement.SetFloat("_Cutoff", cutoff);
                 replacement.SetFloat("_WindStrength", 0.08f);
                 replacement.SetFloat("_WindSpeed", 1.5f);
             }
