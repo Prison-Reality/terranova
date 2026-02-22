@@ -23,7 +23,7 @@ namespace Terranova.Terrain
     {
         public static FogOfWar Instance { get; private set; }
 
-        private const float FOG_HEIGHT_OFFSET = 2.0f;
+        private const float FOG_HEIGHT_OFFSET = 3.5f;
         private const int CAMPFIRE_REVEAL_RADIUS = 30;
         public const int SETTLER_REVEAL_RADIUS = 10;
         public const int CURIOUS_REVEAL_RADIUS = 15;

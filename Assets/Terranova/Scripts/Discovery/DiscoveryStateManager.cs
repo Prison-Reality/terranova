@@ -85,22 +85,22 @@ namespace Terranova.Discovery
                     _unlockedBuildings.Add(bt);
             }
 
-            // Build unlocks description — single unified list, no redundant labels
+            // Build unlocks description — single unified list, formatted as Title Case
             var unlockItems = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
             if (definition.UnlockedCapabilities != null)
             {
                 foreach (var cap in definition.UnlockedCapabilities)
-                    unlockItems.Add(cap);
+                    unlockItems.Add(FormatUnlockName(cap));
             }
             if (definition.UnlockedResources != null)
             {
                 foreach (var res in definition.UnlockedResources)
-                    unlockItems.Add(res.ToString());
+                    unlockItems.Add(FormatUnlockName(res.ToString()));
             }
             if (definition.UnlockedBuildings != null)
             {
                 foreach (var bt in definition.UnlockedBuildings)
-                    unlockItems.Add(bt.ToString());
+                    unlockItems.Add(FormatUnlockName(bt.ToString()));
             }
             string unlocks = unlockItems.Count > 0 ? string.Join(", ", unlockItems) : "";
 
@@ -115,6 +115,38 @@ namespace Terranova.Discovery
 
             Debug.Log($"[Discovery] Discovered: {definition.DisplayName} ({reason})");
             return true;
+        }
+
+        /// <summary>
+        /// Convert internal capability/enum names to readable Title Case.
+        /// "plant_knowledge" → "Plant Knowledge", "CookingFire" → "Cooking Fire"
+        /// </summary>
+        private static string FormatUnlockName(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+
+            // Replace underscores with spaces
+            string s = raw.Replace('_', ' ');
+
+            // Insert space before uppercase letters in PascalCase (e.g. "CookingFire" → "Cooking Fire")
+            var sb = new System.Text.StringBuilder(s.Length + 4);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (i > 0 && char.IsUpper(c) && !char.IsUpper(s[i - 1]) && s[i - 1] != ' ')
+                    sb.Append(' ');
+                sb.Append(c);
+            }
+            s = sb.ToString();
+
+            // Title case: capitalize first letter of each word
+            var words = s.Split(' ');
+            for (int i = 0; i < words.Length; i++)
+            {
+                if (words[i].Length > 0)
+                    words[i] = char.ToUpper(words[i][0]) + words[i].Substring(1).ToLower();
+            }
+            return string.Join(" ", words);
         }
 
         /// <summary>Number of completed discoveries.</summary>

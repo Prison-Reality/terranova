@@ -844,7 +844,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.4";
+            versionText.text = "v0.5.5";
         }
 
         /// <summary>
@@ -1040,18 +1040,19 @@ namespace Terranova.UI
             label.text = "Menu";
         }
 
-        // ─── Order Button (Feature 7, v0.4.13) ──────────────────
+        // ─── Bottom-Left Buttons (Feature 7 + 8.6) ─────────────────
 
         /// <summary>
-        /// Single "Orders" button (bottom-left) that opens the Klappbuch UI
-        /// with all columns empty. Active orders list is accessible from
-        /// within the Klappbuch via "Active Orders" button.
+        /// "Orders" button (bottom-left) opens the Klappbuch UI.
+        /// "Discoveries" button (next to Orders) opens the Discovery Log.
         /// </summary>
         private void CreateOrderButtons()
         {
             float btnW = 110f;
             float btnH = _minTouchTarget;
+            float spacing = 8f;
 
+            // Orders button
             var ordersObj = new GameObject("OrdersButton");
             ordersObj.transform.SetParent(transform, false);
             var ordersRect = ordersObj.AddComponent<RectTransform>();
@@ -1083,6 +1084,41 @@ namespace Terranova.UI
             olText.alignment = TextAnchor.MiddleCenter;
             olText.fontStyle = FontStyle.Bold;
             olText.text = "Orders";
+
+            // Discoveries button (Feature 8.6) — right of Orders
+            float discoveriesX = 20 + btnW + spacing;
+            var discObj = new GameObject("DiscoveriesButton");
+            discObj.transform.SetParent(transform, false);
+            var discRect = discObj.AddComponent<RectTransform>();
+            discRect.anchorMin = new Vector2(0, 0);
+            discRect.anchorMax = new Vector2(0, 0);
+            discRect.pivot = new Vector2(0, 0);
+            discRect.anchoredPosition = new Vector2(discoveriesX, 20);
+            discRect.sizeDelta = new Vector2(btnW + 10, btnH);
+
+            var discImg = discObj.AddComponent<Image>();
+            discImg.color = new Color(0.45f, 0.35f, 0.15f, 0.9f);
+            var discBtn = discObj.AddComponent<Button>();
+            discBtn.targetGraphic = discImg;
+            discBtn.onClick.AddListener(() =>
+            {
+                var logUI = DiscoveryLogUI.Instance;
+                if (logUI != null) logUI.Toggle();
+            });
+
+            var discLabel = new GameObject("Label");
+            discLabel.transform.SetParent(discObj.transform, false);
+            var dlRect = discLabel.AddComponent<RectTransform>();
+            dlRect.anchorMin = Vector2.zero;
+            dlRect.anchorMax = Vector2.one;
+            dlRect.sizeDelta = Vector2.zero;
+            var dlText = discLabel.AddComponent<Text>();
+            dlText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            dlText.fontSize = 15;
+            dlText.color = Color.white;
+            dlText.alignment = TextAnchor.MiddleCenter;
+            dlText.fontStyle = FontStyle.Bold;
+            dlText.text = "Discoveries";
         }
 
         private void SetSpeed(int speedIndex)

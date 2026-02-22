@@ -1,187 +1,249 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Discovery;
 
 namespace Terranova.UI
 {
     /// <summary>
-    /// "Discoveries" tab accessible from the main HUD.
+    /// "Discoveries" panel accessible from a HUD button (bottom-left, next to Orders).
     ///
     /// Feature 8.6: Discovery Log.
     ///
-    /// - List of completed discoveries with icon, name, date, discoverer
-    /// - Hints for in-progress discoveries (Phase A > 50%)
+    /// - Scrollable list of completed discoveries with tier icon, name, day, discoverer
+    /// - Hints section for in-progress discoveries (Phase A > 50%)
     /// - Locked entries shown as "???" with biome hint
     ///
-    /// Toggle: D key or tap the Discoveries button on HUD.
-    /// Uses IMGUI (consistent with DebugOverlay).
+    /// Toggle: Tab key or tap the Discoveries button on HUD.
+    /// Uses Unity UI (consistent with OrderListUI).
     /// </summary>
     public class DiscoveryLogUI : MonoBehaviour
     {
-        private bool _visible;
-        private Vector2 _scrollPos;
+        public static DiscoveryLogUI Instance { get; private set; }
 
-        private static readonly Color HEADER_COLOR = new(0.9f, 0.8f, 0.4f);
+        private const float PANEL_WIDTH = 480f;
+        private const float PANEL_HEIGHT = 520f;
+        private const float TOUCH_SIZE = 44f;
+
+        private static readonly Color BG_COLOR = new(0.06f, 0.07f, 0.06f, 0.95f);
+        private static readonly Color SECTION_BG = new(0.10f, 0.12f, 0.10f, 0.8f);
         private static readonly Color COMPLETED_COLOR = new(0.7f, 1f, 0.7f);
+        private static readonly Color MAJOR_COLOR = new(1f, 0.7f, 0.3f);
         private static readonly Color HINT_COLOR = new(1f, 0.9f, 0.6f);
         private static readonly Color LOCKED_COLOR = new(0.5f, 0.5f, 0.5f);
-        private static readonly Color MAJOR_COLOR = new(1f, 0.7f, 0.3f);
+        private static readonly Color META_COLOR = new(0.6f, 0.6f, 0.6f);
+        private static readonly Color DESC_COLOR = new(0.8f, 0.8f, 0.8f);
 
-        private GUIStyle _headerStyle;
-        private GUIStyle _entryStyle;
-        private GUIStyle _hintStyle;
-        private GUIStyle _lockedStyle;
-        private GUIStyle _buttonStyle;
-        private bool _stylesInitialized;
+        private GameObject _panel;
+        private Transform _listContent;
+        private bool _isOpen;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+        }
 
         private void Update()
         {
             if (UnityEngine.Input.GetKeyDown(KeyCode.Tab))
-                _visible = !_visible;
+                Toggle();
+            if (_isOpen && UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+                Close();
         }
 
-        private void InitStyles()
+        // ─── Open / Close ────────────────────────────────────
+
+        public void Toggle()
         {
-            if (_stylesInitialized) return;
-            _stylesInitialized = true;
-
-            _headerStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 18,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter
-            };
-
-            _entryStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 13,
-                wordWrap = true,
-                richText = true
-            };
-
-            _hintStyle = new GUIStyle(_entryStyle);
-
-            _lockedStyle = new GUIStyle(_entryStyle);
-
-            _buttonStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 14
-            };
+            if (_isOpen) Close();
+            else Open();
         }
 
-        private void OnGUI()
+        public void Open()
         {
-            if (!_visible) return;
+            if (_isOpen) return;
+            _isOpen = true;
+            BuildPanel();
+        }
 
-            InitStyles();
+        public void Close()
+        {
+            if (_panel != null) Destroy(_panel);
+            _panel = null;
+            _isOpen = false;
+        }
 
-            float panelW = Mathf.Min(420f, Screen.width * 0.85f);
-            float panelH = Mathf.Min(550f, Screen.height * 0.8f);
-            float panelX = (Screen.width - panelW) * 0.5f;
-            float panelY = (Screen.height - panelH) * 0.5f;
+        public bool IsOpen => _isOpen;
 
-            var panelRect = new Rect(panelX, panelY, panelW, panelH);
+        // ─── Panel Construction ──────────────────────────────
 
-            // Semi-transparent background
-            GUI.color = new Color(0, 0, 0, 0.85f);
-            GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
-            GUI.color = Color.white;
+        private void BuildPanel()
+        {
+            if (_panel != null) Destroy(_panel);
 
-            GUILayout.BeginArea(panelRect);
-            GUILayout.Space(12);
+            // Full-screen overlay (click outside to close)
+            _panel = new GameObject("DiscoveryLogPanel");
+            _panel.transform.SetParent(transform, false);
+            _panel.transform.SetAsLastSibling();
+            var overlay = _panel.AddComponent<Image>();
+            overlay.color = new Color(0f, 0f, 0f, 0.5f);
+            var overlayRect = _panel.GetComponent<RectTransform>();
+            overlayRect.anchorMin = Vector2.zero;
+            overlayRect.anchorMax = Vector2.one;
+            overlayRect.offsetMin = Vector2.zero;
+            overlayRect.offsetMax = Vector2.zero;
+            _panel.AddComponent<Button>().onClick.AddListener(Close);
 
-            // Header
-            var oldColor = GUI.contentColor;
-            GUI.contentColor = HEADER_COLOR;
-            GUILayout.Label("DISCOVERIES", _headerStyle);
-            GUI.contentColor = oldColor;
+            // Card
+            var card = MakeRect(_panel.transform, "Card", Vector2.zero,
+                new Vector2(PANEL_WIDTH, PANEL_HEIGHT));
+            card.AddComponent<Image>().color = BG_COLOR;
+            card.AddComponent<Button>().onClick.AddListener(() => { }); // block click-through
 
-            GUILayout.Space(8);
+            // Title
+            var titleObj = MakeRect(card.transform, "Title",
+                new Vector2(0, PANEL_HEIGHT / 2 - 24),
+                new Vector2(PANEL_WIDTH - TOUCH_SIZE - 16, 40));
+            var titleText = titleObj.AddComponent<Text>();
+            titleText.font = GetFont();
+            titleText.fontSize = 22;
+            titleText.color = new Color(0.9f, 0.8f, 0.4f);
+            titleText.alignment = TextAnchor.MiddleCenter;
+            titleText.fontStyle = FontStyle.Bold;
+            titleText.text = "DISCOVERIES";
+
+            // Close [X]
+            var closeX = MakeRect(card.transform, "CloseX",
+                new Vector2(PANEL_WIDTH / 2 - TOUCH_SIZE / 2 - 4, PANEL_HEIGHT / 2 - TOUCH_SIZE / 2 - 2),
+                new Vector2(TOUCH_SIZE, TOUCH_SIZE));
+            closeX.AddComponent<Image>().color = new Color(0.5f, 0.2f, 0.2f, 0.8f);
+            closeX.AddComponent<Button>().onClick.AddListener(Close);
+            var closeLabel = MakeRect(closeX.transform, "X", Vector2.zero,
+                new Vector2(TOUCH_SIZE, TOUCH_SIZE));
+            var closeTxt = closeLabel.AddComponent<Text>();
+            closeTxt.font = GetFont();
+            closeTxt.fontSize = 22;
+            closeTxt.color = Color.white;
+            closeTxt.alignment = TextAnchor.MiddleCenter;
+            closeTxt.fontStyle = FontStyle.Bold;
+            closeTxt.text = "X";
 
             // Scroll area
-            _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
+            float scrollHeight = PANEL_HEIGHT - 70;
+            var scrollBg = MakeRect(card.transform, "ScrollBg",
+                new Vector2(0, -20), new Vector2(PANEL_WIDTH - 20, scrollHeight));
+            scrollBg.AddComponent<Image>().color = new Color(0.04f, 0.05f, 0.04f, 0.6f);
+            scrollBg.AddComponent<RectMask2D>();
 
-            DrawCompletedDiscoveries();
-            GUILayout.Space(12);
-            DrawHints();
-            GUILayout.Space(12);
-            DrawLockedEntries();
+            var scrollRect = scrollBg.AddComponent<ScrollRect>();
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.scrollSensitivity = 30f;
 
-            GUILayout.EndScrollView();
+            // Content
+            var content = new GameObject("Content");
+            content.transform.SetParent(scrollBg.transform, false);
+            var contentRect = content.AddComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0, 1);
+            contentRect.anchorMax = new Vector2(1, 1);
+            contentRect.pivot = new Vector2(0.5f, 1);
+            contentRect.anchoredPosition = Vector2.zero;
+            contentRect.sizeDelta = new Vector2(0, 0);
 
-            GUILayout.Space(8);
+            scrollRect.content = contentRect;
+            _listContent = content.transform;
 
-            // Close button
-            if (GUILayout.Button("Close [Tab]", _buttonStyle, GUILayout.Height(36)))
-                _visible = false;
-
-            GUILayout.Space(8);
-            GUILayout.EndArea();
+            PopulateContent();
         }
 
-        // ─── Completed Discoveries ──────────────────────────────
+        // ─── Content Population ──────────────────────────────
 
-        private void DrawCompletedDiscoveries()
+        private void PopulateContent()
+        {
+            if (_listContent == null) return;
+
+            float y = -8f;
+
+            y = DrawCompletedSection(y);
+            y -= 8f;
+            y = DrawHintsSection(y);
+            y -= 8f;
+            y = DrawLockedSection(y);
+            y -= 8f;
+
+            // Set content height
+            var contentRect = _listContent.GetComponent<RectTransform>();
+            contentRect.sizeDelta = new Vector2(0, Mathf.Abs(y));
+        }
+
+        // ─── Completed Discoveries ───────────────────────────
+
+        private float DrawCompletedSection(float y)
         {
             var stateManager = DiscoveryStateManager.Instance;
             var phaseManager = DiscoveryPhaseManager.Instance;
-            if (stateManager == null) return;
+            if (stateManager == null) return y;
 
             bool any = false;
             foreach (var name in stateManager.CompletedDiscoveries)
             {
                 if (!any)
                 {
-                    GUI.contentColor = COMPLETED_COLOR;
-                    GUILayout.Label("── Completed ──", _entryStyle);
-                    GUI.contentColor = Color.white;
+                    y = AddSectionHeader(y, "Completed", COMPLETED_COLOR);
                     any = true;
                 }
 
                 var prog = phaseManager?.GetProgress(name);
+                bool isMajor = prog?.Definition?.Tier == DiscoveryTier.Major;
                 string tierIcon = GetTierIcon(prog);
+                Color nameColor = isMajor ? MAJOR_COLOR : COMPLETED_COLOR;
+
+                // Discovery name with tier icon
+                y = AddTextRow(y, $"{tierIcon} {name}", 16, nameColor, FontStyle.Bold);
+
+                // Metadata: discoverer + day
                 string discoverer = prog?.DiscovererName ?? "Unknown";
                 string day = prog != null && prog.DayDiscovered > 0 ? $"Day {prog.DayDiscovered}" : "";
-
-                GUI.contentColor = prog?.Definition.Tier == DiscoveryTier.Major ? MAJOR_COLOR : COMPLETED_COLOR;
-                GUILayout.Label($"{tierIcon} {name}", _entryStyle);
-                GUI.contentColor = new Color(0.7f, 0.7f, 0.7f);
-
                 string meta = "";
                 if (!string.IsNullOrEmpty(discoverer) && discoverer != "Unknown")
                     meta += $"Discovered by {discoverer}";
                 if (!string.IsNullOrEmpty(day))
                     meta += meta.Length > 0 ? $" | {day}" : day;
                 if (meta.Length > 0)
-                    GUILayout.Label($"    {meta}", _entryStyle);
+                    y = AddTextRow(y, $"    {meta}", 13, META_COLOR, FontStyle.Italic);
 
                 // Description
                 if (prog?.Definition != null)
-                {
-                    GUI.contentColor = new Color(0.85f, 0.85f, 0.85f);
-                    GUILayout.Label($"    {prog.Definition.Description}", _entryStyle);
-                }
+                    y = AddTextRow(y, $"    {prog.Definition.Description}", 13, DESC_COLOR, FontStyle.Normal);
 
-                GUI.contentColor = Color.white;
-                GUILayout.Space(6);
+                y -= 6f;
             }
 
             if (!any)
             {
-                GUI.contentColor = new Color(0.5f, 0.5f, 0.5f);
-                GUILayout.Label("No discoveries yet. Your settlers are still learning...", _entryStyle);
-                GUI.contentColor = Color.white;
+                y = AddSectionHeader(y, "Completed", COMPLETED_COLOR);
+                y = AddTextRow(y, "No discoveries yet. Your settlers are still learning...",
+                    14, LOCKED_COLOR, FontStyle.Italic);
             }
+
+            return y;
         }
 
-        // ─── Hints (Phase A progress > 50%) ─────────────────────
+        // ─── Hints (in-progress > 50%) ───────────────────────
 
-        private void DrawHints()
+        private float DrawHintsSection(float y)
         {
             var phaseManager = DiscoveryPhaseManager.Instance;
             var stateManager = DiscoveryStateManager.Instance;
-            if (phaseManager == null || stateManager == null) return;
+            if (phaseManager == null || stateManager == null) return y;
 
             bool any = false;
             foreach (var kvp in phaseManager.AllProgress)
@@ -193,50 +255,42 @@ namespace Terranova.UI
                 float percent = prog.Definition.ObservationThreshold > 0
                     ? prog.ObservationCount / prog.Definition.ObservationThreshold
                     : 0f;
-
                 if (percent < 0.5f) continue;
 
                 if (!any)
                 {
-                    GUI.contentColor = HINT_COLOR;
-                    GUILayout.Label("── Hints ──", _entryStyle);
-                    GUI.contentColor = Color.white;
+                    y = AddSectionHeader(y, "Hints", HINT_COLOR);
                     any = true;
                 }
 
-                string phaseText = prog.Phase switch
-                {
-                    DiscoveryPhase.Observation => "observing",
-                    DiscoveryPhase.Spark => "inspired!",
-                    DiscoveryPhase.Experimentation => $"experimenting ({prog.ExperimentProgress * 100:F0}%)",
-                    _ => ""
-                };
-
-                GUI.contentColor = HINT_COLOR;
                 string hint = GetObservationHint(prog);
-                GUILayout.Label($"  {hint}", _entryStyle);
+                y = AddTextRow(y, $"  {hint}", 14, HINT_COLOR, FontStyle.Normal);
+
                 if (prog.Phase == DiscoveryPhase.Experimentation)
                 {
-                    GUI.contentColor = new Color(0.6f, 0.8f, 1f);
-                    GUILayout.Label($"    [{phaseText}]", _entryStyle);
+                    string expText = $"    [experimenting ({prog.ExperimentProgress * 100:F0}%)]";
+                    y = AddTextRow(y, expText, 13, new Color(0.6f, 0.8f, 1f), FontStyle.Normal);
                 }
+
                 if (prog.FailureCount > 0)
                 {
-                    GUI.contentColor = new Color(0.8f, 0.6f, 0.5f);
-                    GUILayout.Label($"    (Failed {prog.FailureCount}x — learning from mistakes)", _entryStyle);
+                    y = AddTextRow(y, $"    (Failed {prog.FailureCount}x — learning from mistakes)",
+                        13, new Color(0.8f, 0.6f, 0.5f), FontStyle.Italic);
                 }
-                GUI.contentColor = Color.white;
-                GUILayout.Space(4);
+
+                y -= 4f;
             }
+
+            return y;
         }
 
-        // ─── Locked Entries ─────────────────────────────────────
+        // ─── Locked Entries ──────────────────────────────────
 
-        private void DrawLockedEntries()
+        private float DrawLockedSection(float y)
         {
             var phaseManager = DiscoveryPhaseManager.Instance;
             var stateManager = DiscoveryStateManager.Instance;
-            if (phaseManager == null || stateManager == null) return;
+            if (phaseManager == null || stateManager == null) return y;
 
             bool any = false;
             foreach (var kvp in phaseManager.AllProgress)
@@ -245,21 +299,12 @@ namespace Terranova.UI
                 if (prog.Phase != DiscoveryPhase.Inactive) continue;
                 if (stateManager.IsDiscovered(prog.Definition.DisplayName)) continue;
 
-                // Only show locked entries for discoveries whose prerequisites
-                // will eventually be met (i.e. at least one prereq is in progress)
-                float percent = prog.Definition.ObservationThreshold > 0 && prog.Phase == DiscoveryPhase.Observation
-                    ? prog.ObservationCount / prog.Definition.ObservationThreshold
-                    : 0f;
-
                 if (!any)
                 {
-                    GUI.contentColor = LOCKED_COLOR;
-                    GUILayout.Label("── Locked ──", _entryStyle);
-                    GUI.contentColor = Color.white;
+                    y = AddSectionHeader(y, "Locked", LOCKED_COLOR);
                     any = true;
                 }
 
-                GUI.contentColor = LOCKED_COLOR;
                 string biomeHint = prog.Definition.BonusBiome switch
                 {
                     BiomeType.Forest => "(Forest may help)",
@@ -267,17 +312,85 @@ namespace Terranova.UI
                     BiomeType.Coast => "(Coast may help)",
                     _ => ""
                 };
-                GUILayout.Label($"  ??? {biomeHint}", _entryStyle);
-                GUI.contentColor = Color.white;
-                GUILayout.Space(2);
+                y = AddTextRow(y, $"  ??? {biomeHint}", 14, LOCKED_COLOR, FontStyle.Normal);
+                y -= 2f;
             }
+
+            return y;
         }
 
-        // ─── Helpers ────────────────────────────────────────────
+        // ─── UI Building Helpers ─────────────────────────────
+
+        private float AddSectionHeader(float y, string title, Color color)
+        {
+            float height = 28f;
+            var obj = new GameObject($"Section_{title}");
+            obj.transform.SetParent(_listContent, false);
+            var rect = obj.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0, 1);
+            rect.anchorMax = new Vector2(1, 1);
+            rect.pivot = new Vector2(0.5f, 1);
+            rect.anchoredPosition = new Vector2(0, y);
+            rect.sizeDelta = new Vector2(-16, height);
+
+            // Section background
+            obj.AddComponent<Image>().color = SECTION_BG;
+
+            // Section title text
+            var textObj = new GameObject("Text");
+            textObj.transform.SetParent(obj.transform, false);
+            var textRect = textObj.AddComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(12, 0);
+            textRect.offsetMax = Vector2.zero;
+            var text = textObj.AddComponent<Text>();
+            text.font = GetFont();
+            text.fontSize = 15;
+            text.color = color;
+            text.alignment = TextAnchor.MiddleLeft;
+            text.fontStyle = FontStyle.Bold;
+            text.text = $"── {title} ──";
+
+            return y - height - 4f;
+        }
+
+        private float AddTextRow(float y, string content, int fontSize, Color color, FontStyle style)
+        {
+            // Estimate height based on content length and font size
+            float charWidth = fontSize * 0.55f;
+            float availableWidth = PANEL_WIDTH - 52f;
+            int charsPerLine = Mathf.Max(1, Mathf.FloorToInt(availableWidth / charWidth));
+            int lines = Mathf.CeilToInt((float)content.Length / charsPerLine);
+            float height = Mathf.Max(20f, lines * (fontSize + 3));
+
+            var obj = new GameObject("Row");
+            obj.transform.SetParent(_listContent, false);
+            var rect = obj.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0, 1);
+            rect.anchorMax = new Vector2(1, 1);
+            rect.pivot = new Vector2(0.5f, 1);
+            rect.anchoredPosition = new Vector2(0, y);
+            rect.sizeDelta = new Vector2(-24, height);
+
+            var text = obj.AddComponent<Text>();
+            text.font = GetFont();
+            text.fontSize = fontSize;
+            text.color = color;
+            text.alignment = TextAnchor.UpperLeft;
+            text.fontStyle = style;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.text = content;
+
+            return y - height - 2f;
+        }
+
+        // ─── Helpers ─────────────────────────────────────────
 
         private static string GetTierIcon(DiscoveryProgress prog)
         {
-            if (prog?.Definition == null) return "*";
+            if (prog?.Definition == null) return "[*]";
             return prog.Definition.Tier switch
             {
                 DiscoveryTier.Major => "[!!]",
@@ -298,6 +411,25 @@ namespace Terranova.UI
                 _ => "their surroundings"
             };
             return $"Your settlers are getting experienced with {activity}...";
+        }
+
+        private static Font GetFont()
+        {
+            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+
+        private static GameObject MakeRect(Transform parent, string name,
+            Vector2 pos, Vector2 size)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var r = go.AddComponent<RectTransform>();
+            r.anchorMin = new Vector2(0.5f, 0.5f);
+            r.anchorMax = new Vector2(0.5f, 0.5f);
+            r.pivot = new Vector2(0.5f, 0.5f);
+            r.anchoredPosition = pos;
+            r.sizeDelta = size;
+            return go;
         }
     }
 }

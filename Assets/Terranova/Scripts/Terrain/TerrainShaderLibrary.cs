@@ -175,16 +175,16 @@ namespace Terranova.Terrain
 
             if (shader.name == "Terranova/FogOfWar")
             {
-                mat.SetColor("_FogColor", new Color(0.03f, 0.04f, 0.03f, 0.85f));
+                mat.SetColor("_FogColor", new Color(0.02f, 0.02f, 0.03f, 1.0f));
                 mat.SetFloat("_NoiseScale", 8f);
                 mat.SetFloat("_NoiseSpeed", 0.3f);
                 mat.SetFloat("_NoiseAmount", 0.15f);
-                mat.SetFloat("_EdgeSoftness", 0.2f);
+                mat.SetFloat("_EdgeSoftness", 0.15f);
             }
             else
             {
                 // Fallback: use vertex color alpha for transparency
-                mat.SetColor("_BaseColor", new Color(0.03f, 0.04f, 0.03f, 0.85f));
+                mat.SetColor("_BaseColor", new Color(0.02f, 0.02f, 0.03f, 1.0f));
             }
             return mat;
         }

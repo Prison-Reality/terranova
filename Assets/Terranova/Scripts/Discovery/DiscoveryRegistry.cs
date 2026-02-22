@@ -8,22 +8,24 @@ namespace Terranova.Discovery
     /// <summary>
     /// Creates and registers all GDD Epoch I.1 discovery definitions at runtime.
     ///
-    /// v0.5.4 Feature 8.3: Discovery Types for Epoch I.1
+    /// v0.5.5 Feature 8.3: Discovery Types for Epoch I.1
+    ///
+    /// Pacing targets: Basic 3-5min, Standard 8-12min, Major 15-25min.
     ///
     /// BASIC (Phase A → D, no experimentation):
-    ///   - Rock Knowledge: 20x stone gathering
-    ///   - Plant Knowledge: 15x berry/root gathering
-    ///   - Water Knowledge: 10x drinking
+    ///   - Rock Knowledge: 15x stone gathering (~3-4min)
+    ///   - Plant Knowledge: 12x berry/root gathering (~3min)
+    ///   - Water Knowledge: 8x drinking (~3min, water tasks less frequent)
     ///
     /// STANDARD (full A → B → C → D):
-    ///   - Clubs for Defense: Rock Knowledge + 30x stone work
-    ///   - Wickerwork: Plant Knowledge + 20x fiber gathering
-    ///   - Cord: Plant Knowledge + 25x fiber work
+    ///   - Clubs for Defense: Rock Knowledge + 25x stone work + 18s experiment
+    ///   - Wickerwork: Plant Knowledge + 22x fiber gathering + 18s experiment
+    ///   - Cord: Plant Knowledge + 20x fiber work + 15s experiment
     ///
     /// MAJOR (full cycle + epic staging):
-    ///   - Fire (friction): 50x wood work + dry conditions
-    ///   - Fire (sparks): Rock Knowledge + 40x flint work
-    ///   - Composite Tool: Clubs + Cord + 30x crafting experience
+    ///   - Fire (friction): 45x wood work + 35s experiment
+    ///   - Fire (sparks): Rock Knowledge + 35x flint work + 30s experiment
+    ///   - Composite Tool: Clubs + Cord + 25x crafting + 25s experiment
     ///
     /// Spontaneous:
     ///   - Lightning Fire (unchanged from v0.5.1)
@@ -58,7 +60,7 @@ namespace Terranova.Discovery
                 "Repeated work with stone reveals its hidden properties — which pieces crack cleanly, which hold an edge.",
                 "The stone speaks to those who listen with their hands.",
                 requiredActivity: SettlerTaskType.GatherStone,
-                observationThreshold: 20,
+                observationThreshold: 15,
                 sparkHint: "{name} notices something about the stones...",
                 bonusBiome: BiomeType.Mountains,
                 biomeSpeedMult: 1.3f,
@@ -72,7 +74,7 @@ namespace Terranova.Discovery
                 "Gathering berries and roots teaches which plants nourish, which heal, and which are dangerous.",
                 "The forest feeds those who learn its language.",
                 requiredActivity: SettlerTaskType.GatherWood,
-                observationThreshold: 15,
+                observationThreshold: 12,
                 sparkHint: "{name} notices something about the plants...",
                 bonusBiome: BiomeType.Forest,
                 biomeSpeedMult: 1.3f,
@@ -86,7 +88,7 @@ namespace Terranova.Discovery
                 "Observing water reveals where it gathers, how it flows, and where it is safe to drink.",
                 "Water finds its way, and so must we.",
                 requiredActivity: SettlerTaskType.DrinkWater,
-                observationThreshold: 10,
+                observationThreshold: 8,
                 sparkHint: "{name} notices something about the water...",
                 bonusBiome: BiomeType.Coast,
                 biomeSpeedMult: 1.3f,
@@ -102,9 +104,9 @@ namespace Terranova.Discovery
                 "A heavy stone, shaped and attached to a stick — a weapon that extends the arm's reach.",
                 "The hand that holds the club holds the future.",
                 requiredActivity: SettlerTaskType.GatherStone,
-                observationThreshold: 30,
+                observationThreshold: 25,
                 sparkHint: "{name} wonders if a stone could be shaped into something useful...",
-                experimentDuration: 15f,
+                experimentDuration: 18f,
                 failureChance: 0.4f,
                 prerequisiteDiscoveries: new[] { "Rock Knowledge" },
                 unlockedCapabilities: new[] { "hunt" }
@@ -117,9 +119,9 @@ namespace Terranova.Discovery
                 "Weaving flexible branches and fibers creates baskets, walls, and shelters stronger than any single stick.",
                 "What bends together does not break.",
                 requiredActivity: SettlerTaskType.GatherWood,
-                observationThreshold: 20,
+                observationThreshold: 22,
                 sparkHint: "{name} wonders if fibers could be woven together...",
-                experimentDuration: 15f,
+                experimentDuration: 18f,
                 failureChance: 0.35f,
                 prerequisiteDiscoveries: new[] { "Plant Knowledge" },
                 bonusBiome: BiomeType.Forest,
@@ -134,9 +136,9 @@ namespace Terranova.Discovery
                 "Twisting plant fibers together creates a strong, flexible cord — the thread of civilization.",
                 "The weakest fiber, twisted, becomes unbreakable.",
                 requiredActivity: SettlerTaskType.GatherWood,
-                observationThreshold: 25,
+                observationThreshold: 20,
                 sparkHint: "{name} tries twisting plant fibers together...",
-                experimentDuration: 12f,
+                experimentDuration: 15f,
                 failureChance: 0.3f,
                 prerequisiteDiscoveries: new[] { "Plant Knowledge" },
                 unlockedResources: new[] { ResourceType.PlantFiber },
@@ -152,9 +154,9 @@ namespace Terranova.Discovery
                 "Rubbing dry sticks together creates heat — and eventually, flame! Fire changes everything.",
                 "From friction, warmth. From warmth, survival.",
                 requiredActivity: SettlerTaskType.GatherWood,
-                observationThreshold: 50,
+                observationThreshold: 45,
                 sparkHint: "{name} notices the sticks getting warm from rubbing...",
-                experimentDuration: 30f,
+                experimentDuration: 35f,
                 failureChance: 0.6f,
                 bonusBiome: BiomeType.Forest,
                 biomeSpeedMult: 1.2f,
@@ -169,9 +171,9 @@ namespace Terranova.Discovery
                 "Striking flint against stone sends sparks flying — a faster way to create fire!",
                 "Stone speaks to stone in tongues of light.",
                 requiredActivity: SettlerTaskType.GatherStone,
-                observationThreshold: 40,
+                observationThreshold: 35,
                 sparkHint: "{name} notices sparks when striking stones together...",
-                experimentDuration: 25f,
+                experimentDuration: 30f,
                 failureChance: 0.5f,
                 prerequisiteDiscoveries: new[] { "Rock Knowledge" },
                 requiredBiomes: new[] { VoxelType.Stone },
@@ -188,9 +190,9 @@ namespace Terranova.Discovery
                 "Combining stone, wood, and cord creates a tool greater than the sum of its parts.",
                 "When hand, stone, and fiber become one, the world opens.",
                 requiredActivity: SettlerTaskType.CraftTool,
-                observationThreshold: 30,
+                observationThreshold: 25,
                 sparkHint: "{name} imagines combining materials into something new...",
-                experimentDuration: 20f,
+                experimentDuration: 25f,
                 failureChance: 0.45f,
                 prerequisiteDiscoveries: new[] { "Clubs for Defense", "Cord" },
                 unlockedCapabilities: new[] { "composite_tool", "craft", "fell", "dig" }
