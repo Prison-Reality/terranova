@@ -362,6 +362,7 @@ namespace Terranova.Population
         private MeshRenderer _bodyRenderer;
         private MeshRenderer _headRenderer;
         private SkinnedMeshRenderer _skinnedRenderer; // v0.5.2: For prefab avatars with skinned meshes
+        private Animator _animator; // v0.5.3: Avatar animation controller
         private int _colorIndex;
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
@@ -684,6 +685,47 @@ namespace Terranova.Population
 
             // v0.5.1: Fog of war clearing + trampled path recording
             UpdateFogAndPaths();
+
+            // v0.5.3: Drive avatar animation based on movement state
+            UpdateAnimation();
+        }
+
+        /// <summary>
+        /// v0.5.3: Cross-fade the avatar animation based on current state.
+        /// Walk_1 when moving, Work_1/Work_2 when gathering, Idle_1 otherwise.
+        /// The EXPLORER prefab Animator already has clips embedded from the FBX.
+        /// </summary>
+        private void UpdateAnimation()
+        {
+            if (_animator == null || !_animator.isActiveAndEnabled) return;
+
+            bool isMoving = _agent != null && _agent.velocity.sqrMagnitude > 0.1f;
+
+            // Determine desired animation clip name
+            string desiredClip;
+            if (isMoving)
+            {
+                desiredClip = (_colorIndex % 2 == 0)
+                    ? "Prehistoric_Male_Walk_1"
+                    : "Prehistoric_Female_Walk_1";
+            }
+            else if (_state == SettlerState.Working || _state == SettlerState.GatheringFood)
+            {
+                desiredClip = (_colorIndex % 2 == 0)
+                    ? "Prehistoric_Male_Work_1"
+                    : "Prehistoric_Female_Sitting_1"; // females don't have Work clips
+            }
+            else
+            {
+                desiredClip = (_colorIndex % 2 == 0)
+                    ? "Prehistoric_Male_Idle_1"
+                    : "Prehistoric_Female_Idle_1";
+            }
+
+            // Only cross-fade if clip changed
+            var stateInfo = _animator.GetCurrentAnimatorStateInfo(0);
+            if (!stateInfo.IsName(desiredClip))
+                _animator.CrossFadeInFixedTime(desiredClip, 0.25f);
         }
 
         /// <summary>
@@ -2293,11 +2335,8 @@ namespace Terranova.Population
                 avatar.transform.localRotation = Quaternion.identity;
 
                 // Replace BiRP materials with URP-compatible Terranova materials
+                // (preserves original textures from EXPLORER prefabs)
                 TerrainShaderLibrary.ReplaceWithURPMaterials(avatar);
-
-                // Apply shared PropLit material for consistent settler rendering
-                foreach (var r in avatar.GetComponentsInChildren<Renderer>(true))
-                    r.sharedMaterial = _sharedMaterial;
 
                 // Find renderers for color tinting (hunger/thirst state)
                 _bodyRenderer = avatar.GetComponentInChildren<MeshRenderer>();
@@ -2318,6 +2357,14 @@ namespace Terranova.Population
                     _headRenderer = renderers[1];
                 else
                     _headRenderer = _bodyRenderer;
+
+                // Set up animation: disable root motion (NavMeshAgent drives movement)
+                _animator = avatar.GetComponentInChildren<Animator>();
+                if (_animator != null)
+                {
+                    _animator.applyRootMotion = false;
+                    _animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
+                }
 
                 // Remove any colliders from the prefab (we add our own)
                 foreach (var col in avatar.GetComponentsInChildren<Collider>())
