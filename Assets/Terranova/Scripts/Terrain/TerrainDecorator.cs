@@ -48,8 +48,6 @@ namespace Terranova.Terrain
             Debug.Log($"[TerrainDecorator] Starting decoration: biome={biome}, seed={GameState.Seed}, " +
                       $"world={world.WorldBlocksX}x{world.WorldBlocksZ}, NavMeshReady={world.IsNavMeshReady}");
 
-            CreateGroundMaterials();
-
             var container = new GameObject("TerrainDecorations");
 
             SpawnTrees(world, biome, rng, container.transform);
@@ -58,7 +56,8 @@ namespace Terranova.Terrain
             SpawnFlowers(world, biome, rng, container.transform);
             SpawnRocks(world, biome, rng, container.transform);
             SpawnTreeStumps(world, biome, rng, container.transform);
-            SpawnGroundPatches(world, biome, rng, container.transform);
+            // Ground patches removed — opaque dark-green quads on terrain
+            // looked like broken prop squares instead of subtle blending.
             SpawnShelters(world, biome, rng, container.transform);
             SpawnAtmosphericEffects(world, biome, rng, container.transform);
 
