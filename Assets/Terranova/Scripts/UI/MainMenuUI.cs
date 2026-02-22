@@ -163,7 +163,7 @@ namespace Terranova.UI
             _versionText.fontSize = 18;
             _versionText.color = new Color(0.5f, 0.5f, 0.5f);
             _versionText.alignment = TextAnchor.LowerRight;
-            _versionText.text = "v0.5.4";
+            _versionText.text = "v0.5.5";
             var verShadow = verGo.AddComponent<Shadow>();
             verShadow.effectColor = new Color(0, 0, 0, 0.6f);
             verShadow.effectDistance = new Vector2(1, -1);
