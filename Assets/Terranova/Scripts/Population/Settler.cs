@@ -2360,7 +2360,7 @@ namespace Terranova.Population
                     // Load walk controller from Resources (male = even colorIndex)
                     bool isMale = (_colorIndex % 2 == 0);
                     string walkRes = isMale ? "MaleWalkController" : "FemaleWalkController";
-                    _walkController = Resources.Load<RuntimeAnimatorController>(walkRes);
+                    _walkController = UnityEngine.Resources.Load<RuntimeAnimatorController>(walkRes);
                 }
 
                 // Remove any colliders from the prefab (we add our own)
