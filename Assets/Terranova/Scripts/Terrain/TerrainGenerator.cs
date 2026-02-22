@@ -108,6 +108,9 @@ namespace Terranova.Terrain
                     // Gentle rolling hills: height 60–75
                     // Primary noise creates broad hills, macro adds subtle large-scale variation
                     height = SEA_LEVEL - 4 + (int)(combined * 12f + macro * 4f);
+                    // Clamp above sea level — sub-sea valleys produce spurious
+                    // rectangular water quads on otherwise dry grassland.
+                    if (height <= SEA_LEVEL) height = SEA_LEVEL + 1;
                     break;
 
                 case BiomeType.Mountains:
@@ -115,6 +118,9 @@ namespace Terranova.Terrain
                     // Ridge noise creates sharp mountain ridges from folded Perlin
                     float ridge = Mathf.Abs(primary - 0.5f) * 2f;
                     height = SEA_LEVEL - 9 + (int)(combined * 25f + ridge * 12f + macro * 8f);
+                    // Same sea-level clamp as Forest — mountains shouldn't have
+                    // sea-level water ponds unless explicitly placed.
+                    if (height <= SEA_LEVEL) height = SEA_LEVEL + 1;
                     break;
 
                 case BiomeType.Coast:

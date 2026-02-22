@@ -31,18 +31,18 @@ namespace Terranova.Population
         // ═══════════════════════════════════════════════════════════════
 
         private const float IDLE_RADIUS = 8f;
-        private const float BASE_WALK_SPEED = 1.5f;
-        private const float TASK_WALK_SPEED = 1.5f;
+        private const float BASE_WALK_SPEED = 1.35f;
+        private const float TASK_WALK_SPEED = 1.35f;
         private const float MIN_PAUSE = 1f;
         private const float MAX_PAUSE = 3.5f;
         private const float ARRIVAL_THRESHOLD = 0.3f;
         private const float NAV_SAMPLE_RADIUS = 5f;
 
         // Movement animation speed thresholds
-        private const float SPEED_NORMAL = 1.5f;        // Normal walking
-        private const float SPEED_SLUGGISH = 1.1f;      // Hungry
-        private const float SPEED_STUMBLING = 0.65f;    // Exhausted
-        private const float SPEED_CRAWLING = 0.2f;      // Starving
+        private const float SPEED_NORMAL = 1.35f;       // Normal walking
+        private const float SPEED_SLUGGISH = 1.0f;      // Hungry
+        private const float SPEED_STUMBLING = 0.6f;     // Exhausted
+        private const float SPEED_CRAWLING = 0.18f;     // Starving
 
         // ═══════════════════════════════════════════════════════════════
         // ─── Hunger Settings (MS4 Feature 4.2: Extended Hunger) ───────
