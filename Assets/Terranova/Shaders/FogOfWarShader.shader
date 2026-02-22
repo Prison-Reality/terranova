@@ -1,15 +1,18 @@
-// Fog of War shader with gradient edges and animated noise boundary.
+// Fog of War shader — fully opaque black over unexplored terrain.
 // Vertex colors control fog density (alpha). Edge cells get animated
-// noise for a mysterious, alive-feeling boundary.
+// noise for a mysterious, alive-feeling soft gradient boundary.
+//
+// v0.5.4: Upgraded from semi-transparent (0.85) to fully opaque (1.0).
+//         Player sees NOTHING under unexplored fog.
 Shader "Terranova/FogOfWar"
 {
     Properties
     {
-        _FogColor    ("Fog Color", Color) = (0.03, 0.04, 0.03, 0.85)
+        _FogColor    ("Fog Color", Color) = (0.02, 0.02, 0.03, 1.0)
         _NoiseScale  ("Noise Scale", Float) = 8.0
         _NoiseSpeed  ("Noise Speed", Float) = 0.3
         _NoiseAmount ("Noise Amount", Range(0, 0.3)) = 0.15
-        _EdgeSoftness("Edge Softness", Range(0.01, 0.5)) = 0.2
+        _EdgeSoftness("Edge Softness", Range(0.01, 0.5)) = 0.15
     }
 
     SubShader
@@ -122,7 +125,7 @@ Shader "Terranova/FogOfWar"
 
                 // Slight color variation in fog (darker patches)
                 float3 fogCol = _FogColor.rgb;
-                fogCol += (noise - 0.5) * 0.02;
+                fogCol += (noise - 0.5) * 0.01;
 
                 return half4(fogCol, alpha);
             }

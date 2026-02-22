@@ -195,7 +195,9 @@ namespace Terranova.Core
             // Feature 7: Klappbuch and Order List UI (on same Canvas)
             go.AddComponent<KlappbuchUI>();
             go.AddComponent<OrderListUI>();
-            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, InfoPanel, LoadingScreen, RenderDebugOverlay, DebugOverlay, KlappbuchUI, and OrderListUI.");
+            // Feature 8.6: Discovery Log
+            go.AddComponent<DiscoveryLogUI>();
+            Debug.Log("GameBootstrapper: Created HUD with ResourceDisplay, BuildMenu, InfoPanel, LoadingScreen, RenderDebugOverlay, DebugOverlay, KlappbuchUI, OrderListUI, and DiscoveryLogUI.");
         }
 
         private static void EnsureEventSystem()
@@ -365,9 +367,10 @@ namespace Terranova.Core
             go.AddComponent<ActivityTracker>();
             go.AddComponent<DiscoveryStateManager>();
             go.AddComponent<DiscoveryEngine>();
+            go.AddComponent<DiscoveryPhaseManager>(); // v0.5.4: Phased discovery progression
             go.AddComponent<DiscoveryRegistry>();
             go.AddComponent<DiscoveryEffectsManager>();
-            Debug.Log("GameBootstrapper: Created DiscoverySystem (ActivityTracker, StateManager, Engine, Registry, EffectsManager).");
+            Debug.Log("GameBootstrapper: Created DiscoverySystem (ActivityTracker, StateManager, Engine, PhaseManager, Registry, EffectsManager).");
         }
 
         /// <summary>
