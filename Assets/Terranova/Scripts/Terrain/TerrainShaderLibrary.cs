@@ -338,16 +338,19 @@ namespace Terranova.Terrain
             if (_replacementCache.TryGetValue(original, out var cached) && cached != null)
                 return cached;
 
-            string matName = original.name.ToLowerInvariant();
             string shaderName = original.shader != null ? original.shader.name.ToLowerInvariant() : "";
 
-            // Determine target shader based on material/shader name
+            // Determine if material needs alpha-cutout foliage shader.
+            // Use actual shader behavior, NOT material names — many EXPLORER prefabs
+            // (e.g. Vegetation_1A_D for Bush_2..6) use Standard Opaque on solid 3D
+            // meshes. Applying WindFoliage to them causes the texture's incidental
+            // alpha channel to clip, producing dark green square artifacts.
+            //
+            // Reliable indicators:
+            //   - EXPLORER Wind shader → always alpha-cutout foliage
+            //   - _ALPHATEST_ON keyword → Standard Cutout mode
             bool isFoliage = shaderName.Contains("wind") || shaderName.Contains("animated vert") ||
-                matName.Contains("tree") || matName.Contains("pine") ||
-                matName.Contains("bush") || matName.Contains("fern") ||
-                matName.Contains("flower") || matName.Contains("leaf") ||
-                matName.Contains("plant") || matName.Contains("agricultural") ||
-                matName.Contains("vegetation");
+                original.IsKeywordEnabled("_ALPHATEST_ON");
 
             // Create new material with appropriate Terranova shader
             Shader targetShader = isFoliage ? WindFoliage : PropLit;
