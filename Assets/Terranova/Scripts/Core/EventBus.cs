@@ -240,6 +240,56 @@ namespace Terranova.Core
         public bool IsDetailView;
     }
 
+    // ─── Discovery Phase Events (Feature 8) ──────────────────
+
+    /// <summary>
+    /// Fired when a discovery's observation counter increments (Phase A).
+    /// Feature 8.2: Discovery Phases.
+    /// </summary>
+    public struct DiscoveryObservationEvent
+    {
+        public string DiscoveryId;
+        public int CurrentCount;
+        public int RequiredCount;
+    }
+
+    /// <summary>
+    /// Fired when a settler gets a "Spark" inspiration (Phase B).
+    /// Feature 8.2: "!" icon above head, brief pause.
+    /// </summary>
+    public struct DiscoverySparkEvent
+    {
+        public string DiscoveryId;
+        public string SettlerName;
+        public string HintMessage;
+        public UnityEngine.Vector3 Position;
+    }
+
+    /// <summary>
+    /// Fired during experimentation (Phase C) — progress update.
+    /// Feature 8.2: Progress bar above settler.
+    /// </summary>
+    public struct DiscoveryExperimentEvent
+    {
+        public string DiscoveryId;
+        public string SettlerName;
+        public float Progress; // 0-1
+        public bool Failed;
+        public string FailureMessage;
+    }
+
+    /// <summary>
+    /// Fired when a discovery completes with full Eureka staging (Phase D).
+    /// Feature 8.2: For MAJOR discoveries, includes camera zoom data.
+    /// </summary>
+    public struct DiscoveryEurekaEvent
+    {
+        public string DiscoveryId;
+        public string SettlerName;
+        public UnityEngine.Vector3 Position;
+        public bool IsMajor; // Camera zoom + particle effect + dramatic pause
+    }
+
     // ─── Order Events (Feature 7) ────────────────────────────
 
     /// <summary>

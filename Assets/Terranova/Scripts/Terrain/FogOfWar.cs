@@ -6,12 +6,15 @@ using Terranova.Core;
 namespace Terranova.Terrain
 {
     /// <summary>
-    /// v0.5.1: Fog of War system.
+    /// v0.5.4: Fog of War system — fully opaque.
     ///
-    /// At game start the entire map is covered in dark semi-transparent fog
-    /// EXCEPT a 30-block radius around the campfire. When a settler walks
-    /// through fogged areas the fog permanently clears in a 10-block radius
-    /// (15 for Curious trait). Explored areas stay visible forever.
+    /// Unexplored terrain is COMPLETELY INVISIBLE — covered by opaque black fog.
+    /// No terrain shape, no color, no assets visible underneath.
+    /// Fog edge uses a soft gradient (5-10 block transition) with animated noise.
+    ///
+    /// At game start a 30-block radius around the campfire is revealed.
+    /// Settlers reveal a 10-block radius as they walk (Curious trait: 15).
+    /// Explored areas stay visible forever.
     ///
     /// Unexplored areas hide resource props, decorations, and shelter markers.
     /// The fog is rendered as a single mesh with per-vertex alpha.
@@ -25,6 +28,10 @@ namespace Terranova.Terrain
         public const int SETTLER_REVEAL_RADIUS = 10;
         public const int CURIOUS_REVEAL_RADIUS = 15;
         private const float UPDATE_INTERVAL = 0.25f;
+
+        // Sampling radius for soft edge gradient (in grid steps).
+        // Wider radius = softer transition from visible to black.
+        private const int EDGE_SAMPLE_RADIUS = 3; // 3 steps × 2 blocks = ~6 block soft edge
 
         private bool[,] _explored;
         private int _worldSizeX, _worldSizeZ;
@@ -292,7 +299,7 @@ namespace Terranova.Terrain
                 }
             }
 
-            // Set vertex colors (dark fog)
+            // Set vertex colors (fully opaque fog)
             RefreshVertexColors(vertsX, vertsZ, step);
 
             _fogMesh = new Mesh();
@@ -321,7 +328,8 @@ namespace Terranova.Terrain
 
         private void RefreshVertexColors(int vertsX, int vertsZ, int step)
         {
-            byte fogAlpha = 210; // Dark but not fully opaque
+            // v0.5.4: fully opaque fog (255). Player sees NOTHING under unexplored areas.
+            byte fogAlpha = 255;
             for (int vz = 0; vz < vertsZ; vz++)
             {
                 for (int vx = 0; vx < vertsX; vx++)
@@ -330,26 +338,32 @@ namespace Terranova.Terrain
                     int wx = vx * step;
                     int wz = vz * step;
 
-                    // Sample 2x2 area to get smooth transition
+                    // Sample wider area for soft 5-10 block gradient edge.
+                    // Uses a weighted disc kernel — closer samples have more weight.
                     float explored = 0f;
-                    int samples = 0;
-                    for (int dx = -1; dx <= 1; dx++)
+                    float totalWeight = 0f;
+                    for (int dx = -EDGE_SAMPLE_RADIUS; dx <= EDGE_SAMPLE_RADIUS; dx++)
                     {
-                        for (int dz = -1; dz <= 1; dz++)
+                        for (int dz = -EDGE_SAMPLE_RADIUS; dz <= EDGE_SAMPLE_RADIUS; dz++)
                         {
                             int sx = wx + dx * step;
                             int sz = wz + dz * step;
-                            if (sx >= 0 && sx < _worldSizeX && sz >= 0 && sz < _worldSizeZ)
-                            {
-                                if (_explored[sx, sz]) explored += 1f;
-                                samples++;
-                            }
+                            if (sx < 0 || sx >= _worldSizeX || sz < 0 || sz >= _worldSizeZ)
+                                continue;
+
+                            // Distance-based weight: center has weight 1, edges fade
+                            float dist = Mathf.Sqrt(dx * dx + dz * dz);
+                            if (dist > EDGE_SAMPLE_RADIUS) continue; // disc, not square
+                            float w = 1f - (dist / (EDGE_SAMPLE_RADIUS + 1f));
+
+                            if (_explored[sx, sz]) explored += w;
+                            totalWeight += w;
                         }
                     }
 
-                    float fogAmount = 1f - (explored / samples);
+                    float fogAmount = totalWeight > 0f ? 1f - (explored / totalWeight) : 1f;
                     byte alpha = (byte)(fogAmount * fogAlpha);
-                    _vertexColors[idx] = new Color32(8, 12, 8, alpha);
+                    _vertexColors[idx] = new Color32(5, 5, 8, alpha);
                 }
             }
         }
@@ -386,7 +400,7 @@ namespace Terranova.Terrain
             for (int i = 0; i < parent.transform.childCount; i++)
             {
                 var child = parent.transform.GetChild(i);
-                // Sub-containers: Trees, Rocks, Bushes, GroundPatches, NaturalShelters
+                // Sub-containers: Trees, Rocks, Bushes, NaturalShelters
                 if (child.childCount > 0 && child.GetComponent<Renderer>() == null)
                 {
                     for (int j = 0; j < child.childCount; j++)
