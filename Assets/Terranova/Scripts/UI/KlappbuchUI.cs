@@ -71,6 +71,7 @@ namespace Terranova.UI
         private bool _isNegated;
         private Vector3? _tapPosition;
         private float _canvasW, _canvasH;
+        private int _initFrames;  // Frames remaining for forced initialization snap
 
         // Computed layout
         private float _panelW, _panelH, _whoColW, _doesColW, _whatColW, _colH;
@@ -161,6 +162,16 @@ namespace Terranova.UI
             DecayVelocity(_doesScroll);
             DecayVelocity(_whatScroll);
 
+            // During first few frames: force-snap to correct positions
+            // (layout system may shift content after initial build)
+            if (_initFrames > 0)
+            {
+                _initFrames--;
+                ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
+                ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
+                ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
+            }
+
             // Snap each picker column to nearest valid item
             SnapColumn(_whoScroll, _whoContentRect, _whoItems.Count, ROW_HEIGHT,
                 ref _whoIdx, null);
@@ -220,6 +231,47 @@ namespace Terranova.UI
 
             BuildPanel(context);
             _isOpen = true;
+
+            // Force Unity's layout system to compute VerticalLayoutGroup +
+            // ContentSizeFitter IMMEDIATELY so scroll positions are valid.
+            Canvas.ForceUpdateCanvases();
+
+            // Set initial scroll positions: item 0 centered in each column
+            ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
+            ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
+            ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
+
+            // Also force-snap for the next few frames in case layout shifts
+            _initFrames = 3;
+
+            // Next-frame backup: re-apply after Unity has fully resolved layout
+            StartCoroutine(ReinitializeScrollNextFrame());
+        }
+
+        /// <summary>
+        /// Force a column's scroll to center on the given item index.
+        /// </summary>
+        private void ForceScrollToIndex(ScrollRect scroll, RectTransform content, int idx)
+        {
+            if (scroll == null || content == null) return;
+            float step = ROW_HEIGHT + SPACING;
+            float targetY = idx * step;
+            content.anchoredPosition = new Vector2(0, targetY);
+            scroll.velocity = Vector2.zero;
+        }
+
+        private IEnumerator ReinitializeScrollNextFrame()
+        {
+            // Wait for Unity's layout system to fully resolve
+            yield return null;
+            yield return null;
+
+            if (!_isOpen) yield break;
+
+            Canvas.ForceUpdateCanvases();
+            ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
+            ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
+            ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
         }
 
         public void Close()
@@ -441,6 +493,7 @@ namespace Terranova.UI
                 ContentSizeFitter.FitMode.PreferredSize;
 
             scroll.content = contentRect;
+            scroll.viewport = viewportRect;  // Explicit viewport reference
 
             // Populate rows
             populateRows(content.transform);
@@ -828,19 +881,12 @@ namespace Terranova.UI
 
         private void ApplyContextScroll(OpenKlappbuchEvent context)
         {
-            float step = ROW_HEIGHT + SPACING;
-
-            // WHO
-            if (_whoContentRect != null && _whoIdx > 0)
-                _whoContentRect.anchoredPosition = new Vector2(0, _whoIdx * step);
-
-            // DOES
-            if (_doesContentRect != null && _doesIdx > 0)
-                _doesContentRect.anchoredPosition = new Vector2(0, _doesIdx * step);
-
-            // WHAT
-            if (_whatContentRect != null && _whatIdx > 0)
-                _whatContentRect.anchoredPosition = new Vector2(0, _whatIdx * step);
+            // Always set positions — including index 0 (which needs y=0 to center
+            // the first item). Previously this skipped index 0, leaving the
+            // content at whatever position Unity's layout gave it.
+            ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
+            ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
+            ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
         }
 
         // ─── Result Line ────────────────────────────────────────
