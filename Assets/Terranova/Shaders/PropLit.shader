@@ -2,6 +2,7 @@
 // Replaces "Universal Render Pipeline/Lit" which gets stripped from code-only builds.
 // Supports: _BaseColor, _MainTex, _Smoothness, _Metallic, _EmissionColor
 // GPU instancing enabled so MaterialPropertyBlock per-instance overrides work.
+// v0.5.7: Receives shadows from directional light via shadow coord sampling.
 Shader "Terranova/PropLit"
 {
     Properties
@@ -35,9 +36,12 @@ Shader "Terranova/PropLit"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -95,17 +99,20 @@ Shader "Terranova/PropLit"
                 float3 albedo = texColor.rgb * baseColor.rgb;
 
                 float3 normalWS = normalize(input.normalWS);
-                Light mainLight = GetMainLight();
 
-                // Diffuse (Lambert)
+                // v0.5.7: Sample shadow map for directional light
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
+
+                // Diffuse (Lambert) with shadow attenuation
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
-                float3 diffuse = albedo * NdotL * mainLight.color.rgb;
+                float3 diffuse = albedo * NdotL * mainLight.color.rgb * mainLight.shadowAttenuation;
 
                 // Specular (Blinn-Phong)
                 float3 halfDir = normalize(mainLight.direction + input.viewDirWS);
                 float NdotH = saturate(dot(normalWS, halfDir));
                 float specPow = exp2(10.0 * smoothness + 1.0);
-                float3 specular = pow(NdotH, specPow) * smoothness * mainLight.color.rgb;
+                float3 specular = pow(NdotH, specPow) * smoothness * mainLight.color.rgb * mainLight.shadowAttenuation;
 
                 // Fresnel metallic tint
                 float fresnel = pow(1.0 - saturate(dot(normalWS, input.viewDirWS)), 4.0);

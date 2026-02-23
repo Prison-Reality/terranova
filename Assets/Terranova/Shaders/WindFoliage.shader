@@ -3,6 +3,7 @@
 // Double-sided rendering, texture-based alpha cutout, sine-wave wind sway.
 // When _MainTex is set, uses texture alpha for cutout and texture color.
 // When _MainTex is white (default), falls back to procedural hash pattern.
+// v0.5.7: Receives shadows from directional light via shadow coord sampling.
 Shader "Terranova/WindFoliage"
 {
     Properties
@@ -35,9 +36,12 @@ Shader "Terranova/WindFoliage"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -100,15 +104,16 @@ Shader "Terranova/WindFoliage"
                 // Combine texture color with tint
                 float3 leafColor = texColor.rgb * _BaseColor.rgb;
 
-                // Lighting with translucency
+                // v0.5.7: Sample shadow map for directional light
                 float3 normalWS = normalize(input.normalWS);
-                Light mainLight = GetMainLight();
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 float NdotL = dot(normalWS, mainLight.direction);
 
                 // Front + back lighting (translucent leaves)
                 float frontLight = saturate(NdotL);
                 float backLight = saturate(-NdotL) * 0.3; // Subsurface scatter
-                float totalLight = frontLight + backLight;
+                float totalLight = (frontLight + backLight) * mainLight.shadowAttenuation;
 
                 // Ambient from spherical harmonics (environment lighting)
                 float3 ambient = SampleSH(normalWS) * leafColor;

@@ -4,6 +4,8 @@
 // UV1 (TEXCOORD1) = blend weights: x=Grass, y=Dirt, z=Stone, w=Sand
 // Vertex colors serve as fallback tint when no textures are assigned.
 //
+// v0.5.7: Receives shadows from directional light via shadow coord sampling.
+//
 // Story 0.3: Texturierung und Materialien
 Shader "Terranova/TerrainSplat"
 {
@@ -38,9 +40,12 @@ Shader "Terranova/TerrainSplat"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _SHADOWS_SOFT
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             TEXTURE2D(_GrassTex); SAMPLER(sampler_GrassTex);
             TEXTURE2D(_DirtTex);  SAMPLER(sampler_DirtTex);
@@ -68,6 +73,7 @@ Shader "Terranova/TerrainSplat"
                 float3 normalWS    : TEXCOORD0;
                 float2 texCoord    : TEXCOORD1;   // Scaled world-space UV
                 float4 blendWeight : TEXCOORD2;   // Terrain type blend weights
+                float3 positionWS  : TEXCOORD3;   // For shadow coord computation
             };
 
             Varyings vert(Attributes input)
@@ -76,6 +82,7 @@ Shader "Terranova/TerrainSplat"
                 output.positionCS  = TransformObjectToHClip(input.positionOS.xyz);
                 output.color       = input.color;
                 output.normalWS    = TransformObjectToWorldNormal(input.normalOS);
+                output.positionWS  = TransformObjectToWorld(input.positionOS.xyz);
                 output.texCoord    = input.uv0 * _TexScale;
                 output.blendWeight = input.uv1;
                 return output;
@@ -101,12 +108,13 @@ Shader "Terranova/TerrainSplat"
                 // v0.5.7: Apply seasonal ground tint
                 baseColor *= _SeasonTint.rgb;
 
-                // Simple directional lighting (matches VertexColorOpaque)
-                Light mainLight = GetMainLight();
+                // v0.5.7: Sample shadow map for directional light
+                float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
+                Light mainLight = GetMainLight(shadowCoord);
                 float NdotL = saturate(dot(normalize(input.normalWS), mainLight.direction));
 
                 float3 ambient = 0.3;
-                float3 diffuse = NdotL * mainLight.color.rgb * 0.7;
+                float3 diffuse = NdotL * mainLight.color.rgb * mainLight.shadowAttenuation * 0.7;
                 float3 finalColor = baseColor * (ambient + diffuse);
 
                 return half4(finalColor, 1.0);
