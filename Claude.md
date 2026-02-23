@@ -234,7 +234,7 @@ See `docs/order-grammar-behaviors.md` for full predicate behavior definitions.
 - Smooth sun arc (360° directional light rotation)
 - Night: settlers walk to campfire, stay sheltered
 - Dawn: settlers resume tasks
-- Speed controls: Pause / 1x / 3x / 5x
+- Speed controls: Pause / 1x / 3x / 20x
 
 ### 9. Resources & Economy
 
