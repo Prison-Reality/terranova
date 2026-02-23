@@ -39,14 +39,14 @@ namespace Terranova.UI
         private const float BTN_H = 50f;
         private const float CLOSE_SIZE = 44f;
         private const int FONT_MIN = 14;
-        private const float SNAP_THRESHOLD = 60f;
-        private const float SNAP_DURATION = 0.15f;
+        private const float SNAP_THRESHOLD = 120f;   // Start snapping earlier (higher = snappier)
+        private const float SNAP_DURATION = 0.10f;    // Faster spring settle
+        private const float SNAP_DEAD_ZONE = 1.5f;    // Kill drift below this distance
 
         // v0.5.9: Cylindrical perspective constants
         private const float PERSPECTIVE_SCALE_MIN = 0.70f;  // Min scale at edges
         private const float PERSPECTIVE_ALPHA_MIN = 0.25f;   // Min alpha at edges
         private const float PERSPECTIVE_RANGE = 3.5f;        // How many rows from center to min scale
-        private const float INDICATOR_LINE_ALPHA = 0.6f;     // Selection line opacity
 
         // ─── Colors ─────────────────────────────────────────────
         private static readonly Color BG = new(0.08f, 0.10f, 0.08f, 0.95f);
@@ -62,7 +62,7 @@ namespace Terranova.UI
         private static readonly Color INVALID_C = new(1f, 0.6f, 0.2f);
         private static readonly Color CONFIRM_ON = new(0.2f, 0.55f, 0.3f, 0.95f);
         private static readonly Color CONFIRM_OFF = new(0.2f, 0.2f, 0.2f, 0.5f);
-        private static readonly Color INDICATOR_COLOR = new(0.4f, 0.65f, 0.45f, INDICATOR_LINE_ALPHA);
+        private static readonly Color SELECTION_BAND = new(0.25f, 0.50f, 0.30f, 0.40f);  // Selection rectangle
 
         // ─── State ──────────────────────────────────────────────
         private GameObject _panel;
@@ -365,19 +365,12 @@ namespace Terranova.UI
             vpGo.AddComponent<RectMask2D>();
             viewportRect = vpGo.GetComponent<RectTransform>();
 
-            // v0.5.9: Two thin indicator lines marking center selection (iOS style)
-            float halfRow = ROW_HEIGHT / 2f + 2f;
-            var topLine = MakeRect(vpGo.transform, "IndicatorTop",
-                new Vector2(0, halfRow), new Vector2(colWidth - 4, 1.5f));
-            var topLineImg = topLine.AddComponent<Image>();
-            topLineImg.color = INDICATOR_COLOR;
-            topLineImg.raycastTarget = false;
-
-            var bottomLine = MakeRect(vpGo.transform, "IndicatorBottom",
-                new Vector2(0, -halfRow), new Vector2(colWidth - 4, 1.5f));
-            var bottomLineImg = bottomLine.AddComponent<Image>();
-            bottomLineImg.color = INDICATOR_COLOR;
-            bottomLineImg.raycastTarget = false;
+            // Selection rectangle: clear rectangular band showing which item is selected
+            var selBand = MakeRect(vpGo.transform, "SelectionBand",
+                Vector2.zero, new Vector2(colWidth - 4, ROW_HEIGHT + 6));
+            var selBandImg = selBand.AddComponent<Image>();
+            selBandImg.color = SELECTION_BAND;
+            selBandImg.raycastTarget = false;
 
             // v0.5.9: Subtle gradient overlays at top and bottom edges for depth
             var topFade = MakeRect(vpGo.transform, "TopFade",
@@ -392,14 +385,14 @@ namespace Terranova.UI
             bottomFadeImg.color = new Color(BG.r, BG.g, BG.b, 0.6f);
             bottomFadeImg.raycastTarget = false;
 
-            // ScrollRect with iOS-like physics
+            // ScrollRect with snappy physics — low deceleration so it stops quickly
             var scroll = vpGo.AddComponent<ScrollRect>();
             scroll.horizontal = false;
             scroll.vertical = true;
             scroll.movementType = ScrollRect.MovementType.Elastic;
             scroll.elasticity = 0.08f;
             scroll.inertia = true;
-            scroll.decelerationRate = 0.06f;
+            scroll.decelerationRate = 0.04f;   // Stops faster → snaps sooner
             scroll.scrollSensitivity = 25f;
 
             // Content container
@@ -719,19 +712,29 @@ namespace Terranova.UI
 
             // Calculate nearest item index
             int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
+            float targetY = nearest * step;
+            float dist = Mathf.Abs(y - targetY);
 
-            // When velocity is low, snap to nearest with smooth lerp
+            // Snap aggressively: start correcting as soon as velocity drops
             if (Mathf.Abs(scroll.velocity.y) < SNAP_THRESHOLD)
             {
-                float targetY = nearest * step;
-                float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
-                float newY = Mathf.Lerp(y, targetY, lerpT);
-                content.anchoredPosition = new Vector2(content.anchoredPosition.x, newY);
-
-                if (Mathf.Abs(newY - targetY) < 0.5f)
+                // Kill residual drift immediately when very close
+                if (dist < SNAP_DEAD_ZONE)
                 {
                     content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
                     scroll.velocity = Vector2.zero;
+                }
+                else
+                {
+                    float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
+                    float newY = Mathf.Lerp(y, targetY, lerpT);
+                    content.anchoredPosition = new Vector2(content.anchoredPosition.x, newY);
+
+                    if (Mathf.Abs(newY - targetY) < 0.5f)
+                    {
+                        content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
+                        scroll.velocity = Vector2.zero;
+                    }
                 }
             }
 
@@ -772,16 +775,28 @@ namespace Terranova.UI
             if (Mathf.Abs(_doesScroll.velocity.y) < SNAP_THRESHOLD)
             {
                 float targetY = nearest * step;
-                float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
-                float newY = Mathf.Lerp(y, targetY, lerpT);
-                _doesContentRect.anchoredPosition =
-                    new Vector2(_doesContentRect.anchoredPosition.x, newY);
+                float dist = Mathf.Abs(y - targetY);
 
-                if (Mathf.Abs(newY - targetY) < 0.5f)
+                // Kill residual drift immediately when very close
+                if (dist < SNAP_DEAD_ZONE)
                 {
                     _doesContentRect.anchoredPosition =
                         new Vector2(_doesContentRect.anchoredPosition.x, targetY);
                     _doesScroll.velocity = Vector2.zero;
+                }
+                else
+                {
+                    float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
+                    float newY = Mathf.Lerp(y, targetY, lerpT);
+                    _doesContentRect.anchoredPosition =
+                        new Vector2(_doesContentRect.anchoredPosition.x, newY);
+
+                    if (Mathf.Abs(newY - targetY) < 0.5f)
+                    {
+                        _doesContentRect.anchoredPosition =
+                            new Vector2(_doesContentRect.anchoredPosition.x, targetY);
+                        _doesScroll.velocity = Vector2.zero;
+                    }
                 }
             }
 
