@@ -50,6 +50,12 @@ namespace Terranova.Terrain
         [Tooltip("Assign EXPLORER terrain sand texture (e.g. Terrain_Sand_1A_D). Falls back to procedural if empty.")]
         [SerializeField] private Texture2D _sandTexture;
 
+        [Tooltip("Assign EXPLORER forest floor texture (Terrain_Forest_Floor_1A_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _forestFloorTexture;
+
+        [Tooltip("Assign EXPLORER dust texture (Terrain_Dust_1A_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _dustTexture;
+
         // Track whether materials/textures were auto-created (so we can clean them up)
         private bool _ownsSolidMaterial;
         private bool _ownsWaterMaterial;
@@ -688,6 +694,57 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
+        /// v0.5.8: Change the surface block type at a world XZ position without
+        /// rebaking NavMesh. Used by TrampledPaths to convert blocks to Dirt
+        /// when settlers walk over them repeatedly.
+        ///
+        /// Unlike ModifyBlock, this only changes the topmost solid block and
+        /// skips NavMesh rebake (terrain height doesn't change, only surface type).
+        /// Affected chunks are collected in dirtyChunks for batch rebuilding.
+        /// </summary>
+        public void ModifySurfaceType(int worldX, int worldZ, VoxelType newType,
+            HashSet<Vector2Int> dirtyChunks)
+        {
+            int chunkX = Mathf.FloorToInt((float)worldX / ChunkData.WIDTH);
+            int chunkZ = Mathf.FloorToInt((float)worldZ / ChunkData.DEPTH);
+            var key = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunks.TryGetValue(key, out var chunk))
+                return;
+
+            int localX = worldX - chunkX * ChunkData.WIDTH;
+            int localZ = worldZ - chunkZ * ChunkData.DEPTH;
+
+            int surfaceY = chunk.Data.GetSolidHeightAt(localX, localZ);
+            if (surfaceY < 0) return;
+
+            VoxelType current = chunk.Data.GetBlock(localX, surfaceY, localZ);
+            if (current == newType) return; // Already the target type
+
+            chunk.Data.SetBlock(localX, surfaceY, localZ, newType);
+            dirtyChunks.Add(key);
+
+            // Mark neighbor chunks dirty if at boundary (smooth mesh samples neighbors)
+            if (localX <= 0) dirtyChunks.Add(new Vector2Int(chunkX - 1, chunkZ));
+            if (localX >= ChunkData.WIDTH - 1) dirtyChunks.Add(new Vector2Int(chunkX + 1, chunkZ));
+            if (localZ <= 0) dirtyChunks.Add(new Vector2Int(chunkX, chunkZ - 1));
+            if (localZ >= ChunkData.DEPTH - 1) dirtyChunks.Add(new Vector2Int(chunkX, chunkZ + 1));
+        }
+
+        /// <summary>
+        /// v0.5.8: Rebuild meshes for a set of dirty chunks (batch rebuild).
+        /// Called by TrampledPaths after processing pending dirt conversions.
+        /// </summary>
+        public void RebuildChunks(HashSet<Vector2Int> dirtyChunks)
+        {
+            foreach (var key in dirtyChunks)
+            {
+                if (_chunks.TryGetValue(key, out var chunk))
+                    chunk.RebuildMesh(GetSolidHeightAtWorldPos, GetSolidSurfaceTypeAtWorldPos, chunk.CurrentLod);
+            }
+        }
+
+        /// <summary>
         /// Create fallback materials if none were assigned in Inspector.
         /// Uses TerrainSplat shader for textured terrain with blending,
         /// falls back to VertexColorOpaque if splatting shader is not available.
@@ -777,10 +834,10 @@ namespace Terranova.Terrain
         private void AssignTerrainTextures(Material material)
         {
             // v0.5.8: Use direct asset references assigned in Inspector
-            bool hasRealTextures = _grassTexture != null && _dirtTexture != null
+            bool hasBaseTextures = _grassTexture != null && _dirtTexture != null
                                 && _stoneTexture != null && _sandTexture != null;
 
-            if (hasRealTextures)
+            if (hasBaseTextures)
             {
                 Debug.Log("WorldManager: Using EXPLORER terrain textures (direct references)");
                 material.SetTexture("_GrassTex", _grassTexture);
@@ -796,17 +853,33 @@ namespace Terranova.Terrain
                     "using procedural fallback. Assign EXPLORER textures to WorldManager " +
                     "fields: Grass/Dirt/Stone/Sand Texture.");
                 const int TEX_SIZE = 128;
-                var grassBase = new Color(0.30f, 0.65f, 0.20f);
-                var dirtBase  = new Color(0.55f, 0.36f, 0.16f);
-                var stoneBase = new Color(0.52f, 0.52f, 0.52f);
-                var sandBase  = new Color(0.90f, 0.85f, 0.55f);
+                var grassBase       = new Color(0.30f, 0.65f, 0.20f);
+                var dirtBase        = new Color(0.55f, 0.36f, 0.16f);
+                var stoneBase       = new Color(0.52f, 0.52f, 0.52f);
+                var sandBase        = new Color(0.90f, 0.85f, 0.55f);
+                var forestFloorBase = new Color(0.32f, 0.40f, 0.18f);
+                var dustBase        = new Color(0.62f, 0.55f, 0.42f);
 
-                material.SetTexture("_GrassTex", CreateNoisyTexture(TEX_SIZE, grassBase, 0.08f, 42));
-                material.SetTexture("_DirtTex",  CreateNoisyTexture(TEX_SIZE, dirtBase,  0.10f, 137));
-                material.SetTexture("_StoneTex", CreateNoisyTexture(TEX_SIZE, stoneBase, 0.12f, 271));
-                material.SetTexture("_SandTex",  CreateNoisyTexture(TEX_SIZE, sandBase,  0.06f, 389));
+                material.SetTexture("_GrassTex",       CreateNoisyTexture(TEX_SIZE, grassBase,       0.08f, 42));
+                material.SetTexture("_DirtTex",        CreateNoisyTexture(TEX_SIZE, dirtBase,        0.10f, 137));
+                material.SetTexture("_StoneTex",       CreateNoisyTexture(TEX_SIZE, stoneBase,       0.12f, 271));
+                material.SetTexture("_SandTex",        CreateNoisyTexture(TEX_SIZE, sandBase,        0.06f, 389));
+                material.SetTexture("_ForestFloorTex", CreateNoisyTexture(TEX_SIZE, forestFloorBase, 0.10f, 512));
+                material.SetTexture("_DustTex",        CreateNoisyTexture(TEX_SIZE, dustBase,        0.08f, 617));
                 material.SetFloat("_TexScale", 0.25f);
+                return;
             }
+
+            // v0.5.8: Assign extra textures if available (forest floor, dust)
+            if (_forestFloorTexture != null)
+                material.SetTexture("_ForestFloorTex", _forestFloorTexture);
+            else
+                material.SetTexture("_ForestFloorTex", CreateNoisyTexture(128, new Color(0.32f, 0.40f, 0.18f), 0.10f, 512));
+
+            if (_dustTexture != null)
+                material.SetTexture("_DustTex", _dustTexture);
+            else
+                material.SetTexture("_DustTex", CreateNoisyTexture(128, new Color(0.62f, 0.55f, 0.42f), 0.08f, 617));
         }
 
         /// <summary>

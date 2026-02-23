@@ -1,22 +1,26 @@
-// Terrain splatting shader: blends 4 terrain textures based on per-vertex weights.
+// Terrain splatting shader: blends 6 terrain textures based on per-vertex weights.
 //
 // UV0 (TEXCOORD0) = world-space XZ coordinates for texture sampling
 // UV1 (TEXCOORD1) = blend weights: x=Grass, y=Dirt, z=Stone, w=Sand
+// UV2 (TEXCOORD2) = blend weights: x=ForestFloor, y=Dust
 // Vertex colors serve as fallback tint when no textures are assigned.
 //
 // v0.5.7: Receives shadows from directional light via shadow coord sampling.
+// v0.5.8: Added ForestFloor and Dust texture channels via UV2.
 //
 // Story 0.3: Texturierung und Materialien
 Shader "Terranova/TerrainSplat"
 {
     Properties
     {
-        _GrassTex ("Grass Texture", 2D) = "white" {}
-        _DirtTex  ("Dirt Texture",  2D) = "white" {}
-        _StoneTex ("Stone Texture", 2D) = "white" {}
-        _SandTex  ("Sand Texture",  2D) = "white" {}
-        _TexScale ("Texture Scale", Float) = 0.25
-        _SeasonTint ("Season Tint", Color) = (1,1,1,1)
+        _GrassTex       ("Grass Texture",        2D) = "white" {}
+        _DirtTex        ("Dirt Texture",         2D) = "white" {}
+        _StoneTex       ("Stone Texture",        2D) = "white" {}
+        _SandTex        ("Sand Texture",         2D) = "white" {}
+        _ForestFloorTex ("Forest Floor Texture", 2D) = "white" {}
+        _DustTex        ("Dust Texture",         2D) = "white" {}
+        _TexScale       ("Texture Scale", Float) = 0.25
+        _SeasonTint     ("Season Tint", Color) = (1,1,1,1)
     }
 
     SubShader
@@ -47,10 +51,12 @@ Shader "Terranova/TerrainSplat"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
-            TEXTURE2D(_GrassTex); SAMPLER(sampler_GrassTex);
-            TEXTURE2D(_DirtTex);  SAMPLER(sampler_DirtTex);
-            TEXTURE2D(_StoneTex); SAMPLER(sampler_StoneTex);
-            TEXTURE2D(_SandTex);  SAMPLER(sampler_SandTex);
+            TEXTURE2D(_GrassTex);       SAMPLER(sampler_GrassTex);
+            TEXTURE2D(_DirtTex);        SAMPLER(sampler_DirtTex);
+            TEXTURE2D(_StoneTex);       SAMPLER(sampler_StoneTex);
+            TEXTURE2D(_SandTex);        SAMPLER(sampler_SandTex);
+            TEXTURE2D(_ForestFloorTex); SAMPLER(sampler_ForestFloorTex);
+            TEXTURE2D(_DustTex);        SAMPLER(sampler_DustTex);
 
             CBUFFER_START(UnityPerMaterial)
                 float _TexScale;
@@ -64,45 +70,52 @@ Shader "Terranova/TerrainSplat"
                 float4 color      : COLOR;       // Fallback vertex color (weighted blend)
                 float2 uv0        : TEXCOORD0;   // World-space XZ for texture sampling
                 float4 uv1        : TEXCOORD1;   // Blend weights: x=grass, y=dirt, z=stone, w=sand
+                float2 uv2        : TEXCOORD2;   // Blend weights: x=forestFloor, y=dust
             };
 
             struct Varyings
             {
-                float4 positionCS  : SV_POSITION;
-                float4 color       : COLOR;
-                float3 normalWS    : TEXCOORD0;
-                float2 texCoord    : TEXCOORD1;   // Scaled world-space UV
-                float4 blendWeight : TEXCOORD2;   // Terrain type blend weights
-                float3 positionWS  : TEXCOORD3;   // For shadow coord computation
+                float4 positionCS    : SV_POSITION;
+                float4 color         : COLOR;
+                float3 normalWS      : TEXCOORD0;
+                float2 texCoord      : TEXCOORD1;   // Scaled world-space UV
+                float4 blendWeight   : TEXCOORD2;   // Terrain type blend weights (grass/dirt/stone/sand)
+                float3 positionWS    : TEXCOORD3;   // For shadow coord computation
+                float2 blendWeightEx : TEXCOORD4;   // Extra blend weights (forestFloor/dust)
             };
 
             Varyings vert(Attributes input)
             {
                 Varyings output;
-                output.positionCS  = TransformObjectToHClip(input.positionOS.xyz);
-                output.color       = input.color;
-                output.normalWS    = TransformObjectToWorldNormal(input.normalOS);
-                output.positionWS  = TransformObjectToWorld(input.positionOS.xyz);
-                output.texCoord    = input.uv0 * _TexScale;
-                output.blendWeight = input.uv1;
+                output.positionCS    = TransformObjectToHClip(input.positionOS.xyz);
+                output.color         = input.color;
+                output.normalWS      = TransformObjectToWorldNormal(input.normalOS);
+                output.positionWS    = TransformObjectToWorld(input.positionOS.xyz);
+                output.texCoord      = input.uv0 * _TexScale;
+                output.blendWeight   = input.uv1;
+                output.blendWeightEx = input.uv2;
                 return output;
             }
 
             half4 frag(Varyings input) : SV_Target
             {
-                // Sample all 4 terrain textures at world-space UV
+                // Sample all 6 terrain textures at world-space UV
                 float2 uv = input.texCoord;
-                half3 grass = SAMPLE_TEXTURE2D(_GrassTex, sampler_GrassTex, uv).rgb;
-                half3 dirt  = SAMPLE_TEXTURE2D(_DirtTex,  sampler_DirtTex,  uv).rgb;
-                half3 stone = SAMPLE_TEXTURE2D(_StoneTex, sampler_StoneTex, uv).rgb;
-                half3 sand  = SAMPLE_TEXTURE2D(_SandTex,  sampler_SandTex,  uv).rgb;
+                half3 grass      = SAMPLE_TEXTURE2D(_GrassTex,       sampler_GrassTex,       uv).rgb;
+                half3 dirt       = SAMPLE_TEXTURE2D(_DirtTex,        sampler_DirtTex,        uv).rgb;
+                half3 stone      = SAMPLE_TEXTURE2D(_StoneTex,       sampler_StoneTex,       uv).rgb;
+                half3 sand       = SAMPLE_TEXTURE2D(_SandTex,        sampler_SandTex,        uv).rgb;
+                half3 forestFlr  = SAMPLE_TEXTURE2D(_ForestFloorTex, sampler_ForestFloorTex, uv).rgb;
+                half3 dustTex    = SAMPLE_TEXTURE2D(_DustTex,        sampler_DustTex,        uv).rgb;
 
-                // Blend textures using per-vertex weights
-                float4 w = input.blendWeight;
-                half3 texColor = grass * w.x + dirt * w.y + stone * w.z + sand * w.w;
+                // Blend textures using per-vertex weights from UV1 + UV2
+                float4 w  = input.blendWeight;
+                float2 wx = input.blendWeightEx;
+                half3 texColor = grass * w.x + dirt * w.y + stone * w.z + sand * w.w
+                               + forestFlr * wx.x + dustTex * wx.y;
 
                 // If all weights are zero (e.g. water submesh), use vertex color as fallback
-                float totalWeight = w.x + w.y + w.z + w.w;
+                float totalWeight = w.x + w.y + w.z + w.w + wx.x + wx.y;
                 half3 baseColor = totalWeight > 0.01 ? texColor : input.color.rgb;
 
                 // v0.5.7: Apply seasonal ground tint

@@ -23,6 +23,8 @@ namespace Terranova.Terrain
     /// Story 0.1: Mesh-Generierung aus Voxel-Daten
     /// Story 0.2: Seamless chunk boundaries via custom normals
     /// Story 0.3: Texture splatting with per-vertex blend weights
+    /// v0.5.8: 6-channel texture blending (grass/dirt/stone/sand via UV1,
+    ///         forestFloor/dust via UV2)
     /// </summary>
     public static class SmoothTerrainBuilder
     {
@@ -69,12 +71,13 @@ namespace Terranova.Terrain
             var heightGrid = new float[VERTS_PER_SIDE, VERTS_PER_SIDE];
             var colorGrid = new Color[VERTS_PER_SIDE, VERTS_PER_SIDE];
             var blendGrid = new Vector4[VERTS_PER_SIDE, VERTS_PER_SIDE];
+            var extraBlendGrid = new Vector2[VERTS_PER_SIDE, VERTS_PER_SIDE]; // v0.5.8: ForestFloor/Dust
 
-            FillVertexGrids(chunk, getHeight, getSurface, heightGrid, colorGrid, blendGrid);
+            FillVertexGrids(chunk, getHeight, getSurface, heightGrid, colorGrid, blendGrid, extraBlendGrid);
 
             // Step 2: Generate terrain surface mesh (subsampled by lodStep)
             var terrain = new MeshData();
-            BuildTerrainSurface(chunk, heightGrid, colorGrid, blendGrid, terrain, lodStep);
+            BuildTerrainSurface(chunk, heightGrid, colorGrid, blendGrid, extraBlendGrid, terrain, lodStep);
             ComputeTerrainNormals(heightGrid, chunk, getHeight, terrain, lodStep);
 
             // Step 3: Generate water surface mesh (also subsampled by lodStep)
@@ -97,6 +100,7 @@ namespace Terranova.Terrain
         /// Blend weights represent the fraction of each terrain type among the
         /// surrounding columns. This enables soft texture blending at type transitions.
         /// Vector4: x=Grass, y=Dirt, z=Stone, w=Sand.
+        /// Vector2 (extra): x=ForestFloor, y=Dust. (v0.5.8)
         ///
         /// Story 0.3: Texture splatting
         /// </summary>
@@ -106,7 +110,8 @@ namespace Terranova.Terrain
             SurfaceLookup getSurface,
             float[,] heightGrid,
             Color[,] colorGrid,
-            Vector4[,] blendGrid)
+            Vector4[,] blendGrid,
+            Vector2[,] extraBlendGrid)
         {
             int originX = chunk.ChunkX * ChunkData.WIDTH;
             int originZ = chunk.ChunkZ * ChunkData.DEPTH;
@@ -122,6 +127,7 @@ namespace Terranova.Terrain
 
                     // Count occurrences of each surface type for blend weights
                     int grassCount = 0, dirtCount = 0, stoneCount = 0, sandCount = 0;
+                    int forestFloorCount = 0, dustCount = 0; // v0.5.8
 
                     for (int dx = -1; dx <= 0; dx++)
                     {
@@ -164,10 +170,12 @@ namespace Terranova.Terrain
                             // Tally surface type for blend weight computation
                             switch (st)
                             {
-                                case VoxelType.Grass: grassCount++; break;
-                                case VoxelType.Dirt:  dirtCount++;  break;
-                                case VoxelType.Stone: stoneCount++; break;
-                                case VoxelType.Sand:  sandCount++;  break;
+                                case VoxelType.Grass:       grassCount++;       break;
+                                case VoxelType.Dirt:        dirtCount++;        break;
+                                case VoxelType.Stone:       stoneCount++;       break;
+                                case VoxelType.Sand:        sandCount++;        break;
+                                case VoxelType.ForestFloor: forestFloorCount++; break;
+                                case VoxelType.Dust:        dustCount++;        break;
                                 // Water columns below sea level are handled by water mesh
                                 default: grassCount++; break; // fallback
                             }
@@ -179,7 +187,7 @@ namespace Terranova.Terrain
                         ? (totalHeight / count) + 1f
                         : SEA_LEVEL + 1f;
 
-                    // Blend weights: fraction of each type (sum = 1.0)
+                    // Blend weights: fraction of each type (sum = 1.0 across both vectors)
                     float inv = count > 0 ? 1f / count : 1f;
                     Vector4 weights = new Vector4(
                         grassCount * inv,
@@ -188,15 +196,24 @@ namespace Terranova.Terrain
                         sandCount * inv);
                     blendGrid[vx, vz] = weights;
 
+                    Vector2 extraWeights = new Vector2(
+                        forestFloorCount * inv,
+                        dustCount * inv);
+                    extraBlendGrid[vx, vz] = extraWeights;
+
                     // Vertex color: weighted blend of type colors (fallback for unlit rendering)
-                    Color grassC = GetSurfaceColor(VoxelType.Grass);
-                    Color dirtC  = GetSurfaceColor(VoxelType.Dirt);
-                    Color stoneC = GetSurfaceColor(VoxelType.Stone);
-                    Color sandC  = GetSurfaceColor(VoxelType.Sand);
-                    colorGrid[vx, vz] = grassC * weights.x
-                                      + dirtC  * weights.y
-                                      + stoneC * weights.z
-                                      + sandC  * weights.w;
+                    Color grassC       = GetSurfaceColor(VoxelType.Grass);
+                    Color dirtC        = GetSurfaceColor(VoxelType.Dirt);
+                    Color stoneC       = GetSurfaceColor(VoxelType.Stone);
+                    Color sandC        = GetSurfaceColor(VoxelType.Sand);
+                    Color forestFloorC = GetSurfaceColor(VoxelType.ForestFloor);
+                    Color dustC        = GetSurfaceColor(VoxelType.Dust);
+                    colorGrid[vx, vz] = grassC       * weights.x
+                                      + dirtC        * weights.y
+                                      + stoneC       * weights.z
+                                      + sandC        * weights.w
+                                      + forestFloorC * extraWeights.x
+                                      + dustC        * extraWeights.y;
                 }
             }
         }
@@ -209,11 +226,12 @@ namespace Terranova.Terrain
         /// At lodStep=2: 8×8 cells × 2 tris = 128 triangles.
         /// At lodStep=4: 4×4 cells × 2 tris = 32 triangles.
         ///
-        /// Per vertex: position, color, UV0 (world-space XZ), UV1 (blend weights).
+        /// Per vertex: position, color, UV0 (world-space XZ), UV1 (blend weights),
+        /// UV2 (extra blend weights: forestFloor/dust). (v0.5.8)
         /// </summary>
         private static void BuildTerrainSurface(
             ChunkData chunk,
-            float[,] heights, Color[,] colors, Vector4[,] blends,
+            float[,] heights, Color[,] colors, Vector4[,] blends, Vector2[,] extraBlends,
             MeshData mesh, int lodStep = 1)
         {
             float worldOriginX = chunk.ChunkX * ChunkData.WIDTH;
@@ -236,6 +254,7 @@ namespace Terranova.Terrain
                     mesh.Colors.Add(colors[vx, vz]);
                     mesh.UVs.Add(new Vector2(worldOriginX + vx, worldOriginZ + vz));
                     mesh.BlendWeights.Add(blends[vx, vz]);
+                    mesh.ExtraBlendWeights.Add(extraBlends[vx, vz]);
                 }
             }
 
@@ -445,17 +464,20 @@ namespace Terranova.Terrain
         /// <summary>
         /// Map voxel surface type to vertex color.
         /// Northgard-inspired natural palette.
+        /// v0.5.8: Added ForestFloor and Dust colors.
         /// </summary>
         private static Color GetSurfaceColor(VoxelType type)
         {
             return type switch
             {
-                VoxelType.Grass => new Color(0.28f, 0.58f, 0.18f),   // Rich natural green
-                VoxelType.Dirt  => new Color(0.50f, 0.34f, 0.18f),   // Warm earth brown
-                VoxelType.Stone => new Color(0.48f, 0.47f, 0.45f),   // Natural grey with warmth
-                VoxelType.Sand  => new Color(0.85f, 0.78f, 0.55f),   // Warm beige
-                VoxelType.Water => new Color(0.12f, 0.35f, 0.65f),   // Deeper blue
-                _               => Color.magenta
+                VoxelType.Grass       => new Color(0.28f, 0.58f, 0.18f),   // Rich natural green
+                VoxelType.Dirt        => new Color(0.50f, 0.34f, 0.18f),   // Warm earth brown
+                VoxelType.Stone       => new Color(0.48f, 0.47f, 0.45f),   // Natural grey with warmth
+                VoxelType.Sand        => new Color(0.85f, 0.78f, 0.55f),   // Warm beige
+                VoxelType.ForestFloor => new Color(0.32f, 0.40f, 0.18f),   // Dark olive-green (mulch/leaves)
+                VoxelType.Dust        => new Color(0.62f, 0.55f, 0.42f),   // Warm tan (dry dust)
+                VoxelType.Water       => new Color(0.12f, 0.35f, 0.65f),   // Deeper blue
+                _                     => Color.magenta
             };
         }
 
@@ -492,6 +514,11 @@ namespace Terranova.Terrain
             for (int i = 0; i < water.Vertices.Count; i++)
                 allBlends.Add(Vector4.zero);
 
+            // v0.5.8: Merge extra blend weights (forestFloor/dust), water gets zero
+            var allExtraBlends = new List<Vector2>(terrain.ExtraBlendWeights);
+            for (int i = 0; i < water.Vertices.Count; i++)
+                allExtraBlends.Add(Vector2.zero);
+
             // Offset water triangle indices
             var waterTris = new List<int>(water.Triangles.Count);
             for (int i = 0; i < water.Triangles.Count; i++)
@@ -503,6 +530,7 @@ namespace Terranova.Terrain
             mesh.SetNormals(allNormals);
             mesh.SetUVs(0, allUVs);            // UV0: world-space texture coords
             mesh.SetUVs(1, allBlends);          // UV1: terrain type blend weights
+            mesh.SetUVs(2, allExtraBlends);     // UV2: extra blend weights (forestFloor/dust)
             mesh.SetTriangles(terrain.Triangles, 0);
             mesh.SetTriangles(waterTris, 1);
 
@@ -521,8 +549,9 @@ namespace Terranova.Terrain
             public readonly List<int> Triangles = new();
             public readonly List<Color> Colors = new();
             public readonly List<Vector3> Normals = new();
-            public readonly List<Vector2> UVs = new();          // UV0: world-space XZ
-            public readonly List<Vector4> BlendWeights = new(); // UV1: terrain type weights
+            public readonly List<Vector2> UVs = new();               // UV0: world-space XZ
+            public readonly List<Vector4> BlendWeights = new();      // UV1: terrain type weights
+            public readonly List<Vector2> ExtraBlendWeights = new(); // UV2: forestFloor/dust (v0.5.8)
         }
     }
 }

@@ -171,14 +171,16 @@ namespace Terranova.Terrain
         {
             return type switch
             {
-                VoxelType.Grass => new Color(0.28f, 0.58f, 0.18f),  // Rich natural green
-                VoxelType.Dirt  => new Color(0.50f, 0.34f, 0.18f),  // Warm earth brown
-                VoxelType.Stone => new Color(                         // Natural grey with variation
+                VoxelType.Grass       => new Color(0.28f, 0.58f, 0.18f),  // Rich natural green
+                VoxelType.Dirt        => new Color(0.50f, 0.34f, 0.18f),  // Warm earth brown
+                VoxelType.Stone       => new Color(                        // Natural grey with variation
                     0.46f + (y % 3) * 0.02f,
                     0.45f + (y % 3) * 0.02f,
                     0.43f + (y % 3) * 0.02f),
-                VoxelType.Sand  => new Color(0.85f, 0.78f, 0.55f),  // Warm beige
-                _               => Color.magenta
+                VoxelType.Sand        => new Color(0.85f, 0.78f, 0.55f),  // Warm beige
+                VoxelType.ForestFloor => new Color(0.32f, 0.40f, 0.18f),  // Dark olive-green (mulch/leaves)
+                VoxelType.Dust        => new Color(0.62f, 0.55f, 0.42f),  // Warm tan (dry dust)
+                _                     => Color.magenta
             };
         }
 

@@ -7,12 +7,14 @@ namespace Terranova.Terrain
 {
     /// <summary>
     /// v0.5.1: Trampled Paths system.
+    /// v0.5.8: Path-building converts terrain to Dirt after 3 settler walks.
     ///
     /// When settlers walk the same route repeatedly a path forms:
-    ///   - After 10 walks: light dirt texture appears
-    ///   - After 30 walks: clear path visible
-    ///   - Settlers move 30% faster on trampled paths
-    ///   - Paths slowly fade if unused for several game-days
+    ///   - After 3 walks: terrain block converts to Dirt (v0.5.8)
+    ///   - After 10 walks: clear worn path overlay visible
+    ///   - Settlers move 30% faster on trampled paths (threshold 3+)
+    ///   - Walk counts slowly decay if unused for several game-days
+    ///   - Dirt conversion is permanent (block type changes)
     ///
     /// Most common paths: campfire → water, campfire → gathering areas.
     /// Paths persist across tribe death (slowly fading).
@@ -21,12 +23,12 @@ namespace Terranova.Terrain
     {
         public static TrampledPaths Instance { get; private set; }
 
-        private const int LIGHT_PATH_THRESHOLD = 10;
-        private const int CLEAR_PATH_THRESHOLD = 30;
-        private const float SPEED_BONUS = 1.3f; // 30% faster on paths
-        private const int DECAY_PER_DAY = 2; // Walk count reduced per game-day
+        private const int DIRT_CONVERSION_THRESHOLD = 3;  // v0.5.8: convert to Dirt after 3 walks
+        private const int CLEAR_PATH_THRESHOLD = 10;       // worn path overlay appears
+        private const float SPEED_BONUS = 1.3f;            // 30% faster on paths
+        private const int DECAY_PER_DAY = 2;               // Walk count reduced per game-day
         private const float VISUAL_UPDATE_INTERVAL = 2.0f; // Rebuild visuals every 2s
-        private const float TRACK_INTERVAL = 0.3f; // How often we sample settler positions
+        private const float TRACK_INTERVAL = 0.3f;         // How often we sample settler positions
 
         private int[,] _walkCounts;
         private int _worldSizeX, _worldSizeZ;
@@ -34,10 +36,16 @@ namespace Terranova.Terrain
         private float _visualTimer;
         private bool _visualDirty;
 
+        // v0.5.8: Track blocks that need dirt conversion (batched for performance)
+        private readonly HashSet<long> _pendingDirtConversions = new();
+        private bool _dirtConversionPending;
+
+        // v0.5.8: Track which blocks have already been converted to avoid repeat work
+        private readonly HashSet<long> _convertedToDirt = new();
+
         // Visual path rendering
         private GameObject _pathContainer;
         private readonly Dictionary<long, GameObject> _pathQuads = new();
-        private Material _lightPathMat;
         private Material _clearPathMat;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -85,6 +93,8 @@ namespace Terranova.Terrain
             CreateMaterials();
 
             // Pre-trample area around campfire (settlers spawn there)
+            // v0.5.8: threshold lowered to DIRT_CONVERSION_THRESHOLD + 1,
+            // actual dirt conversion happens in next Update
             int campX = world.CampfireBlockX;
             int campZ = world.CampfireBlockZ;
             for (int dx = -3; dx <= 3; dx++)
@@ -93,9 +103,15 @@ namespace Terranova.Terrain
                     int x = campX + dx;
                     int z = campZ + dz;
                     if (x >= 0 && x < _worldSizeX && z >= 0 && z < _worldSizeZ)
-                        _walkCounts[x, z] = LIGHT_PATH_THRESHOLD + 5;
+                    {
+                        _walkCounts[x, z] = CLEAR_PATH_THRESHOLD + 5;
+                        // Queue dirt conversion for campfire area
+                        long key = ((long)x << 32) | (uint)z;
+                        _pendingDirtConversions.Add(key);
+                    }
                 }
 
+            _dirtConversionPending = true;
             _visualDirty = true;
             _initialized = true;
             Debug.Log("[TrampledPaths] Initialized.");
@@ -104,6 +120,13 @@ namespace Terranova.Terrain
         private void Update()
         {
             if (!_initialized) return;
+
+            // v0.5.8: Process pending dirt conversions (batched for performance)
+            if (_dirtConversionPending)
+            {
+                _dirtConversionPending = false;
+                ProcessDirtConversions();
+            }
 
             _visualTimer -= Time.deltaTime;
             if (_visualTimer <= 0f && _visualDirty)
@@ -119,6 +142,7 @@ namespace Terranova.Terrain
         /// <summary>
         /// Record a settler walking over a block position.
         /// Call this periodically from Settler when moving.
+        /// v0.5.8: Queues dirt conversion when walk count exceeds 3.
         /// </summary>
         public void RecordStep(Vector3 worldPos)
         {
@@ -128,16 +152,27 @@ namespace Terranova.Terrain
             if (bx < 0 || bx >= _worldSizeX || bz < 0 || bz >= _worldSizeZ) return;
 
             _walkCounts[bx, bz]++;
-
-            // Mark dirty when crossing thresholds
             int count = _walkCounts[bx, bz];
-            if (count == LIGHT_PATH_THRESHOLD || count == CLEAR_PATH_THRESHOLD)
+
+            // v0.5.8: Queue dirt conversion when crossing threshold
+            if (count == DIRT_CONVERSION_THRESHOLD)
+            {
+                long key = ((long)bx << 32) | (uint)bz;
+                if (!_convertedToDirt.Contains(key))
+                {
+                    _pendingDirtConversions.Add(key);
+                    _dirtConversionPending = true;
+                }
+            }
+
+            // Mark visual dirty when crossing overlay threshold
+            if (count == CLEAR_PATH_THRESHOLD)
                 _visualDirty = true;
         }
 
         /// <summary>
         /// Get the speed multiplier at a world position.
-        /// Returns 1.0 (no path) or SPEED_BONUS (on path).
+        /// v0.5.8: Speed bonus now starts at DIRT_CONVERSION_THRESHOLD (3 walks).
         /// </summary>
         public float GetSpeedMultiplier(Vector3 worldPos)
         {
@@ -145,7 +180,7 @@ namespace Terranova.Terrain
             int bx = Mathf.FloorToInt(worldPos.x);
             int bz = Mathf.FloorToInt(worldPos.z);
             if (bx < 0 || bx >= _worldSizeX || bz < 0 || bz >= _worldSizeZ) return 1f;
-            return _walkCounts[bx, bz] >= LIGHT_PATH_THRESHOLD ? SPEED_BONUS : 1f;
+            return _walkCounts[bx, bz] >= DIRT_CONVERSION_THRESHOLD ? SPEED_BONUS : 1f;
         }
 
         /// <summary>
@@ -165,7 +200,47 @@ namespace Terranova.Terrain
         public void OnTribeDeath()
         {
             // Paths persist — they'll decay naturally via DayChangedEvent
+            // Dirt conversions are permanent (block type already changed)
             Debug.Log("[TrampledPaths] Tribe died — paths persist and will slowly fade.");
+        }
+
+        // ─── v0.5.8: Dirt Conversion ────────────────────────────
+
+        /// <summary>
+        /// Process all pending dirt conversions in a single batch.
+        /// Modifies surface blocks to Dirt and rebuilds affected chunks once.
+        /// </summary>
+        private void ProcessDirtConversions()
+        {
+            if (_pendingDirtConversions.Count == 0) return;
+
+            var world = WorldManager.Instance;
+            if (world == null) return;
+
+            var dirtyChunks = new HashSet<Vector2Int>();
+            int converted = 0;
+
+            foreach (long packed in _pendingDirtConversions)
+            {
+                int bx = (int)(packed >> 32);
+                int bz = (int)(packed & 0xFFFFFFFF);
+
+                if (_convertedToDirt.Contains(packed))
+                    continue;
+
+                world.ModifySurfaceType(bx, bz, VoxelType.Dirt, dirtyChunks);
+                _convertedToDirt.Add(packed);
+                converted++;
+            }
+
+            _pendingDirtConversions.Clear();
+
+            if (dirtyChunks.Count > 0)
+            {
+                world.RebuildChunks(dirtyChunks);
+                if (converted > 0)
+                    Debug.Log($"[TrampledPaths] Converted {converted} blocks to dirt ({dirtyChunks.Count} chunks rebuilt)");
+            }
         }
 
         // ─── Day Decay ──────────────────────────────────────────
@@ -184,8 +259,7 @@ namespace Terranova.Terrain
                         int old = _walkCounts[x, z];
                         _walkCounts[x, z] = Mathf.Max(0, _walkCounts[x, z] - DECAY_PER_DAY);
                         // Mark dirty if crossing threshold downward
-                        if ((old >= LIGHT_PATH_THRESHOLD && _walkCounts[x, z] < LIGHT_PATH_THRESHOLD) ||
-                            (old >= CLEAR_PATH_THRESHOLD && _walkCounts[x, z] < CLEAR_PATH_THRESHOLD))
+                        if (old >= CLEAR_PATH_THRESHOLD && _walkCounts[x, z] < CLEAR_PATH_THRESHOLD)
                             anyChanged = true;
                     }
                 }
@@ -198,10 +272,13 @@ namespace Terranova.Terrain
 
         private void CreateMaterials()
         {
-            _lightPathMat = TerrainShaderLibrary.CreateLightPathMaterial();
             _clearPathMat = TerrainShaderLibrary.CreateClearPathMaterial();
         }
 
+        /// <summary>
+        /// v0.5.8: Only render worn-path overlays at CLEAR_PATH_THRESHOLD (10+ walks).
+        /// Below that, the dirt block conversion itself provides the visual feedback.
+        /// </summary>
         private void RebuildVisuals()
         {
             if (_pathContainer == null || _walkCounts == null) return;
@@ -217,27 +294,14 @@ namespace Terranova.Terrain
                 for (int z = 0; z < _worldSizeZ; z++)
                 {
                     int count = _walkCounts[x, z];
-                    if (count < LIGHT_PATH_THRESHOLD) continue;
+                    if (count < CLEAR_PATH_THRESHOLD) continue;
 
                     long key = ((long)x << 32) | (uint)z;
                     activePositions.Add(key);
 
-                    bool isClear = count >= CLEAR_PATH_THRESHOLD;
-                    Material mat = isClear ? _clearPathMat : _lightPathMat;
-
-                    if (_pathQuads.TryGetValue(key, out var existing))
+                    if (!_pathQuads.ContainsKey(key))
                     {
-                        // Update material if needed
-                        if (existing != null)
-                        {
-                            var mr = existing.GetComponent<MeshRenderer>();
-                            if (mr != null && mr.sharedMaterial != mat)
-                                mr.sharedMaterial = mat;
-                        }
-                    }
-                    else
-                    {
-                        // Create new path quad
+                        // Create worn-path overlay quad
                         float y = world.GetSmoothedHeightAtWorldPos(x + 0.5f, z + 0.5f) + 0.03f;
                         var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
                         quad.name = "Path";
@@ -247,7 +311,7 @@ namespace Terranova.Terrain
                         quad.transform.localScale = new Vector3(1.1f, 1.1f, 1f);
                         Object.Destroy(quad.GetComponent<Collider>());
                         var mr = quad.GetComponent<MeshRenderer>();
-                        if (mat != null) mr.sharedMaterial = mat;
+                        if (_clearPathMat != null) mr.sharedMaterial = _clearPathMat;
                         mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                         mr.receiveShadows = false;
                         _pathQuads[key] = quad;
