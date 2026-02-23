@@ -118,7 +118,7 @@ namespace Terranova.Terrain
             _sunLight.shadows = LightShadows.Soft;
             _sunLight.shadowResolution = UnityEngine.Rendering.LightShadowResolution.Medium;
             _sunLight.shadowNearPlane = 0.5f;
-            QualitySettings.shadowDistance = 120f;
+            // Shadow distance configured in URP Pipeline Asset (120m)
         }
 
         private void UpdateLighting()
