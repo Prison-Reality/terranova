@@ -11,9 +11,16 @@ namespace Terranova.UI
 {
     /// <summary>
     /// Feature 7.3 (v0.4.15): Klappbuch UI — iOS-style scroll-picker.
+    /// v0.5.9: Reworked with iOS UIPickerView-style cylindrical perspective effect.
     ///
     /// Three columns (WHO / DOES / WHAT-WHERE) where the user scrolls each
     /// column and the center item is the current selection (like UIPickerView).
+    ///
+    /// iOS-style features:
+    ///   - Cylindrical 3D perspective: items scale down and fade from center
+    ///   - Two thin horizontal indicator lines marking selected row
+    ///   - Smooth deceleration with elastic bounce at edges
+    ///   - Snap-to-center with spring animation
     ///
     /// Layout: 80 % of screen width, columns WHO 25 % / DOES 35 % / WHAT 40 %.
     /// Pauses game and disables camera input while open.
@@ -32,16 +39,21 @@ namespace Terranova.UI
         private const float BTN_H = 50f;
         private const float CLOSE_SIZE = 44f;
         private const int FONT_MIN = 14;
-        private const float SNAP_THRESHOLD = 80f;
-        private const float SNAP_DURATION = 0.2f;
+        private const float SNAP_THRESHOLD = 60f;
+        private const float SNAP_DURATION = 0.15f;
+
+        // v0.5.9: Cylindrical perspective constants
+        private const float PERSPECTIVE_SCALE_MIN = 0.70f;  // Min scale at edges
+        private const float PERSPECTIVE_ALPHA_MIN = 0.25f;   // Min alpha at edges
+        private const float PERSPECTIVE_RANGE = 3.5f;        // How many rows from center to min scale
+        private const float INDICATOR_LINE_ALPHA = 0.6f;     // Selection line opacity
 
         // ─── Colors ─────────────────────────────────────────────
         private static readonly Color BG = new(0.08f, 0.10f, 0.08f, 0.95f);
-        private static readonly Color COL_BG = new(0.12f, 0.14f, 0.12f, 0.9f);
-        private static readonly Color BAND_COLOR = new(0.3f, 0.55f, 0.35f, 0.35f);
-        private static readonly Color ROW_N = new(0.16f, 0.20f, 0.16f, 0.8f);
-        private static readonly Color ROW_LOCK = new(0.12f, 0.12f, 0.12f, 0.6f);
-        private static readonly Color ROW_BUSY = new(0.14f, 0.14f, 0.14f, 0.5f);
+        private static readonly Color COL_BG = new(0.10f, 0.12f, 0.10f, 0.92f);
+        private static readonly Color ROW_N = new(0f, 0f, 0f, 0f);        // v0.5.9: Transparent row bg (iOS style)
+        private static readonly Color ROW_LOCK = new(0.10f, 0.10f, 0.10f, 0.4f);
+        private static readonly Color ROW_BUSY = new(0.10f, 0.10f, 0.10f, 0.3f);
         private static readonly Color TXT_N = Color.white;
         private static readonly Color TXT_L = new(0.5f, 0.5f, 0.5f);
         private static readonly Color TXT_B = new(0.6f, 0.6f, 0.6f);
@@ -50,6 +62,7 @@ namespace Terranova.UI
         private static readonly Color INVALID_C = new(1f, 0.6f, 0.2f);
         private static readonly Color CONFIRM_ON = new(0.2f, 0.55f, 0.3f, 0.95f);
         private static readonly Color CONFIRM_OFF = new(0.2f, 0.2f, 0.2f, 0.5f);
+        private static readonly Color INDICATOR_COLOR = new(0.4f, 0.65f, 0.45f, INDICATOR_LINE_ALPHA);
 
         // ─── State ──────────────────────────────────────────────
         private GameObject _panel;
@@ -65,6 +78,8 @@ namespace Terranova.UI
         // Picker scroll rects and content rects
         private ScrollRect _whoScroll, _doesScroll, _whatScroll;
         private RectTransform _whoContentRect, _doesContentRect, _whatContentRect;
+        // v0.5.9: Viewport rects for cylindrical effect center calculation
+        private RectTransform _whoViewportRect, _doesViewportRect, _whatViewportRect;
 
         // Item data
         private readonly List<WhoItem> _whoItems = new();
@@ -151,6 +166,11 @@ namespace Terranova.UI
                 _prevDoesIdx = _doesIdx;
                 RebuildWhatColumn();
             }
+
+            // v0.5.9: Apply cylindrical perspective effect to all columns
+            ApplyCylindricalEffect(_whoScroll, _whoContentRect, _whoViewportRect);
+            ApplyCylindricalEffect(_doesScroll, _doesContentRect, _doesViewportRect);
+            ApplyCylindricalEffect(_whatScroll, _whatContentRect, _whatViewportRect);
 
             UpdateResultLine();
         }
@@ -295,11 +315,11 @@ namespace Terranova.UI
             PopulateWhatItems();
 
             _whoScroll = BuildPickerColumn(card.transform, "WHO", col1X, columnsY, _whoColW,
-                _whoItems.Count, BuildWhoRows, out _whoContentRect);
+                _whoItems.Count, BuildWhoRows, out _whoContentRect, out _whoViewportRect);
             _doesScroll = BuildPickerColumn(card.transform, "DOES", col2X, columnsY, _doesColW,
-                _doesItems.Count, BuildDoesRows, out _doesContentRect);
+                _doesItems.Count, BuildDoesRows, out _doesContentRect, out _doesViewportRect);
             _whatScroll = BuildPickerColumn(card.transform, "WHAT / WHERE", col3X, columnsY, _whatColW,
-                _whatItems.Count, BuildWhatRows, out _whatContentRect);
+                _whatItems.Count, BuildWhatRows, out _whatContentRect, out _whatViewportRect);
 
             // ── Result line ──
             float resultY = -_panelH / 2 + BTN_H + RESULT_H / 2 + 8;
@@ -320,7 +340,8 @@ namespace Terranova.UI
 
         private ScrollRect BuildPickerColumn(Transform parent, string header,
             float x, float y, float colWidth, int itemCount,
-            System.Action<Transform> populateRows, out RectTransform contentRect)
+            System.Action<Transform> populateRows,
+            out RectTransform contentRect, out RectTransform viewportRect)
         {
             float totalH = _colH + 28; // header + column
             var col = MakeRect(parent, $"Col_{header}", new Vector2(x, y),
@@ -342,23 +363,44 @@ namespace Terranova.UI
                 new Vector2(0, -14), new Vector2(colWidth, _colH));
             vpGo.AddComponent<Image>().color = COL_BG;
             vpGo.AddComponent<RectMask2D>();
+            viewportRect = vpGo.GetComponent<RectTransform>();
 
-            // Highlight band (center selection indicator, non-interactive)
-            var band = MakeRect(vpGo.transform, "Band",
-                Vector2.zero, new Vector2(colWidth, ROW_HEIGHT + 4));
-            var bandImg = band.AddComponent<Image>();
-            bandImg.color = BAND_COLOR;
-            bandImg.raycastTarget = false;
+            // v0.5.9: Two thin indicator lines marking center selection (iOS style)
+            float halfRow = ROW_HEIGHT / 2f + 2f;
+            var topLine = MakeRect(vpGo.transform, "IndicatorTop",
+                new Vector2(0, halfRow), new Vector2(colWidth - 4, 1.5f));
+            var topLineImg = topLine.AddComponent<Image>();
+            topLineImg.color = INDICATOR_COLOR;
+            topLineImg.raycastTarget = false;
 
-            // ScrollRect
+            var bottomLine = MakeRect(vpGo.transform, "IndicatorBottom",
+                new Vector2(0, -halfRow), new Vector2(colWidth - 4, 1.5f));
+            var bottomLineImg = bottomLine.AddComponent<Image>();
+            bottomLineImg.color = INDICATOR_COLOR;
+            bottomLineImg.raycastTarget = false;
+
+            // v0.5.9: Subtle gradient overlays at top and bottom edges for depth
+            var topFade = MakeRect(vpGo.transform, "TopFade",
+                new Vector2(0, _colH / 2 - 20), new Vector2(colWidth, 40));
+            var topFadeImg = topFade.AddComponent<Image>();
+            topFadeImg.color = new Color(BG.r, BG.g, BG.b, 0.6f);
+            topFadeImg.raycastTarget = false;
+
+            var bottomFade = MakeRect(vpGo.transform, "BottomFade",
+                new Vector2(0, -_colH / 2 + 20), new Vector2(colWidth, 40));
+            var bottomFadeImg = bottomFade.AddComponent<Image>();
+            bottomFadeImg.color = new Color(BG.r, BG.g, BG.b, 0.6f);
+            bottomFadeImg.raycastTarget = false;
+
+            // ScrollRect with iOS-like physics
             var scroll = vpGo.AddComponent<ScrollRect>();
             scroll.horizontal = false;
             scroll.vertical = true;
             scroll.movementType = ScrollRect.MovementType.Elastic;
-            scroll.elasticity = 0.1f;
+            scroll.elasticity = 0.08f;
             scroll.inertia = true;
-            scroll.decelerationRate = 0.08f;
-            scroll.scrollSensitivity = 30f;
+            scroll.decelerationRate = 0.06f;
+            scroll.scrollSensitivity = 25f;
 
             // Content container
             var content = new GameObject("Content");
@@ -390,6 +432,103 @@ namespace Terranova.UI
             populateRows(content.transform);
 
             return scroll;
+        }
+
+        // ─── v0.5.9: Cylindrical Perspective Effect ─────────────
+
+        /// <summary>
+        /// Apply iOS UIPickerView-style cylindrical perspective to a column.
+        /// Items at the center are full-size and fully opaque.
+        /// Items further from center progressively scale down and fade out,
+        /// simulating a 3D rotating drum/cylinder.
+        /// </summary>
+        private void ApplyCylindricalEffect(ScrollRect scroll, RectTransform content,
+            RectTransform viewport)
+        {
+            if (scroll == null || content == null || viewport == null) return;
+
+            // Center of the viewport in world space
+            Vector3[] vpCorners = new Vector3[4];
+            viewport.GetWorldCorners(vpCorners);
+            float vpCenterY = (vpCorners[0].y + vpCorners[2].y) * 0.5f;
+            float vpHeight = vpCorners[2].y - vpCorners[0].y;
+            if (vpHeight < 1f) return;
+
+            float step = ROW_HEIGHT + SPACING;
+
+            for (int i = 0; i < content.childCount; i++)
+            {
+                var child = content.GetChild(i);
+                var childRT = child as RectTransform;
+                if (childRT == null) continue;
+
+                // Get child center in world space
+                Vector3[] childCorners = new Vector3[4];
+                childRT.GetWorldCorners(childCorners);
+                float childCenterY = (childCorners[0].y + childCorners[2].y) * 0.5f;
+
+                // Distance from viewport center (normalized: 0 = center, 1 = one row away)
+                float distFromCenter = Mathf.Abs(childCenterY - vpCenterY) / (step * viewport.lossyScale.y);
+                float normalizedDist = distFromCenter / PERSPECTIVE_RANGE;
+                normalizedDist = Mathf.Clamp01(normalizedDist);
+
+                // Cosine falloff for natural cylindrical look
+                float curve = Mathf.Cos(normalizedDist * Mathf.PI * 0.5f);
+
+                // Scale: 1.0 at center → PERSPECTIVE_SCALE_MIN at edges
+                float scale = Mathf.Lerp(PERSPECTIVE_SCALE_MIN, 1f, curve);
+                childRT.localScale = new Vector3(scale, scale, 1f);
+
+                // Alpha: 1.0 at center → PERSPECTIVE_ALPHA_MIN at edges
+                float alpha = Mathf.Lerp(PERSPECTIVE_ALPHA_MIN, 1f, curve);
+
+                // Apply alpha to all Text and Image components on this row
+                ApplyRowAlpha(child, alpha);
+            }
+        }
+
+        /// <summary>
+        /// Set alpha on all Text and Image components of a row.
+        /// Preserves the base RGB values, only modifies alpha channel.
+        /// </summary>
+        private static void ApplyRowAlpha(Transform row, float alpha)
+        {
+            // Row background image (if any)
+            var img = row.GetComponent<Image>();
+            if (img != null)
+            {
+                var c = img.color;
+                img.color = new Color(c.r, c.g, c.b, c.a > 0.01f ? Mathf.Min(c.a, alpha) : 0f);
+            }
+
+            // All child text/image components
+            for (int i = 0; i < row.childCount; i++)
+            {
+                var child = row.GetChild(i);
+                var txt = child.GetComponent<Text>();
+                if (txt != null)
+                {
+                    var c = txt.color;
+                    txt.color = new Color(c.r, c.g, c.b, alpha);
+                }
+                var childImg = child.GetComponent<Image>();
+                if (childImg != null)
+                {
+                    var c = childImg.color;
+                    childImg.color = new Color(c.r, c.g, c.b, alpha);
+                }
+                // Recurse one level for subtitle labels
+                for (int j = 0; j < child.childCount; j++)
+                {
+                    var sub = child.GetChild(j);
+                    var subTxt = sub.GetComponent<Text>();
+                    if (subTxt != null)
+                    {
+                        var sc = subTxt.color;
+                        subTxt.color = new Color(sc.r, sc.g, sc.b, alpha);
+                    }
+                }
+            }
         }
 
         // ─── WHO Items ──────────────────────────────────────────
@@ -581,7 +720,7 @@ namespace Terranova.UI
             // Calculate nearest item index
             int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
 
-            // When velocity is low, snap to nearest with 0.2s lerp
+            // When velocity is low, snap to nearest with smooth lerp
             if (Mathf.Abs(scroll.velocity.y) < SNAP_THRESHOLD)
             {
                 float targetY = nearest * step;
@@ -612,7 +751,6 @@ namespace Terranova.UI
 
             // DOES column has mixed row heights (locked vs unlocked) and divider elements.
             // Use uniform step based on ROW_HEIGHT for snapping since most items are unlocked.
-            // The divider adds offset, but snapping to nearest unlocked is more important.
             float step = ROW_HEIGHT + SPACING;
             float y = _doesContentRect.anchoredPosition.y;
             int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, _doesItems.Count - 1);
