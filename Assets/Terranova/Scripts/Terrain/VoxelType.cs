@@ -7,12 +7,14 @@ namespace Terranova.Terrain
     /// </summary>
     public enum VoxelType : byte
     {
-        Air = 0,        // Empty space, not rendered
-        Grass = 1,      // Surface layer in temperate biomes
-        Dirt = 2,       // Below grass, above stone
-        Stone = 3,      // Deep underground, also exposed in mountains
-        Sand = 4,       // Beaches, desert biomes, near water
-        Water = 5       // Fills areas below sea level
+        Air = 0,           // Empty space, not rendered
+        Grass = 1,         // Surface layer in temperate biomes
+        Dirt = 2,          // Below grass, above stone; also formed by settler foot traffic
+        Stone = 3,         // Deep underground, also exposed in mountains
+        Sand = 4,          // Beaches, desert biomes, near water
+        Water = 5,         // Fills areas below sea level
+        ForestFloor = 6,   // v0.5.8: Forest biome ground (leaves, mulch, twigs)
+        Dust = 7           // v0.5.8: Arid/dry areas, mountain plateaus
     }
 
     /// <summary>

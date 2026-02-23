@@ -866,7 +866,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.7";
+            versionText.text = "v0.5.8";
         }
 
         /// <summary>

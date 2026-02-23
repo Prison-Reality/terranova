@@ -201,11 +201,16 @@ namespace Terranova.Terrain
             switch (_biome)
             {
                 case BiomeType.Forest:
-                    // Mostly grass with occasional dirt patches for visual variety
-                    float dirtNoise = Mathf.PerlinNoise(
+                    // v0.5.8: Forest uses ForestFloor (leaves/mulch) as primary ground,
+                    // with grass clearings and occasional dirt patches
+                    float forestNoise = Mathf.PerlinNoise(
                         (worldX + _seedOffsetX) * 0.08f,
                         (worldZ + _seedOffsetZ) * 0.08f);
-                    return dirtNoise > 0.75f ? VoxelType.Dirt : VoxelType.Grass;
+                    if (forestNoise > 0.78f)
+                        return VoxelType.Dirt;       // Exposed earth patches
+                    if (forestNoise > 0.45f)
+                        return VoxelType.ForestFloor; // Leafy forest ground (dominant)
+                    return VoxelType.Grass;           // Grass clearings
 
                 case BiomeType.Mountains:
                     // High elevations: exposed stone (granite/rock face)
@@ -217,7 +222,10 @@ namespace Terranova.Terrain
                         float stoneNoise = Mathf.PerlinNoise(
                             (worldX + _seedOffsetX) * 0.1f,
                             (worldZ + _seedOffsetZ) * 0.1f);
-                        return stoneNoise > 0.5f ? VoxelType.Stone : VoxelType.Grass;
+                        if (stoneNoise > 0.5f) return VoxelType.Stone;
+                        // v0.5.8: Dusty ground at mid-elevation transitions
+                        if (stoneNoise > 0.3f) return VoxelType.Dust;
+                        return VoxelType.Grass;
                     }
                     return VoxelType.Grass;
 
