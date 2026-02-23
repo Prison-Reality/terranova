@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Discovery;
@@ -52,9 +53,11 @@ namespace Terranova.UI
 
         private void Update()
         {
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Tab))
+            var kb = Keyboard.current;
+            if (kb == null) return;
+            if (kb.tabKey.wasPressedThisFrame)
                 Toggle();
-            if (_isOpen && UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            if (_isOpen && kb.escapeKey.wasPressedThisFrame)
                 Close();
         }
 
