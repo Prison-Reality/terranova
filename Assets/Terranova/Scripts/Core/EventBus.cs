@@ -192,7 +192,7 @@ namespace Terranova.Core
     /// </summary>
     public struct SeasonChangedEvent
     {
-        public Terrain.Season NewSeason;
+        public Terranova.Terrain.Season NewSeason;
         public int Year;
         public int DayInSeason;
     }
