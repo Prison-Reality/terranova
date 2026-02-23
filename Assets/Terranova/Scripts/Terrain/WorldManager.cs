@@ -750,27 +750,48 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
-        /// Generate simple procedural placeholder textures for each terrain type
-        /// and assign them to the splatting material. Each texture is a base color
-        /// with subtle noise variation to avoid a flat, synthetic look.
+        /// Assign terrain textures to the splatting material.
+        /// v0.5.8: Loads real textures from EXPLORER Stone Age asset pack
+        /// (copied to Resources/Terrain/). Falls back to procedural placeholders
+        /// if the real textures are not found.
         ///
         /// Story 0.3: Texturierung und Materialien
         /// </summary>
         private void AssignPlaceholderTextures(Material material)
         {
-            const int TEX_SIZE = 128;
+            // v0.5.8: Try loading real terrain textures from Resources
+            var grass = Resources.Load<Texture2D>("Terrain/Terrain_Grass");
+            var dirt  = Resources.Load<Texture2D>("Terrain/Terrain_Dirt");
+            var stone = Resources.Load<Texture2D>("Terrain/Terrain_Stone");
+            var sand  = Resources.Load<Texture2D>("Terrain/Terrain_Sand");
 
-            // Base colors matching the vertex color palette
-            var grassBase = new Color(0.30f, 0.65f, 0.20f);
-            var dirtBase  = new Color(0.55f, 0.36f, 0.16f);
-            var stoneBase = new Color(0.52f, 0.52f, 0.52f);
-            var sandBase  = new Color(0.90f, 0.85f, 0.55f);
+            bool hasRealTextures = grass != null && dirt != null && stone != null && sand != null;
 
-            material.SetTexture("_GrassTex", CreateNoisyTexture(TEX_SIZE, grassBase, 0.08f, 42));
-            material.SetTexture("_DirtTex",  CreateNoisyTexture(TEX_SIZE, dirtBase,  0.10f, 137));
-            material.SetTexture("_StoneTex", CreateNoisyTexture(TEX_SIZE, stoneBase, 0.12f, 271));
-            material.SetTexture("_SandTex",  CreateNoisyTexture(TEX_SIZE, sandBase,  0.06f, 389));
-            material.SetFloat("_TexScale", 0.25f);
+            if (hasRealTextures)
+            {
+                Debug.Log("WorldManager: Using EXPLORER terrain textures");
+                material.SetTexture("_GrassTex", grass);
+                material.SetTexture("_DirtTex",  dirt);
+                material.SetTexture("_StoneTex", stone);
+                material.SetTexture("_SandTex",  sand);
+                // Real textures are higher-res (1024x1024) — scale to ~1 tile per 4 world units
+                material.SetFloat("_TexScale", 0.15f);
+            }
+            else
+            {
+                Debug.LogWarning("WorldManager: EXPLORER terrain textures not found, using procedural fallback");
+                const int TEX_SIZE = 128;
+                var grassBase = new Color(0.30f, 0.65f, 0.20f);
+                var dirtBase  = new Color(0.55f, 0.36f, 0.16f);
+                var stoneBase = new Color(0.52f, 0.52f, 0.52f);
+                var sandBase  = new Color(0.90f, 0.85f, 0.55f);
+
+                material.SetTexture("_GrassTex", CreateNoisyTexture(TEX_SIZE, grassBase, 0.08f, 42));
+                material.SetTexture("_DirtTex",  CreateNoisyTexture(TEX_SIZE, dirtBase,  0.10f, 137));
+                material.SetTexture("_StoneTex", CreateNoisyTexture(TEX_SIZE, stoneBase, 0.12f, 271));
+                material.SetTexture("_SandTex",  CreateNoisyTexture(TEX_SIZE, sandBase,  0.06f, 389));
+                material.SetFloat("_TexScale", 0.25f);
+            }
         }
 
         /// <summary>

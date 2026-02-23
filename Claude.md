@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-02-23 | Current version: v0.5.7 | Milestone: MS4
+> Last updated: 2026-02-23 | Current version: v0.5.8 | Milestone: MS4
 
 ---
 
@@ -127,13 +127,13 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.5.7
+**Current version:** v0.5.8
 
 #### Implemented Features (MS4)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| F1: Terrain with 3 biomes (Forest, Mountains, Coast) | ✅ Working | Visual upgrade with asset pack in progress |
+| F1: Terrain with 3 biomes (Forest, Mountains, Coast) | ✅ Working | v0.5.8: Real terrain textures from EXPLORER pack |
 | F2: Extended material system (28 materials) | ✅ Working | |
 | F3: Tool system with quality Q1-Q5 | ✅ Working | |
 | F4: Food system, hunger/thirst mechanics | ✅ Working | Settlers drink reliably |
