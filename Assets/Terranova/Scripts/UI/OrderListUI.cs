@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Orders;
@@ -65,7 +66,8 @@ namespace Terranova.UI
                 RebuildList();
             }
 
-            if (_isOpen && UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            var kb = Keyboard.current;
+            if (_isOpen && kb != null && kb.escapeKey.wasPressedThisFrame)
                 Close();
         }
 

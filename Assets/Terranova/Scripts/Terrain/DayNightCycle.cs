@@ -101,19 +101,11 @@ namespace Terranova.Terrain
             if (_sunLight == null) return;
 
             // ── Sun rotation: full 360° arc ──────────────────────────
-            // timeOfDay 0.25 = sunrise (east), 0.5 = noon (overhead),
-            // 0.75 = sunset (west), 0.0/1.0 = midnight (below horizon).
             float sunAngle = (_timeOfDay - 0.25f) * 360f;
             _sunLight.transform.rotation = Quaternion.Euler(sunAngle, -30f, 0f);
 
-            // ── Sun altitude drives everything smoothly ──────────────
-            // altitude: -90 (midnight) → 0 (sunrise/sunset) → +90 (noon)
             float altitude = SunAltitude;
-
-            // Normalized altitude: 0 = horizon, 1 = zenith
             float altNorm = Mathf.Clamp01(altitude / 90f);
-
-            // How far below horizon (0 = at horizon, 1 = deep night)
             float belowHorizon = Mathf.Clamp01(-altitude / 30f);
 
             // ── Sun color: horizon→orange, zenith→white, below→dark ──
@@ -121,38 +113,46 @@ namespace Terranova.Terrain
             float intensity;
             if (altitude > 0f)
             {
-                // Above horizon: orange at low angles, white at high
                 sunColor = Color.Lerp(SUN_HORIZON, SUN_NOON, altNorm);
                 intensity = Mathf.Lerp(0.4f, 1.3f, altNorm);
             }
             else
             {
-                // Below horizon: fade to dark
                 sunColor = Color.Lerp(SUN_HORIZON, SUN_NIGHT, belowHorizon);
                 intensity = Mathf.Lerp(0.4f, 0f, belowHorizon);
             }
 
+            // ── v0.5.6: Season lighting tint ─────────────────────────
+            var season = SeasonManager.Instance;
+            if (season != null)
+                sunColor *= season.LightingTint;
+
             // ── Ambient: smooth blend night→horizon→day ──────────────
             Color ambient;
             if (altitude > 0f)
-            {
                 ambient = Color.Lerp(AMB_HORIZON, AMB_DAY, altNorm);
-            }
             else
-            {
                 ambient = Color.Lerp(AMB_HORIZON, AMB_NIGHT, belowHorizon);
-            }
+
+            if (season != null)
+                ambient *= season.LightingTint;
 
             _sunLight.color = sunColor;
             _sunLight.intensity = intensity;
             RenderSettings.ambientLight = ambient;
 
-            // ── Fog for night visibility ─────────────────────────────
-            bool fogActive = altitude < 5f;
+            // ── Fog: night + seasonal (winter/autumn mornings) ───────
+            float fogThreshold = 5f;
+            if (season != null && season.CurrentSeason == Season.Winter)
+                fogThreshold = 15f;
+            else if (season != null && season.CurrentSeason == Season.Autumn && IsDawn)
+                fogThreshold = 12f;
+
+            bool fogActive = altitude < fogThreshold;
             RenderSettings.fog = fogActive;
             if (fogActive)
             {
-                float fogStrength = Mathf.Clamp01(Mathf.InverseLerp(5f, -15f, altitude));
+                float fogStrength = Mathf.Clamp01(Mathf.InverseLerp(fogThreshold, -15f, altitude));
                 RenderSettings.fogColor = Color.Lerp(AMB_HORIZON, AMB_NIGHT, fogStrength);
                 RenderSettings.fogMode = FogMode.Linear;
                 RenderSettings.fogStartDistance = Mathf.Lerp(80f, 20f, fogStrength);
@@ -162,10 +162,14 @@ namespace Terranova.Terrain
 
         private void UpdateTemperature()
         {
-            // Temperature follows sun altitude smoothly
             float altitude = SunAltitude;
-            float altNorm = Mathf.Clamp01((altitude + 90f) / 180f); // 0=midnight, 1=noon
+            float altNorm = Mathf.Clamp01((altitude + 90f) / 180f);
             _temperature = Mathf.Lerp(8f, 24f, altNorm);
+
+            // v0.5.6: Season temperature offset
+            var season = SeasonManager.Instance;
+            if (season != null)
+                _temperature += season.TemperatureOffset;
         }
 
         /// <summary>

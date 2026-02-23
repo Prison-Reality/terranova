@@ -87,6 +87,7 @@ namespace Terranova.Core
             EnsureSelectionManager();
             EnsureDiscoverySystem();
             EnsureDayNightCycle(); // MS4: Day-night cycle
+            EnsureSeasonManager(); // Feature 10: Seasons
             EnsureOrderSystem(); // Feature 7: Order grammar & Klappbuch
 
             Debug.Log("GameBootstrapper: All systems ready.");
@@ -397,6 +398,19 @@ namespace Terranova.Core
             var go = new GameObject("DayNightCycle");
             go.AddComponent<DayNightCycle>();
             Debug.Log("GameBootstrapper: Created DayNightCycle.");
+        }
+
+        /// <summary>
+        /// Feature 10: Season Manager.
+        /// </summary>
+        private static void EnsureSeasonManager()
+        {
+            if (Object.FindFirstObjectByType<SeasonManager>() != null)
+                return;
+
+            var go = new GameObject("SeasonManager");
+            go.AddComponent<SeasonManager>();
+            Debug.Log("GameBootstrapper: Created SeasonManager.");
         }
 
         /// <summary>

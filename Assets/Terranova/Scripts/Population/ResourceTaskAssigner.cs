@@ -113,9 +113,10 @@ namespace Terranova.Population
                 var task = new SettlerTask(taskType, nearest.transform.position, basePos, duration);
                 task.TargetResource = nearest;
 
-                // Feature 3.1: Improved Tools → gather speed +30%
-                if (GameplayModifiers.GatherSpeedMultiplier > 1f)
-                    task.SpeedMultiplier = GameplayModifiers.GatherSpeedMultiplier;
+                // Feature 3.1 + 10: gather speed from tools + season
+                float effectiveGather = GameplayModifiers.EffectiveGatherSpeed;
+                if (effectiveGather != 1f)
+                    task.SpeedMultiplier = effectiveGather;
 
                 if (settler.AssignTask(task))
                     return;

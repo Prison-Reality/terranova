@@ -187,6 +187,26 @@ namespace Terranova.Core
     }
 
     /// <summary>
+    /// Fired when the season changes.
+    /// Feature 10: Seasons (v0.5.6).
+    /// </summary>
+    public struct SeasonChangedEvent
+    {
+        public Terrain.Season NewSeason;
+        public int Year;
+        public int DayInSeason;
+    }
+
+    /// <summary>
+    /// Fired for season transition notifications (start-of-season messages).
+    /// Feature 10: Seasons (v0.5.6).
+    /// </summary>
+    public struct SeasonNotificationEvent
+    {
+        public string Message;
+    }
+
+    /// <summary>
     /// Fired when a settler's tool breaks.
     /// MS4 Feature 3.2: Tool Wear.
     /// </summary>
