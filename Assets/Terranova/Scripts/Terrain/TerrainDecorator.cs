@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 using Terranova.Core;
 
 namespace Terranova.Terrain
@@ -338,6 +339,30 @@ namespace Terranova.Terrain
         //  ROCKS (DECORATION — permanent, NOT gatherable)
         // ═══════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// Adds a NavMeshObstacle with carving so settlers pathfind around rocks.
+        /// </summary>
+        private static void AddNavMeshObstacle(GameObject rock)
+        {
+            var renderers = rock.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return;
+
+            var bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            var obstacle = rock.AddComponent<NavMeshObstacle>();
+            obstacle.shape = NavMeshObstacleShape.Box;
+            obstacle.center = rock.transform.InverseTransformPoint(bounds.center);
+            obstacle.size = new Vector3(
+                bounds.size.x / rock.transform.lossyScale.x,
+                bounds.size.y / rock.transform.lossyScale.y,
+                bounds.size.z / rock.transform.lossyScale.z
+            );
+            obstacle.carving = true;
+            obstacle.carvingMoveThreshold = 0.1f;
+        }
+
         private void SpawnRocks(WorldManager world, BiomeType biome, System.Random rng, Transform parent)
         {
             var rockContainer = new GameObject("Rocks");
@@ -359,7 +384,7 @@ namespace Terranova.Terrain
                             continue;
                         string[] pool = rng.Next(2) == 0 ? AssetPrefabRegistry.RockLarge : AssetPrefabRegistry.RockMedium;
                         var rock = AssetPrefabRegistry.InstantiateRandom(pool, pos, rng, rockContainer.transform, 0.6f, 1.0f);
-                        if (rock != null) { rock.name = "Rock_Decor"; placed++; }
+                        if (rock != null) { rock.name = "Rock_Decor"; AddNavMeshObstacle(rock); placed++; }
                     }
                     break;
                 }
@@ -383,7 +408,7 @@ namespace Terranova.Terrain
                             pool = AssetPrefabRegistry.CanyonWalls;
 
                         var rock = AssetPrefabRegistry.InstantiateRandom(pool, pos, rng, rockContainer.transform, 0.5f, 1.0f);
-                        if (rock != null) { rock.name = "Rock_Decor"; placed++; }
+                        if (rock != null) { rock.name = "Rock_Decor"; AddNavMeshObstacle(rock); placed++; }
                     }
 
                     // Rock formations as landmarks: 3-5
@@ -394,7 +419,7 @@ namespace Terranova.Terrain
                         if (!TryFindPosition(world, rng, campX, campZ, 15f, out Vector3 pos))
                             continue;
                         var form = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.RockFormations, pos, rng, rockContainer.transform, 0.8f, 1.2f);
-                        if (form != null) { form.name = "RockFormation_Landmark"; formPlaced++; placed++; }
+                        if (form != null) { form.name = "RockFormation_Landmark"; AddNavMeshObstacle(form); formPlaced++; placed++; }
                     }
 
                     // Sharp rocks: 5-8
@@ -405,7 +430,7 @@ namespace Terranova.Terrain
                         if (!TryFindPosition(world, rng, campX, campZ, 6f, out Vector3 pos))
                             continue;
                         var sharp = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.RockSharp, pos, rng, rockContainer.transform, 0.7f, 1.1f);
-                        if (sharp != null) { sharp.name = "Rock_Sharp"; sharpPlaced++; placed++; }
+                        if (sharp != null) { sharp.name = "Rock_Sharp"; AddNavMeshObstacle(sharp); sharpPlaced++; placed++; }
                     }
                     break;
                 }
@@ -419,7 +444,7 @@ namespace Terranova.Terrain
                         if (!TryFindPosition(world, rng, campX, campZ, 6f, out Vector3 pos, true))
                             continue;
                         var slab = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.RockSlabs, pos, rng, rockContainer.transform, 0.7f, 1.0f);
-                        if (slab != null) { slab.name = "Rock_Slab"; placed++; }
+                        if (slab != null) { slab.name = "Rock_Slab"; AddNavMeshObstacle(slab); placed++; }
                     }
 
                     // Rock pavements: 3-5
@@ -430,7 +455,7 @@ namespace Terranova.Terrain
                         if (!TryFindPosition(world, rng, campX, campZ, 6f, out Vector3 pos, true))
                             continue;
                         var pav = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.RockPavements, pos, rng, rockContainer.transform, 0.8f, 1.1f);
-                        if (pav != null) { pav.name = "Rock_Pavement"; pavPlaced++; placed++; }
+                        if (pav != null) { pav.name = "Rock_Pavement"; AddNavMeshObstacle(pav); pavPlaced++; placed++; }
                     }
                     break;
                 }

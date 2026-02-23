@@ -40,8 +40,8 @@ namespace Terranova.UI
         [SerializeField] private float _minTouchTarget = 44f;
 
         // ─── Speed Widget ─────────────────────────────────────────
-        private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 5f };
-        private static readonly string[] SPEED_LABELS = { "||", "1x", "3x", "5x" };
+        private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 20f };
+        private static readonly string[] SPEED_LABELS = { "||", "1x", "3x", "20x" };
         private int _currentSpeedIndex = 1;
 
         // ─── Game State ───────────────────────────────────────────
