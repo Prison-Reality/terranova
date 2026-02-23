@@ -37,6 +37,19 @@ namespace Terranova.Terrain
         [Tooltip("Material for water (transparent, vertex colors). Auto-created if not assigned.")]
         [SerializeField] private Material _waterMaterial;
 
+        [Header("Terrain Textures (v0.5.8)")]
+        [Tooltip("Assign EXPLORER terrain grass texture (e.g. Terrain_Grass_1A_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _grassTexture;
+
+        [Tooltip("Assign EXPLORER terrain dirt/earth texture (e.g. Terrain_Earth_1C_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _dirtTexture;
+
+        [Tooltip("Assign EXPLORER terrain stone texture (e.g. Terrain_Stone_1A_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _stoneTexture;
+
+        [Tooltip("Assign EXPLORER terrain sand texture (e.g. Terrain_Sand_1A_D). Falls back to procedural if empty.")]
+        [SerializeField] private Texture2D _sandTexture;
+
         // Track whether materials/textures were auto-created (so we can clean them up)
         private bool _ownsSolidMaterial;
         private bool _ownsWaterMaterial;
@@ -711,10 +724,10 @@ namespace Terranova.Terrain
                 _solidMaterial.name = "Terrain_Splat (Auto)";
                 _ownsSolidMaterial = true;
 
-                // If using the splatting shader, generate and assign placeholder textures
+                // If using the splatting shader, assign terrain textures
                 if (shader.name == "Terranova/TerrainSplat")
                 {
-                    AssignPlaceholderTextures(_solidMaterial);
+                    AssignTerrainTextures(_solidMaterial);
                 }
             }
 
@@ -751,35 +764,37 @@ namespace Terranova.Terrain
 
         /// <summary>
         /// Assign terrain textures to the splatting material.
-        /// v0.5.8: Loads real textures from EXPLORER Stone Age asset pack
-        /// (copied to Resources/Terrain/). Falls back to procedural placeholders
-        /// if the real textures are not found.
+        /// v0.5.8: Uses direct asset references (SerializeField) for EXPLORER terrain textures.
+        /// Assign the textures in the Inspector on WorldManager:
+        ///   - Grass: EXPLORER - Stone Age/Terrain Textures/Terrain_Grass_1A_D
+        ///   - Dirt:  EXPLORER - Stone Age/Terrain Textures/Terrain_Earth_1C_D
+        ///   - Stone: EXPLORER - Stone Age/Terrain Textures/Terrain_Stone_1A_D
+        ///   - Sand:  EXPLORER - Stone Age/Terrain Textures/Terrain_Sand_1A_D
+        /// Falls back to procedural placeholders if textures are not assigned.
         ///
         /// Story 0.3: Texturierung und Materialien
         /// </summary>
-        private void AssignPlaceholderTextures(Material material)
+        private void AssignTerrainTextures(Material material)
         {
-            // v0.5.8: Try loading real terrain textures from Resources
-            var grass = Resources.Load<Texture2D>("Terrain/Terrain_Grass");
-            var dirt  = Resources.Load<Texture2D>("Terrain/Terrain_Dirt");
-            var stone = Resources.Load<Texture2D>("Terrain/Terrain_Stone");
-            var sand  = Resources.Load<Texture2D>("Terrain/Terrain_Sand");
-
-            bool hasRealTextures = grass != null && dirt != null && stone != null && sand != null;
+            // v0.5.8: Use direct asset references assigned in Inspector
+            bool hasRealTextures = _grassTexture != null && _dirtTexture != null
+                                && _stoneTexture != null && _sandTexture != null;
 
             if (hasRealTextures)
             {
-                Debug.Log("WorldManager: Using EXPLORER terrain textures");
-                material.SetTexture("_GrassTex", grass);
-                material.SetTexture("_DirtTex",  dirt);
-                material.SetTexture("_StoneTex", stone);
-                material.SetTexture("_SandTex",  sand);
-                // Real textures are higher-res (1024x1024) — scale to ~1 tile per 4 world units
+                Debug.Log("WorldManager: Using EXPLORER terrain textures (direct references)");
+                material.SetTexture("_GrassTex", _grassTexture);
+                material.SetTexture("_DirtTex",  _dirtTexture);
+                material.SetTexture("_StoneTex", _stoneTexture);
+                material.SetTexture("_SandTex",  _sandTexture);
+                // Real textures are 1024x1024 — tile every ~6 world units
                 material.SetFloat("_TexScale", 0.15f);
             }
             else
             {
-                Debug.LogWarning("WorldManager: EXPLORER terrain textures not found, using procedural fallback");
+                Debug.LogWarning("WorldManager: Terrain textures not assigned in Inspector, " +
+                    "using procedural fallback. Assign EXPLORER textures to WorldManager " +
+                    "fields: Grass/Dirt/Stone/Sand Texture.");
                 const int TEX_SIZE = 128;
                 var grassBase = new Color(0.30f, 0.65f, 0.20f);
                 var dirtBase  = new Color(0.55f, 0.36f, 0.16f);
