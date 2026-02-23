@@ -192,7 +192,7 @@ namespace Terranova.Core
     /// </summary>
     public struct SeasonChangedEvent
     {
-        public Terranova.Terrain.Season NewSeason;
+        public Season NewSeason;
         public int Year;
         public int DayInSeason;
     }
@@ -429,6 +429,21 @@ namespace Terranova.Core
         Spoiled, // >8h: causes sickness
         Dried,   // indefinite, -20% nutrition
         Smoked   // indefinite, full nutrition
+    }
+
+    // ─── Season Enum (Feature 10) ───────────────────────────────
+
+    /// <summary>
+    /// The four seasons of the year.
+    /// Feature 10: Seasons (v0.5.6).
+    /// Defined in Core so all assemblies can reference it.
+    /// </summary>
+    public enum Season
+    {
+        Spring = 0,
+        Summer = 1,
+        Autumn = 2,
+        Winter = 3
     }
 
     // ─── Order Enums (Feature 7) ─────────────────────────────

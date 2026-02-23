@@ -566,16 +566,6 @@ namespace Terranova.Terrain
         }
     }
 
-    // ─── Season Enum ─────────────────────────────────────
-
-    public enum Season
-    {
-        Spring = 0,
-        Summer = 1,
-        Autumn = 2,
-        Winter = 3
-    }
-
     // ─── Helper: Follow Camera ───────────────────────────
 
     /// <summary>Simple component that keeps particle emitter above the camera.</summary>
