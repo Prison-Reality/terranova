@@ -153,6 +153,14 @@ namespace Terranova.UI
                 return;
             }
 
+            // BUG FIX: Time.timeScale ≈ 0 breaks ScrollRect's built-in velocity
+            // decay (it uses scaled deltaTime internally, so Pow(rate, ~0) = 1.0 and
+            // velocity never drops). Manually decay all scroll velocities using
+            // unscaled time so our snap threshold can actually be reached.
+            DecayVelocity(_whoScroll);
+            DecayVelocity(_doesScroll);
+            DecayVelocity(_whatScroll);
+
             // Snap each picker column to nearest valid item
             SnapColumn(_whoScroll, _whoContentRect, _whoItems.Count, ROW_HEIGHT,
                 ref _whoIdx, null);
@@ -173,6 +181,19 @@ namespace Terranova.UI
             ApplyCylindricalEffect(_whatScroll, _whatContentRect, _whatViewportRect);
 
             UpdateResultLine();
+        }
+
+        /// <summary>
+        /// Manually decay ScrollRect velocity using unscaled time.
+        /// At Time.timeScale ≈ 0, ScrollRect's internal deceleration
+        /// (which uses scaled deltaTime) effectively stops working —
+        /// velocity from a flick never drops, so snap never kicks in.
+        /// </summary>
+        private static void DecayVelocity(ScrollRect scroll)
+        {
+            if (scroll == null) return;
+            float decay = Mathf.Pow(0.03f, Time.unscaledDeltaTime);
+            scroll.velocity *= decay;
         }
 
         // ─── Open / Close ───────────────────────────────────────
@@ -920,34 +941,15 @@ namespace Terranova.UI
 
         // ─── Order Construction ─────────────────────────────────
 
-        /// <summary>
-        /// Read the center item index from a column's scroll position.
-        /// </summary>
-        private int GetCenterIndex(RectTransform content, int itemCount, float rowH)
-        {
-            if (content == null || itemCount == 0) return 0;
-            float step = rowH + SPACING;
-            float y = content.anchoredPosition.y;
-            return Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
-        }
-
         private OrderDefinition BuildCurrentOrder()
         {
-            // Read center item from each column's ACTUAL scroll position
-            int whoIdx = GetCenterIndex(_whoContentRect, _whoItems.Count, ROW_HEIGHT);
-            int doesIdx = GetCenterIndex(_doesContentRect, _doesItems.Count, ROW_HEIGHT);
-            int whatIdx = GetCenterIndex(_whatContentRect, _whatItems.Count, ROW_HEIGHT);
-
-            // Skip locked DOES items
-            if (doesIdx >= 0 && doesIdx < _doesItems.Count && _doesItems[doesIdx].IsLocked)
-            {
-                // Find nearest unlocked
-                for (int d = 1; d < _doesItems.Count; d++)
-                {
-                    if (doesIdx - d >= 0 && !_doesItems[doesIdx - d].IsLocked) { doesIdx -= d; break; }
-                    if (doesIdx + d < _doesItems.Count && !_doesItems[doesIdx + d].IsLocked) { doesIdx += d; break; }
-                }
-            }
+            // Use the tracked snap indices directly — these are always in sync
+            // with the visual snap target. Previously this method independently
+            // read scroll positions which could disagree with the snap logic
+            // (especially for the DOES column with divider elements).
+            int whoIdx = _whoIdx;
+            int doesIdx = _doesIdx;
+            int whatIdx = _whatIdx;
 
             if (doesIdx < 0 || doesIdx >= _doesItems.Count) return null;
             var doesItem = _doesItems[doesIdx];
