@@ -415,7 +415,7 @@ namespace Terranova.UI
 
         private static Font GetFont()
         {
-            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            return UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         }
 
         private static GameObject MakeRect(Transform parent, string name,
