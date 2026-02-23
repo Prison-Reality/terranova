@@ -226,7 +226,7 @@ namespace Terranova.Resources
                 ResourceType.PlantFiber => RESPAWN_TIME_PLANT_FIBER,
                 _                       => RESPAWN_TIME_WOOD
             };
-            _respawnTimer = baseTime * RespawnMultiplier;
+            _respawnTimer = baseTime * RespawnMultiplier * GameplayModifiers.ResourceRespawnMultiplier;
             _respawning = true;
 
             EventBus.Publish(new ResourceDepletedEvent

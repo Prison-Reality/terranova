@@ -112,6 +112,7 @@ namespace Terranova.UI
             EventBus.Subscribe<ToolBrokeEvent>(OnToolBroke);
             EventBus.Subscribe<NeedsCriticalEvent>(OnNeedsCritical);
             EventBus.Subscribe<SettlerPoisonedEvent>(OnSettlerPoisoned);
+            EventBus.Subscribe<SeasonNotificationEvent>(OnSeasonNotification);
         }
 
         private void Update()
@@ -232,6 +233,21 @@ namespace Terranova.UI
             ShowEvent($"{evt.SettlerName} poisoned by {evt.FoodName}!", new Color(0.6f, 0.2f, 0.8f), 4f);
         }
 
+        /// <summary>Feature 10: Season change notification.</summary>
+        private void OnSeasonNotification(SeasonNotificationEvent evt)
+        {
+            var season = SeasonManager.Instance;
+            Color color = season != null ? season.CurrentSeason switch
+            {
+                Season.Spring => new Color(0.5f, 0.9f, 0.4f),
+                Season.Summer => new Color(1f, 0.85f, 0.3f),
+                Season.Autumn => new Color(0.9f, 0.6f, 0.2f),
+                Season.Winter => new Color(0.7f, 0.8f, 1f),
+                _ => Color.white
+            } : Color.white;
+            ShowEvent(evt.Message, color, 5f);
+        }
+
         // ─── Display Helpers ──────────────────────────────────────
 
         private void ShowEvent(string message, Color color, float duration)
@@ -243,14 +259,20 @@ namespace Terranova.UI
         }
 
         /// <summary>
-        /// Feature 1.5: Update "Day X" counter from DayNightCycle.
+        /// Feature 1.5 + 10: Update "Spring - Day 3  |  Day 13" counter.
         /// </summary>
         private void UpdateDayCounter()
         {
             if (_dayCounterText == null) return;
             var dnc = DayNightCycle.Instance;
             int day = dnc != null ? dnc.DayCount : GameState.DayCount;
-            _dayCounterText.text = $"Day {day}";
+
+            // v0.5.6: Show season + day-in-season alongside total day count
+            var season = SeasonManager.Instance;
+            if (season != null)
+                _dayCounterText.text = $"{season.GetDisplayString()}  |  Day {day}";
+            else
+                _dayCounterText.text = $"Day {day}";
         }
 
         /// <summary>
@@ -793,12 +815,12 @@ namespace Terranova.UI
                 TextAnchor.UpperCenter);
             _eventText.color = Color.yellow;
 
-            // Day counter (top-right) — replaces old calendar
+            // Day counter (top-right) — includes season (v0.5.6)
             _dayCounterText = CreateText("DayCounterText",
                 new Vector2(-20, -20),
-                new Vector2(250, 40),
+                new Vector2(380, 40),
                 TextAnchor.UpperRight);
-            _dayCounterText.text = "Day 1";
+            _dayCounterText.text = "Spring - Day 1  |  Day 1";
 
             // Warning text (below resource text)
             _warningText = CreateText("WarningText",
@@ -844,7 +866,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.5";
+            versionText.text = "v0.5.6";
         }
 
         /// <summary>
@@ -1208,6 +1230,7 @@ namespace Terranova.UI
             EventBus.Unsubscribe<ToolBrokeEvent>(OnToolBroke);
             EventBus.Unsubscribe<NeedsCriticalEvent>(OnNeedsCritical);
             EventBus.Unsubscribe<SettlerPoisonedEvent>(OnSettlerPoisoned);
+            EventBus.Unsubscribe<SeasonNotificationEvent>(OnSeasonNotification);
 
             if (_speedButtons != null)
             {

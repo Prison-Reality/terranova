@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Orders;
@@ -130,7 +131,8 @@ namespace Terranova.UI
         {
             if (!_isOpen) return;
 
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            var kb = Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame)
             {
                 Close();
                 return;

@@ -1099,6 +1099,8 @@ namespace Terranova.Population
             if (_hunger > 0f)
             {
                 float decayMult = GameplayModifiers.FoodDecayMultiplier;
+                // v0.5.6: Seasonal hunger modifier (Winter +30%)
+                decayMult *= GameplayModifiers.HungerRateMultiplier;
                 // Robust trait: hunger drains 25% slower
                 if (_trait == SettlerTrait.Robust) decayMult *= 0.75f;
                 // Cold exposure: hunger drains faster at night without shelter
@@ -1244,8 +1246,10 @@ namespace Terranova.Population
             if (_thirst > 0f)
             {
                 float thirstMult = 1f;
+                // v0.5.6: Seasonal thirst modifier (Summer +20%, Winter -20%)
+                thirstMult *= GameplayModifiers.ThirstRateMultiplier;
                 // Robust trait: thirst drains 25% slower
-                if (_trait == SettlerTrait.Robust) thirstMult = 0.75f;
+                if (_trait == SettlerTrait.Robust) thirstMult *= 0.75f;
                 // Cold exposure: thirst drains faster at night without shelter
                 if (_shelterState == ShelterState.Exposed || _shelterState == ShelterState.Hypothermic)
                     thirstMult *= COLD_THIRST_DRAIN_MULT;
