@@ -31,6 +31,25 @@ namespace Terranova.Terrain
         private Material _groundDarkGrassMat;
         private Material _groundRockyMat;
 
+        // v0.5.8: Flower container reference for spring-only visibility
+        private GameObject _flowerContainer;
+
+        private void OnEnable()
+        {
+            EventBus.Subscribe<SeasonChangedEvent>(OnSeasonChanged);
+        }
+
+        private void OnDisable()
+        {
+            EventBus.Unsubscribe<SeasonChangedEvent>(OnSeasonChanged);
+        }
+
+        private void OnSeasonChanged(SeasonChangedEvent evt)
+        {
+            if (_flowerContainer != null)
+                _flowerContainer.SetActive(evt.NewSeason == Season.Spring);
+        }
+
         private void Update()
         {
             if (_decorated) return;
@@ -55,6 +74,7 @@ namespace Terranova.Terrain
             SpawnBushes(world, biome, rng, container.transform);
             SpawnFerns(world, biome, rng, container.transform);
             SpawnFlowers(world, biome, rng, container.transform);
+            SpawnMushrooms(world, biome, rng, container.transform);
             SpawnRocks(world, biome, rng, container.transform);
             SpawnTreeStumps(world, biome, rng, container.transform);
             // Ground patches removed — opaque dark-green quads on terrain
@@ -152,27 +172,32 @@ namespace Terranova.Terrain
         {
             int count;
             string[] pool;
+            float minCampDist;
 
             switch (biome)
             {
                 case BiomeType.Forest:
-                    count = 30 + rng.Next(11); // 30-40
+                    count = 100 + rng.Next(31); // 100-130: dense forest
                     // Mix pine and deciduous trees
                     pool = new string[AssetPrefabRegistry.PineTrees.Length + AssetPrefabRegistry.DeciduousTrees.Length];
                     AssetPrefabRegistry.PineTrees.CopyTo(pool, 0);
                     AssetPrefabRegistry.DeciduousTrees.CopyTo(pool, AssetPrefabRegistry.PineTrees.Length);
+                    minCampDist = 12f; // larger clearing around campfire
                     break;
                 case BiomeType.Mountains:
                     count = 3 + rng.Next(3); // 3-5
                     pool = AssetPrefabRegistry.MountainTrees;
+                    minCampDist = 8f;
                     break;
                 case BiomeType.Coast:
                     count = 3 + rng.Next(3); // 3-5
                     pool = AssetPrefabRegistry.CoastTrees;
+                    minCampDist = 8f;
                     break;
                 default:
                     count = 20;
                     pool = AssetPrefabRegistry.DeciduousTrees;
+                    minCampDist = 8f;
                     break;
             }
 
@@ -183,9 +208,9 @@ namespace Terranova.Terrain
             int campX = world.CampfireBlockX;
             int campZ = world.CampfireBlockZ;
 
-            for (int attempt = 0; attempt < count * 5 && placed < count; attempt++)
+            for (int attempt = 0; attempt < count * 8 && placed < count; attempt++)
             {
-                if (!TryFindPosition(world, rng, campX, campZ, 8f, out Vector3 pos))
+                if (!TryFindPosition(world, rng, campX, campZ, minCampDist, out Vector3 pos))
                     continue;
 
                 var tree = AssetPrefabRegistry.InstantiateRandom(pool, pos, rng, treeContainer.transform, 0.8f, 1.2f);
@@ -211,7 +236,7 @@ namespace Terranova.Terrain
             switch (biome)
             {
                 case BiomeType.Forest:
-                    count = 20 + rng.Next(11); // 20-30
+                    count = 40 + rng.Next(21); // 40-60: dense undergrowth
                     pool = AssetPrefabRegistry.Bushes;
                     break;
                 case BiomeType.Mountains:
@@ -304,35 +329,99 @@ namespace Terranova.Terrain
         }
 
         // ═══════════════════════════════════════════════════════════
-        //  FLOWERS (DECORATION — Forest only)
+        //  FLOWERS (DECORATION — Forest only, visible in Spring)
         // ═══════════════════════════════════════════════════════════
 
         private void SpawnFlowers(WorldManager world, BiomeType biome, System.Random rng, Transform parent)
         {
             if (biome != BiomeType.Forest) return;
 
-            int count = 10 + rng.Next(6); // 10-15
-            var flowerContainer = new GameObject("Flowers");
-            flowerContainer.transform.SetParent(parent, false);
+            int count = 30 + rng.Next(16); // 30-45: scattered wildflowers
+            _flowerContainer = new GameObject("Flowers");
+            _flowerContainer.transform.SetParent(parent, false);
 
             int placed = 0;
             int campX = world.CampfireBlockX;
             int campZ = world.CampfireBlockZ;
 
-            for (int attempt = 0; attempt < count * 5 && placed < count; attempt++)
+            // Place flowers in small clusters of 2-3
+            for (int attempt = 0; attempt < count * 6 && placed < count; attempt++)
             {
-                if (!TryFindPosition(world, rng, campX, campZ, 5f, out Vector3 pos))
+                if (!TryFindPosition(world, rng, campX, campZ, 5f, out Vector3 clusterCenter))
                     continue;
 
-                var flower = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.Flowers, pos, rng, flowerContainer.transform, 0.8f, 1.1f);
-                if (flower != null)
+                int clusterSize = 2 + rng.Next(2); // 2-3 per cluster
+                for (int c = 0; c < clusterSize && placed < count; c++)
                 {
-                    flower.name = "Flower";
-                    placed++;
+                    Vector3 offset = new Vector3(
+                        (float)(rng.NextDouble() - 0.5) * 2f, 0f,
+                        (float)(rng.NextDouble() - 0.5) * 2f);
+                    Vector3 flowerPos = clusterCenter + offset;
+                    flowerPos.y = world.GetSmoothedHeightAtWorldPos(flowerPos.x, flowerPos.z);
+
+                    var flower = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.Flowers, flowerPos, rng, _flowerContainer.transform, 0.8f, 1.2f);
+                    if (flower != null)
+                    {
+                        flower.name = "Flower";
+                        placed++;
+                    }
                 }
             }
 
-            Debug.Log($"[TerrainDecorator] Placed {placed} flowers");
+            // v0.5.8: Flowers only visible during Spring
+            var season = SeasonManager.Instance;
+            bool isSpring = season != null && season.CurrentSeason == Season.Spring;
+            _flowerContainer.SetActive(isSpring);
+
+            Debug.Log($"[TerrainDecorator] Placed {placed} flowers (spring-only, currently {(isSpring ? "visible" : "hidden")})");
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  MUSHROOMS (DECORATION — Forest/Coast, clustered near trees)
+        // ═══════════════════════════════════════════════════════════
+
+        private void SpawnMushrooms(WorldManager world, BiomeType biome, System.Random rng, Transform parent)
+        {
+            int count;
+            switch (biome)
+            {
+                case BiomeType.Forest: count = 20 + rng.Next(11); break; // 20-30
+                case BiomeType.Coast:  count = 5 + rng.Next(4);   break; // 5-8
+                default: return;
+            }
+
+            var mushroomContainer = new GameObject("Mushrooms");
+            mushroomContainer.transform.SetParent(parent, false);
+
+            int placed = 0;
+            int campX = world.CampfireBlockX;
+            int campZ = world.CampfireBlockZ;
+
+            // Place mushrooms in clusters of 2-4
+            for (int attempt = 0; attempt < count * 6 && placed < count; attempt++)
+            {
+                if (!TryFindPosition(world, rng, campX, campZ, 6f, out Vector3 clusterCenter))
+                    continue;
+
+                int clusterSize = 2 + rng.Next(3); // 2-4 per cluster
+                for (int c = 0; c < clusterSize && placed < count; c++)
+                {
+                    Vector3 offset = new Vector3(
+                        (float)(rng.NextDouble() - 0.5) * 1.5f, 0f,
+                        (float)(rng.NextDouble() - 0.5) * 1.5f);
+                    Vector3 mushPos = clusterCenter + offset;
+                    mushPos.y = world.GetSmoothedHeightAtWorldPos(mushPos.x, mushPos.z);
+
+                    var mush = AssetPrefabRegistry.InstantiateRandom(AssetPrefabRegistry.Mushrooms, mushPos, rng, mushroomContainer.transform, 0.7f, 1.2f);
+                    if (mush != null)
+                    {
+                        mush.name = "Mushroom";
+                        placed++;
+                    }
+                }
+            }
+
+            Debug.Log($"[TerrainDecorator] Placed {placed} decorative mushrooms ({biome})");
         }
 
         // ═══════════════════════════════════════════════════════════
