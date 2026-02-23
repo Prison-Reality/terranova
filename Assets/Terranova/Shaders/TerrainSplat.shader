@@ -14,6 +14,7 @@ Shader "Terranova/TerrainSplat"
         _StoneTex ("Stone Texture", 2D) = "white" {}
         _SandTex  ("Sand Texture",  2D) = "white" {}
         _TexScale ("Texture Scale", Float) = 0.25
+        _SeasonTint ("Season Tint", Color) = (1,1,1,1)
     }
 
     SubShader
@@ -48,6 +49,7 @@ Shader "Terranova/TerrainSplat"
 
             CBUFFER_START(UnityPerMaterial)
                 float _TexScale;
+                half4 _SeasonTint;
             CBUFFER_END
 
             struct Attributes
@@ -95,6 +97,9 @@ Shader "Terranova/TerrainSplat"
                 // If all weights are zero (e.g. water submesh), use vertex color as fallback
                 float totalWeight = w.x + w.y + w.z + w.w;
                 half3 baseColor = totalWeight > 0.01 ? texColor : input.color.rgb;
+
+                // v0.5.7: Apply seasonal ground tint
+                baseColor *= _SeasonTint.rgb;
 
                 // Simple directional lighting (matches VertexColorOpaque)
                 Light mainLight = GetMainLight();

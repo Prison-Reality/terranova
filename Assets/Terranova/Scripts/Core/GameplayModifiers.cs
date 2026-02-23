@@ -32,6 +32,9 @@ namespace Terranova.Core
         /// <summary>Berry bush yield multiplier. Winter = 0 (no berries).</summary>
         public static float BerryYieldMultiplier { get; set; } = 1f;
 
+        /// <summary>v0.5.7: HP lost per night when unsheltered in winter. 0 outside winter.</summary>
+        public static float WinterExposureDamage { get; set; } = 0f;
+
         /// <summary>Combined gather speed: discovery × season.</summary>
         public static float EffectiveGatherSpeed => GatherSpeedMultiplier * SeasonGatherMultiplier;
 
@@ -45,6 +48,7 @@ namespace Terranova.Core
             SeasonGatherMultiplier = 1f;
             ResourceRespawnMultiplier = 1f;
             BerryYieldMultiplier = 1f;
+            WinterExposureDamage = 0f;
         }
     }
 }
