@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-02-21 | Current version: v0.5.2 | Milestone: MS4
+> Last updated: 2026-02-23 | Current version: v0.5.7 | Milestone: MS4
 
 ---
 
@@ -127,7 +127,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.5.2
+**Current version:** v0.5.7
 
 #### Implemented Features (MS4)
 
@@ -142,7 +142,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 | F7: Order Grammar & Klappbuch UI | ⚡ In Progress | 3-column picker works, orders execute, bugs parked |
 | F8: Extended Discovery System | ⏳ Planned | Phases A-D, failure-driven discovery |
 | F9: Wildlife & Events | ⏳ Planned | Animals, random events |
-| F10: Seasons | ⏳ Planned | Warm/cold cycles |
+| F10: Seasons | ✅ Done (v0.5.7) | Sun arc 52°N, seasonal day length, ground/tree/bush tinting, snow/leaves particles, gameplay modifiers |
 | F11: Organic Terraforming | ⏳ Planned | Part of terrain refactoring |
 | F12: Tribal Chronicle | ⏳ Planned | Narrative system |
 

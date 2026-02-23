@@ -8,12 +8,13 @@ namespace Terranova.Terrain
     /// MS4 Feature 1.5: Day-Night Cycle.
     /// ~3 game-minutes per day (180 seconds of game time).
     ///
-    /// The directional light rotates 360° over one full day:
-    ///   Dawn (east, warm orange) → Noon (overhead, bright white)
-    ///   → Dusk (west, warm red) → Night (below horizon, dark blue ambient only)
-    ///
-    /// Sun altitude (0° horizon, 90° zenith, negative = below horizon) drives
-    /// all lighting smoothly — no hard-coded phase thresholds.
+    /// v0.5.7: Realistic latitude-based sun arc (52°N — Berlin/London).
+    ///   - Sun max elevation varies by season: Summer 61°, Spring/Autumn 38°, Winter 15°.
+    ///   - Day length varies: Summer 67% day, Spring/Autumn 50%, Winter 33%.
+    ///   - Sun rises East, sets West (azimuth rotates continuously).
+    ///   - Winter: low flat arc = long dramatic shadows across terrain.
+    ///   - Summer: high arc = short shadows, bright overhead light.
+    ///   - Soft shadows enabled on directional light.
     /// </summary>
     public class DayNightCycle : MonoBehaviour
     {
@@ -23,9 +24,14 @@ namespace Terranova.Terrain
         public const float SECONDS_PER_DAY = 180f;
 
         private Light _sunLight;
-        private float _timeOfDay; // 0-1, where 0.25=sunrise, 0.5=noon, 0.75=sunset
+        private float _timeOfDay; // 0-1, where 0 = midnight
         private int _dayCount = 1;
         private float _temperature = 20f; // Celsius, simplified
+
+        // Cached sun state (computed each frame in UpdateLighting)
+        private float _sunAltitude;
+        private float _sunriseTime = 0.25f;
+        private float _sunsetTime = 0.75f;
 
         // Sun arc color stops
         private static readonly Color SUN_NOON    = new Color(1f, 0.96f, 0.84f);     // Warm white
@@ -41,15 +47,29 @@ namespace Terranova.Terrain
         public float TimeOfDay => _timeOfDay;
         public float Temperature => _temperature;
 
-        /// <summary>Sun altitude: 0 at horizon, positive above, negative below.</summary>
-        public float SunAltitude => Mathf.Sin((_timeOfDay - 0.25f) * Mathf.PI * 2f) * 90f;
+        /// <summary>Sun altitude in degrees: 0 at horizon, positive above, negative below.</summary>
+        public float SunAltitude => _sunAltitude;
 
-        public bool IsNight => SunAltitude < -5f;
-        public bool IsDawn => _timeOfDay >= 0.20f && _timeOfDay < 0.30f;
-        public bool IsDusk => _timeOfDay >= 0.70f && _timeOfDay < 0.80f;
+        public bool IsNight => _sunAltitude < -5f;
+        public bool IsDawn
+        {
+            get
+            {
+                float margin = 0.05f;
+                return _timeOfDay >= (_sunriseTime - margin) && _timeOfDay < (_sunriseTime + margin);
+            }
+        }
+        public bool IsDusk
+        {
+            get
+            {
+                float margin = 0.05f;
+                return _timeOfDay >= (_sunsetTime - margin) && _timeOfDay < (_sunsetTime + margin);
+            }
+        }
 
         /// <summary>Visibility range multiplier (smooth).</summary>
-        public float VisibilityMultiplier => Mathf.Clamp01(Mathf.InverseLerp(-10f, 10f, SunAltitude));
+        public float VisibilityMultiplier => Mathf.Clamp01(Mathf.InverseLerp(-10f, 10f, _sunAltitude));
 
         private void Awake()
         {
@@ -91,21 +111,65 @@ namespace Terranova.Terrain
                 var sunGo = new GameObject("Sun");
                 _sunLight = sunGo.AddComponent<Light>();
                 _sunLight.type = LightType.Directional;
-                _sunLight.shadows = LightShadows.Soft;
             }
             _sunLight.intensity = 1.2f;
+
+            // v0.5.7: Enable soft shadows
+            _sunLight.shadows = LightShadows.Soft;
+            _sunLight.shadowResolution = UnityEngine.Rendering.LightShadowResolution.Medium;
+            _sunLight.shadowNearPlane = 0.5f;
+            QualitySettings.shadowDistance = 120f;
         }
 
         private void UpdateLighting()
         {
             if (_sunLight == null) return;
 
-            // ── Sun rotation: full 360° arc ──────────────────────────
-            float sunAngle = (_timeOfDay - 0.25f) * 360f;
-            _sunLight.transform.rotation = Quaternion.Euler(sunAngle, -30f, 0f);
+            // ── v0.5.7: Seasonal sun parameters ────────────────────
+            var season = SeasonManager.Instance;
+            float maxElev = 38f;     // Spring/Autumn default
+            float dayFrac = 0.5f;    // 50% day
 
-            float altitude = SunAltitude;
-            float altNorm = Mathf.Clamp01(altitude / 90f);
+            if (season != null)
+            {
+                maxElev = season.MaxSunElevation;
+                dayFrac = season.DayFraction;
+            }
+
+            _sunriseTime = (1f - dayFrac) * 0.5f;
+            _sunsetTime = _sunriseTime + dayFrac;
+
+            // ── Compute sun elevation and azimuth ──────────────────
+            float t = _timeOfDay;
+            bool isDaytime = t >= _sunriseTime && t < _sunsetTime;
+
+            float elevation;
+            if (isDaytime)
+            {
+                float dayProgress = (t - _sunriseTime) / dayFrac; // 0→1
+                elevation = maxElev * Mathf.Sin(dayProgress * Mathf.PI);
+            }
+            else
+            {
+                float nightDuration = 1f - dayFrac;
+                float nightProgress;
+                if (t >= _sunsetTime)
+                    nightProgress = (t - _sunsetTime) / nightDuration;
+                else
+                    nightProgress = (t + 1f - _sunsetTime) / nightDuration;
+                elevation = -30f * Mathf.Sin(nightProgress * Mathf.PI);
+            }
+            _sunAltitude = elevation;
+
+            // Azimuth: continuous 360° rotation so shadows sweep E→S→W
+            // At sunrise: light comes from East; at noon: from South; at sunset: from West
+            float azimuth = _timeOfDay * 360f + 180f;
+
+            _sunLight.transform.rotation = Quaternion.Euler(elevation, azimuth, 0f);
+
+            // ── Lighting calculations from altitude ────────────────
+            float altitude = _sunAltitude;
+            float altNorm = Mathf.Clamp01(altitude / maxElev); // normalized to seasonal peak
             float belowHorizon = Mathf.Clamp01(-altitude / 30f);
 
             // ── Sun color: horizon→orange, zenith→white, below→dark ──
@@ -122,12 +186,11 @@ namespace Terranova.Terrain
                 intensity = Mathf.Lerp(0.4f, 0f, belowHorizon);
             }
 
-            // ── v0.5.6: Season lighting tint ─────────────────────────
-            var season = SeasonManager.Instance;
+            // ── Season lighting tint ────────────────────────────────
             if (season != null)
                 sunColor *= season.LightingTint;
 
-            // ── Ambient: smooth blend night→horizon→day ──────────────
+            // ── Ambient: smooth blend night→horizon→day ─────────────
             Color ambient;
             if (altitude > 0f)
                 ambient = Color.Lerp(AMB_HORIZON, AMB_DAY, altNorm);
@@ -141,7 +204,7 @@ namespace Terranova.Terrain
             _sunLight.intensity = intensity;
             RenderSettings.ambientLight = ambient;
 
-            // ── Fog: night + seasonal (winter/autumn mornings) ───────
+            // ── Fog: night + seasonal (winter/autumn mornings) ──────
             float fogThreshold = 5f;
             if (season != null && season.CurrentSeason == Season.Winter)
                 fogThreshold = 15f;
@@ -162,11 +225,10 @@ namespace Terranova.Terrain
 
         private void UpdateTemperature()
         {
-            float altitude = SunAltitude;
+            float altitude = _sunAltitude;
             float altNorm = Mathf.Clamp01((altitude + 90f) / 180f);
             _temperature = Mathf.Lerp(8f, 24f, altNorm);
 
-            // v0.5.6: Season temperature offset
             var season = SeasonManager.Instance;
             if (season != null)
                 _temperature += season.TemperatureOffset;

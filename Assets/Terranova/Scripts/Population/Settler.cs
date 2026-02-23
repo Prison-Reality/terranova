@@ -1725,6 +1725,14 @@ namespace Terranova.Population
                 _shelterState = ShelterState.Exposed;
                 _coldExposureTimer += _shelterCheckTimer; // Accumulate cold
 
+                // v0.5.7: Winter exposure damage — lose hunger (2 HP) per night unsheltered
+                float exposureDmg = GameplayModifiers.WinterExposureDamage;
+                if (exposureDmg > 0f)
+                {
+                    // Spread total damage across winter night (~120s, checked every ~1s)
+                    _hunger = Mathf.Max(0f, _hunger - exposureDmg / 120f);
+                }
+
                 if (_coldExposureTimer >= HYPOTHERMIA_TIME)
                 {
                     _shelterState = ShelterState.Hypothermic;
