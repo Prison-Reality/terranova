@@ -47,6 +47,9 @@ namespace Terranova.Terrain
         public float TimeOfDay => _timeOfDay;
         public float Temperature => _temperature;
 
+        /// <summary>Fractional time of day when sunset occurs (e.g. 0.75).</summary>
+        public float SunsetTime => _sunsetTime;
+
         /// <summary>Sun altitude in degrees: 0 at horizon, positive above, negative below.</summary>
         public float SunAltitude => _sunAltitude;
 
