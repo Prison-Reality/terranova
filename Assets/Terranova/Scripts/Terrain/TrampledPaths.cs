@@ -7,28 +7,31 @@ namespace Terranova.Terrain
 {
     /// <summary>
     /// v0.5.1: Trampled Paths system.
-    /// v0.5.8: Path-building converts terrain to Dirt after 3 settler walks.
+    /// v0.5.8: Path-building converts terrain to Dirt after repeated walks.
+    /// v0.5.12: Natural walking paths — higher thresholds, organic-looking overlays,
+    ///   gradual formation, and fading when unused.
     ///
     /// When settlers walk the same route repeatedly a path forms:
-    ///   - After 3 walks: terrain block converts to Dirt (v0.5.8)
-    ///   - After 10 walks: clear worn path overlay visible
-    ///   - Settlers move 30% faster on trampled paths (threshold 3+)
-    ///   - Walk counts slowly decay if unused for several game-days
+    ///   - After 8 walks: terrain block converts to Dirt
+    ///   - After 20 walks: clear worn path overlay visible (natural-looking)
+    ///   - Settlers move 30% faster on trampled paths (threshold 8+)
+    ///   - Walk counts decay by 4 per game-day if unused
     ///   - Dirt conversion is permanent (block type changes)
+    ///   - No pre-trampled area — paths only form from actual settler movement
     ///
-    /// Most common paths: campfire → water, campfire → gathering areas.
-    /// Paths persist across tribe death (slowly fading).
+    /// Overlays use randomized rotation, offset, and scale for organic appearance.
     /// </summary>
     public class TrampledPaths : MonoBehaviour
     {
         public static TrampledPaths Instance { get; private set; }
 
-        private const int DIRT_CONVERSION_THRESHOLD = 3;  // v0.5.8: convert to Dirt after 3 walks
-        private const int CLEAR_PATH_THRESHOLD = 10;       // worn path overlay appears
-        private const float SPEED_BONUS = 1.3f;            // 30% faster on paths
-        private const int DECAY_PER_DAY = 2;               // Walk count reduced per game-day
-        private const float VISUAL_UPDATE_INTERVAL = 2.0f; // Rebuild visuals every 2s
-        private const float TRACK_INTERVAL = 0.3f;         // How often we sample settler positions
+        // v0.5.12: Higher thresholds for more natural path formation
+        private const int DIRT_CONVERSION_THRESHOLD = 8;   // Convert to Dirt after 8 walks
+        private const int CLEAR_PATH_THRESHOLD = 20;        // Worn path overlay appears after 20 walks
+        private const float SPEED_BONUS = 1.3f;             // 30% faster on paths
+        private const int DECAY_PER_DAY = 4;                // Walk count reduced per game-day (faster fade)
+        private const float VISUAL_UPDATE_INTERVAL = 2.0f;  // Rebuild visuals every 2s
+        private const float TRACK_INTERVAL = 0.3f;          // How often we sample settler positions
 
         private int[,] _walkCounts;
         private int _worldSizeX, _worldSizeZ;
@@ -92,29 +95,11 @@ namespace Terranova.Terrain
 
             CreateMaterials();
 
-            // Pre-trample area around campfire (settlers spawn there)
-            // v0.5.8: threshold lowered to DIRT_CONVERSION_THRESHOLD + 1,
-            // actual dirt conversion happens in next Update
-            int campX = world.CampfireBlockX;
-            int campZ = world.CampfireBlockZ;
-            for (int dx = -3; dx <= 3; dx++)
-                for (int dz = -3; dz <= 3; dz++)
-                {
-                    int x = campX + dx;
-                    int z = campZ + dz;
-                    if (x >= 0 && x < _worldSizeX && z >= 0 && z < _worldSizeZ)
-                    {
-                        _walkCounts[x, z] = CLEAR_PATH_THRESHOLD + 5;
-                        // Queue dirt conversion for campfire area
-                        long key = ((long)x << 32) | (uint)z;
-                        _pendingDirtConversions.Add(key);
-                    }
-                }
+            // v0.5.12: No pre-trampling — paths form naturally from settler movement only.
+            // The campfire area will develop paths as settlers walk around it.
 
-            _dirtConversionPending = true;
-            _visualDirty = true;
             _initialized = true;
-            Debug.Log("[TrampledPaths] Initialized.");
+            Debug.Log("[TrampledPaths] v0.5.12 Initialized (natural path formation, no pre-trampling).");
         }
 
         private void Update()
@@ -142,7 +127,7 @@ namespace Terranova.Terrain
         /// <summary>
         /// Record a settler walking over a block position.
         /// Call this periodically from Settler when moving.
-        /// v0.5.8: Queues dirt conversion when walk count exceeds 3.
+        /// v0.5.12: Higher thresholds, natural path formation.
         /// </summary>
         public void RecordStep(Vector3 worldPos)
         {
@@ -154,7 +139,7 @@ namespace Terranova.Terrain
             _walkCounts[bx, bz]++;
             int count = _walkCounts[bx, bz];
 
-            // v0.5.8: Queue dirt conversion when crossing threshold
+            // v0.5.12: Queue dirt conversion when crossing threshold
             if (count == DIRT_CONVERSION_THRESHOLD)
             {
                 long key = ((long)bx << 32) | (uint)bz;
@@ -172,7 +157,7 @@ namespace Terranova.Terrain
 
         /// <summary>
         /// Get the speed multiplier at a world position.
-        /// v0.5.8: Speed bonus now starts at DIRT_CONVERSION_THRESHOLD (3 walks).
+        /// v0.5.12: Speed bonus starts at DIRT_CONVERSION_THRESHOLD (8 walks).
         /// </summary>
         public float GetSpeedMultiplier(Vector3 worldPos)
         {
@@ -276,8 +261,21 @@ namespace Terranova.Terrain
         }
 
         /// <summary>
-        /// v0.5.8: Only render worn-path overlays at CLEAR_PATH_THRESHOLD (10+ walks).
-        /// Below that, the dirt block conversion itself provides the visual feedback.
+        /// Deterministic pseudo-random float from two ints (for consistent per-block randomness).
+        /// Returns value in [0, 1).
+        /// </summary>
+        private static float HashBlock(int bx, int bz)
+        {
+            int h = bx * 374761393 + bz * 668265263;
+            h = (h ^ (h >> 13)) * 1274126177;
+            return (h & 0x7FFFFFFF) / (float)int.MaxValue;
+        }
+
+        /// <summary>
+        /// v0.5.12: Natural-looking path overlays with randomized rotation, offset, and scale.
+        /// Each quad gets a unique deterministic random transform based on block position,
+        /// producing organic, irregular paths instead of grid-aligned squares.
+        /// Overlays grow in intensity with walk count above threshold.
         /// </summary>
         private void RebuildVisuals()
         {
@@ -301,14 +299,30 @@ namespace Terranova.Terrain
 
                     if (!_pathQuads.ContainsKey(key))
                     {
-                        // Create worn-path overlay quad
                         float y = world.GetSmoothedHeightAtWorldPos(x + 0.5f, z + 0.5f) + 0.03f;
+
+                        // v0.5.12: Deterministic per-block randomness for natural appearance
+                        float h1 = HashBlock(x, z);
+                        float h2 = HashBlock(x + 1000, z + 1000);
+                        float h3 = HashBlock(x + 2000, z + 2000);
+
+                        // Random rotation (0-360 degrees) — breaks grid alignment
+                        float rotation = h1 * 360f;
+
+                        // Random offset from block center (-0.25 to 0.25) — creates irregular placement
+                        float offsetX = (h2 - 0.5f) * 0.5f;
+                        float offsetZ = (h3 - 0.5f) * 0.5f;
+
+                        // Random scale variation (0.8 to 1.5) — varied quad sizes
+                        float scaleX = 0.8f + h1 * 0.7f;
+                        float scaleZ = 0.8f + h2 * 0.7f;
+
                         var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
                         quad.name = "Path";
                         quad.transform.SetParent(_pathContainer.transform, false);
-                        quad.transform.position = new Vector3(x + 0.5f, y, z + 0.5f);
-                        quad.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-                        quad.transform.localScale = new Vector3(1.1f, 1.1f, 1f);
+                        quad.transform.position = new Vector3(x + 0.5f + offsetX, y, z + 0.5f + offsetZ);
+                        quad.transform.rotation = Quaternion.Euler(90f, rotation, 0f);
+                        quad.transform.localScale = new Vector3(scaleX, scaleZ, 1f);
                         Object.Destroy(quad.GetComponent<Collider>());
                         var mr = quad.GetComponent<MeshRenderer>();
                         if (_clearPathMat != null) mr.sharedMaterial = _clearPathMat;

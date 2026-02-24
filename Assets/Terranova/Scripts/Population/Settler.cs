@@ -167,6 +167,15 @@ namespace Terranova.Population
         private static int _totalStoneDelivered;
         private static int _totalFoodDelivered;
 
+        // v0.5.12: Wood pile system — sticks drop at fixed spot, become Wood_Pile_1C after 5
+        private const int STICKS_PER_WOOD_PILE = 5;
+        private const float STICK_DROP_OFFSET = 3.0f; // Distance from campfire center
+        private static int _stickDropCount;
+        private static readonly List<GameObject> _droppedSticks = new();
+        private static GameObject _woodPile;
+        private static Vector3 _stickDropPosition;
+        private static bool _stickDropPositionSet;
+
         /// <summary>Reset static state when domain reload is disabled.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
@@ -178,6 +187,10 @@ namespace Terranova.Population
             _sharedSitController = null;
             _sharedMaleWorkController = null;
             _sharedFemaleWorkController = null;
+            _stickDropCount = 0;
+            _droppedSticks.Clear();
+            _woodPile = null;
+            _stickDropPositionSet = false;
             for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++) _campfireSeats[i] = false;
         }
 
@@ -448,8 +461,8 @@ namespace Terranova.Population
             CreateOverheadBars();
             SettlerLocator.Register(transform);
 
-            // Start with a Q1 Simple Hand Axe (MS4 Feature 3)
-            EquipTool(ToolDatabase.Get("simple_hand_axe"));
+            // v0.5.12: Settlers start without tools — they can only collect sticks.
+            // An axe must be crafted or discovered to enable stone gathering and other tasks.
 
             // Start with random pause (desync settlers)
             _state = SettlerState.IdlePausing;
@@ -537,11 +550,16 @@ namespace Terranova.Population
         /// </summary>
         private bool CanPerformTask(SettlerTaskType taskType)
         {
-            // Epoch I.1: ALL basic gathering works without tools (deadwood,
-            // berries, roots, insects, drinking). Tools only increase speed
-            // and enable advanced actions. A toolless settler must never
-            // stand idle and starve.
-            return true;
+            // v0.5.12: Without an axe, settlers can only collect sticks (GatherWood),
+            // drink water, seek food/shelter. An axe enables stone gathering, building, etc.
+            if (_equippedTool != null) return true; // With any tool, all tasks available
+
+            // Toolless: survival tasks + stick collection only
+            return taskType == SettlerTaskType.GatherWood
+                || taskType == SettlerTaskType.DrinkWater
+                || taskType == SettlerTaskType.SeekFood
+                || taskType == SettlerTaskType.SeekShelter
+                || taskType == SettlerTaskType.Hunt;  // Berry gathering (food)
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -1053,6 +1071,10 @@ namespace Terranova.Population
             if (_currentTask != null)
             {
                 string resourceName = TrackDelivery(_currentTask.TaskType);
+
+                // v0.5.12: Drop sticks at fixed location for wood deliveries
+                if (_currentTask.TaskType == SettlerTaskType.GatherWood)
+                    DropStickAtCampfire();
 
                 // XP bonus on delivery (Curious trait: +20% XP)
                 float xpGain = 10f;
@@ -2110,6 +2132,16 @@ namespace Terranova.Population
             if (_campfireSeatIndex < 0)
                 ClaimCampfireSeat();
 
+            // v0.5.12: Warp settler to exact seat position so all sit at same distance from fire
+            if (_campfireSeatIndex >= 0)
+            {
+                Vector3 seatPos = GetCampfireSeatPosition(_campfireSeatIndex);
+                if (NavMesh.SamplePosition(seatPos, out NavMeshHit seatHit, NAV_SAMPLE_RADIUS, NavMesh.AllAreas))
+                    _agent.Warp(seatHit.position);
+                else
+                    _agent.Warp(seatPos);
+            }
+
             // Face the campfire
             FaceCampfire();
 
@@ -2312,6 +2344,96 @@ namespace Terranova.Population
                     return "1x Food";
                 default:
                     return $"1x {taskType}";
+            }
+        }
+
+        // ─── v0.5.12: Wood Pile System ──────────────────────────────
+
+        /// <summary>
+        /// Get the fixed stick drop position near the campfire.
+        /// Calculated once and reused for all settlers.
+        /// </summary>
+        private Vector3 GetStickDropPosition()
+        {
+            if (!_stickDropPositionSet)
+            {
+                // Fixed position offset from campfire (East side)
+                _stickDropPosition = new Vector3(
+                    _campfirePosition.x + STICK_DROP_OFFSET,
+                    _campfirePosition.y,
+                    _campfirePosition.z);
+
+                // Sample NavMesh height at drop position for correct Y
+                var world = WorldManager.Instance;
+                if (world != null)
+                    _stickDropPosition.y = world.GetSmoothedHeightAtWorldPos(
+                        _stickDropPosition.x, _stickDropPosition.z);
+
+                _stickDropPositionSet = true;
+            }
+            return _stickDropPosition;
+        }
+
+        /// <summary>
+        /// v0.5.12: Drop a stick at the fixed drop location near the campfire.
+        /// After STICKS_PER_WOOD_PILE sticks, replace them all with a Wood_Pile_1C prop.
+        /// </summary>
+        private void DropStickAtCampfire()
+        {
+            Vector3 dropPos = GetStickDropPosition();
+            _stickDropCount++;
+
+            if (_stickDropCount < STICKS_PER_WOOD_PILE)
+            {
+                // Place a visual stick with slight random offset for natural look
+                var rng = new System.Random(_stickDropCount * 7919 + GameState.Seed);
+                float ox = (float)(rng.NextDouble() - 0.5) * 0.8f;
+                float oz = (float)(rng.NextDouble() - 0.5) * 0.8f;
+                float rot = (float)(rng.NextDouble() * 360.0);
+                Vector3 stickPos = dropPos + new Vector3(ox, 0f, oz);
+
+                var stick = AssetPrefabRegistry.InstantiateRandom(
+                    AssetPrefabRegistry.Twigs, stickPos, rng, null, 0.5f, 0.8f);
+                if (stick != null)
+                {
+                    stick.name = $"DroppedStick_{_stickDropCount}";
+                    stick.transform.rotation = Quaternion.Euler(0f, rot, 0f);
+                    // Remove colliders so sticks don't block movement
+                    foreach (var col in stick.GetComponentsInChildren<Collider>())
+                        Destroy(col);
+                    _droppedSticks.Add(stick);
+                }
+
+                Debug.Log($"[{name}] Dropped stick {_stickDropCount}/{STICKS_PER_WOOD_PILE} at campfire");
+            }
+            else
+            {
+                // Replace all dropped sticks with a Wood_Pile_1C
+                foreach (var stick in _droppedSticks)
+                {
+                    if (stick != null) Destroy(stick);
+                }
+                _droppedSticks.Clear();
+
+                // Destroy previous wood pile if one already exists (shouldn't normally happen)
+                if (_woodPile != null)
+                    Destroy(_woodPile);
+
+                _woodPile = AssetPrefabRegistry.InstantiateSpecific(
+                    "Props/Wood_Pile_1C", dropPos, Quaternion.identity, null, 0.6f);
+
+                if (_woodPile != null)
+                {
+                    _woodPile.name = "WoodPile";
+                    // Remove colliders so pile doesn't block movement
+                    foreach (var col in _woodPile.GetComponentsInChildren<Collider>())
+                        Destroy(col);
+                }
+
+                Debug.Log($"[{name}] {STICKS_PER_WOOD_PILE} sticks collected — created Wood Pile at campfire!");
+
+                // Reset counter for next batch
+                _stickDropCount = 0;
             }
         }
 
