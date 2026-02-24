@@ -231,6 +231,18 @@ namespace Terranova.Terrain
             "Props/Animal_Carcass_2A",
         };
 
+        // ─── Pottery (for clay/honey resources) ──────────────
+
+        public static readonly string[] ClayDishes = {
+            "Pottery/Clay_Dish_1A", "Pottery/Clay_Dish_1B", "Pottery/Clay_Dish_1C",
+            "Pottery/Clay_Dish_1D", "Pottery/Clay_Dish_1E",
+            "Pottery/Clay_Dish_2A", "Pottery/Clay_Dish_2B", "Pottery/Clay_Dish_2C",
+        };
+
+        public static readonly string[] ClayVases = {
+            "Pottery/Clay_Vase_1A", "Pottery/Clay_Vase_1B", "Pottery/Clay_Vase_1C",
+        };
+
         // ─── Particles ─────────────────────────────────────────
 
         public static readonly string FireParticle = "Assets/EXPLORER - Stone Age/Particles/Fire_1A";

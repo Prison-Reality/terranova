@@ -175,6 +175,10 @@ namespace Terranova.Population
             _totalStoneDelivered = 0;
             _totalFoodDelivered = 0;
             _sharedMaterial = null;
+            _sharedSitController = null;
+            _sharedMaleWorkController = null;
+            _sharedFemaleWorkController = null;
+            for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++) _campfireSeats[i] = false;
         }
 
         private SettlerTask _currentTask;
@@ -320,6 +324,11 @@ namespace Terranova.Population
         private const float COLD_THIRST_DRAIN_MULT = 1.5f;  // Thirst drains 1.5x faster in cold
         private const float HYPOTHERMIA_TIME = 90f;          // Seconds of cold exposure before death
 
+        // Campfire circle seating (v0.5.10)
+        private const float CAMPFIRE_SIT_RADIUS = 2.0f;    // Radius of sitting circle around fire
+        private const int MAX_CAMPFIRE_SEATS = 12;          // Maximum seats around campfire
+        private const float RETURN_SAFETY_MARGIN = 8f;      // Extra seconds buffer for early night return
+
         private ShelterState _shelterState = ShelterState.Exposed;
         private float _shelterCheckTimer;
         private float _coldExposureTimer;
@@ -328,6 +337,10 @@ namespace Terranova.Population
         // v0.5.0: Natural shelter support — settlers can seek nearby shelters instead of campfire
         private Vector3 _nightShelterTarget;
         private NaturalShelter _claimedShelter;
+
+        // v0.5.10: Campfire circle seating — settlers sit evenly around the fire
+        private int _campfireSeatIndex = -1;
+        private static readonly bool[] _campfireSeats = new bool[MAX_CAMPFIRE_SEATS];
 
         // v0.5.1: Fog of war + trampled paths tracking
         private float _fogPathTimer;
@@ -365,7 +378,15 @@ namespace Terranova.Population
         private Animator _animator; // v0.5.3: Avatar animation controller
         private RuntimeAnimatorController _idleController;  // Original idle controller from prefab
         private RuntimeAnimatorController _walkController;  // Walk controller loaded from Resources
+        private RuntimeAnimatorController _sitController;   // v0.5.10: Sitting controller for campfire rest
+        private RuntimeAnimatorController _workController;  // v0.5.11: Work controller for stone/build
         private bool _isPlayingWalk; // Track current animation state
+        private bool _isPlayingSit;  // v0.5.10: Track sitting animation state
+        private bool _isPlayingWork; // v0.5.11: Track work animation state
+        private Transform _rightHandBone;                  // v0.5.11: Hand bone for carrying items
+        private static RuntimeAnimatorController _sharedSitController; // Shared across all settlers
+        private static RuntimeAnimatorController _sharedMaleWorkController;
+        private static RuntimeAnimatorController _sharedFemaleWorkController;
         private int _colorIndex;
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
@@ -439,6 +460,7 @@ namespace Terranova.Population
 
         private void OnDestroy()
         {
+            ReleaseCampfireSeat();
             SettlerLocator.Unregister(transform);
         }
 
@@ -704,16 +726,47 @@ namespace Terranova.Population
             if (_idleController == null) return; // No animation setup
 
             bool isMoving = _agent != null && _agent.velocity.sqrMagnitude > 0.1f;
+            bool shouldSit = _state == SettlerState.RestingAtCampfire && !isMoving;
+            bool shouldWork = _state == SettlerState.Working && !isMoving;
 
-            if (isMoving && !_isPlayingWalk && _walkController != null)
+            // v0.5.10: Sitting animation for campfire rest
+            if (shouldSit && !_isPlayingSit && _sitController != null)
             {
-                _animator.runtimeAnimatorController = _walkController;
-                _isPlayingWalk = true;
+                _animator.runtimeAnimatorController = _sitController;
+                _isPlayingSit = true;
+                _isPlayingWalk = false;
+                _isPlayingWork = false;
             }
-            else if (!isMoving && _isPlayingWalk)
+            // v0.5.11: Work animation for stone/build tasks
+            else if (shouldWork && !_isPlayingWork && _workController != null)
+            {
+                _animator.runtimeAnimatorController = _workController;
+                _isPlayingWork = true;
+                _isPlayingWalk = false;
+                _isPlayingSit = false;
+            }
+            else if (!shouldSit && _isPlayingSit)
             {
                 _animator.runtimeAnimatorController = _idleController;
-                _isPlayingWalk = false;
+                _isPlayingSit = false;
+            }
+            else if (!shouldWork && _isPlayingWork)
+            {
+                _animator.runtimeAnimatorController = _idleController;
+                _isPlayingWork = false;
+            }
+            else if (!shouldSit && !shouldWork)
+            {
+                if (isMoving && !_isPlayingWalk && _walkController != null)
+                {
+                    _animator.runtimeAnimatorController = _walkController;
+                    _isPlayingWalk = true;
+                }
+                else if (!isMoving && _isPlayingWalk)
+                {
+                    _animator.runtimeAnimatorController = _idleController;
+                    _isPlayingWalk = false;
+                }
             }
         }
 
@@ -1655,6 +1708,7 @@ namespace Terranova.Population
                 _wasNight = false;
                 // v0.5.0: Release any natural shelter claim at dawn
                 ReleaseShelterClaim();
+                ReleaseCampfireSeat();
                 _nightShelterTarget = Vector3.zero;
 
                 // Dawn: if resting at campfire, resume normal behavior
@@ -1694,6 +1748,8 @@ namespace Terranova.Population
 
             if (!isNight)
             {
+                // v0.5.10: Check if settler should head home early (won't make it before dark)
+                CheckEarlyNightReturn();
                 // Daytime: everyone is fine
                 _shelterState = ShelterState.Sheltered;
                 _coldExposureTimer = 0f;
@@ -1779,6 +1835,14 @@ namespace Terranova.Population
                 }
             }
 
+            // v0.5.10: If going to campfire, claim a seat for even circle distribution
+            if (_claimedShelter == null)
+            {
+                int seat = ClaimCampfireSeat();
+                if (seat >= 0)
+                    _nightShelterTarget = GetCampfireSeatPosition(seat);
+            }
+
             // Already near target — just rest
             float distToTarget = Vector3.Distance(
                 new Vector3(transform.position.x, 0f, transform.position.z),
@@ -1816,6 +1880,14 @@ namespace Terranova.Population
             _isMoving = false;
             _agent.ResetPath();
             DestroyCargo();
+
+            // v0.5.10: Claim a campfire seat if we don't have one yet and not going to a natural shelter
+            if (_claimedShelter == null && _campfireSeatIndex < 0)
+            {
+                int seat = ClaimCampfireSeat();
+                if (seat >= 0)
+                    _nightShelterTarget = GetCampfireSeatPosition(seat);
+            }
 
             Vector3 target = _nightShelterTarget != Vector3.zero ? _nightShelterTarget : _campfirePosition;
 
@@ -1855,6 +1927,175 @@ namespace Terranova.Population
             }
         }
 
+        // ─── v0.5.10: Campfire Circle Seating ──────────────────────
+
+        /// <summary>
+        /// Claim the next available seat around the campfire circle.
+        /// Returns the seat index (0 to MAX_CAMPFIRE_SEATS-1), or -1 if all taken.
+        /// </summary>
+        private int ClaimCampfireSeat()
+        {
+            ReleaseCampfireSeat(); // Release any existing seat first
+            for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++)
+            {
+                if (!_campfireSeats[i])
+                {
+                    _campfireSeats[i] = true;
+                    _campfireSeatIndex = i;
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>Release the currently claimed campfire seat.</summary>
+        private void ReleaseCampfireSeat()
+        {
+            if (_campfireSeatIndex >= 0 && _campfireSeatIndex < MAX_CAMPFIRE_SEATS)
+                _campfireSeats[_campfireSeatIndex] = false;
+            _campfireSeatIndex = -1;
+        }
+
+        /// <summary>
+        /// Get the world position of a campfire seat (evenly distributed around a circle).
+        /// </summary>
+        private Vector3 GetCampfireSeatPosition(int seatIndex)
+        {
+            float angle = (seatIndex / (float)MAX_CAMPFIRE_SEATS) * Mathf.PI * 2f;
+            return new Vector3(
+                _campfirePosition.x + Mathf.Cos(angle) * CAMPFIRE_SIT_RADIUS,
+                _campfirePosition.y,
+                _campfirePosition.z + Mathf.Sin(angle) * CAMPFIRE_SIT_RADIUS);
+        }
+
+        /// <summary>Face the settler toward the campfire.</summary>
+        private void FaceCampfire()
+        {
+            Vector3 dir = _campfirePosition - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.01f)
+                transform.rotation = Quaternion.LookRotation(dir);
+        }
+
+        /// <summary>
+        /// v0.5.10: Check if the settler should head to campfire early because they
+        /// won't make it back before nightfall. Interrupts work states when needed.
+        /// Called from UpdateShelterState every ~1 second during daytime.
+        /// </summary>
+        private void CheckEarlyNightReturn()
+        {
+            // Only check during active work states far from campfire
+            if (_state != SettlerState.WalkingToTarget && _state != SettlerState.Working)
+                return;
+
+            var cycle = DayNightCycle.Instance;
+            if (cycle == null) return;
+
+            float timeUntilSunset = cycle.SunsetTime - cycle.TimeOfDay;
+            if (timeUntilSunset < 0f) timeUntilSunset += 1f; // Wrap around midnight
+            if (timeUntilSunset > 0.25f) return; // Sunset is far away
+
+            float secondsUntilSunset = timeUntilSunset * DayNightCycle.SECONDS_PER_DAY;
+
+            float distToCampfire = Vector3.Distance(
+                new Vector3(transform.position.x, 0f, transform.position.z),
+                new Vector3(_campfirePosition.x, 0f, _campfirePosition.z));
+
+            if (distToCampfire <= CAMPFIRE_SHELTER_RADIUS) return;
+
+            float speed = GetEffectiveSpeed(TASK_WALK_SPEED);
+            if (speed < 0.01f) speed = 0.01f;
+            float travelTime = distToCampfire / speed;
+
+            // If we can't make it back before sunset + margin, head home now
+            if (travelTime + RETURN_SAFETY_MARGIN > secondsUntilSunset)
+            {
+                Debug.Log($"[{name}] Early night return: dist={distToCampfire:F1}, travel={travelTime:F1}s, sunset in {secondsUntilSunset:F1}s");
+
+                // Save current task for dawn resumption
+                if (_currentTask != null && _savedTask == null)
+                {
+                    _savedTask = _currentTask;
+                    _currentTask = null;
+                }
+                else if (_currentTask != null)
+                {
+                    if (_currentTask.TargetResource != null && _currentTask.TargetResource.IsReserved)
+                        _currentTask.TargetResource.Release();
+                    if (_currentTask.TargetBuilding != null && _currentTask.TargetBuilding.IsBeingBuilt)
+                        _currentTask.TargetBuilding.ReleaseConstruction();
+                    _currentTask = null;
+                }
+
+                DestroyCargo();
+                _nightShelterTarget = _campfirePosition;
+
+                // Claim a seat for the campfire circle
+                int seat = ClaimCampfireSeat();
+                if (seat >= 0)
+                    _nightShelterTarget = GetCampfireSeatPosition(seat);
+
+                StartWalkingToCampfire();
+            }
+        }
+
+        /// <summary>
+        /// v0.5.10: Load the sitting animation controller.
+        /// Uses humanoid retargeting — female sitting clip works on both genders.
+        /// </summary>
+        private static RuntimeAnimatorController LoadSitController()
+        {
+            if (_sharedSitController != null) return _sharedSitController;
+
+            // Try Resources folder first (for builds)
+            _sharedSitController = UnityEngine.Resources.Load<RuntimeAnimatorController>("SitController");
+            if (_sharedSitController != null) return _sharedSitController;
+
+#if UNITY_EDITOR
+            _sharedSitController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
+                "Assets/EXPLORER - Stone Age/Animations/Controllers/Prehistoric_Female_Avatar_Sitting_1.controller");
+#endif
+
+            if (_sharedSitController == null)
+                Debug.LogWarning("[Settler] Sitting animation controller not found — settlers will use idle animation at campfire");
+
+            return _sharedSitController;
+        }
+
+        /// <summary>
+        /// v0.5.11: Load the work animation controller.
+        /// Males: Work_1 (stone chipping). Females: Pray_1 (kneeling as work substitute).
+        /// </summary>
+        private static RuntimeAnimatorController LoadWorkController(bool isMale)
+        {
+            if (isMale)
+            {
+                if (_sharedMaleWorkController != null) return _sharedMaleWorkController;
+
+                _sharedMaleWorkController = UnityEngine.Resources.Load<RuntimeAnimatorController>("MaleWorkController");
+                if (_sharedMaleWorkController != null) return _sharedMaleWorkController;
+
+#if UNITY_EDITOR
+                _sharedMaleWorkController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
+                    "Assets/EXPLORER - Stone Age/Animations/Controllers/Prehistoric_Male_Avatar_Work_1.controller");
+#endif
+                return _sharedMaleWorkController;
+            }
+            else
+            {
+                if (_sharedFemaleWorkController != null) return _sharedFemaleWorkController;
+
+                _sharedFemaleWorkController = UnityEngine.Resources.Load<RuntimeAnimatorController>("FemaleWorkController");
+                if (_sharedFemaleWorkController != null) return _sharedFemaleWorkController;
+
+#if UNITY_EDITOR
+                _sharedFemaleWorkController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
+                    "Assets/EXPLORER - Stone Age/Animations/Controllers/Prehistoric_Female_Avatar_Pray_1.controller");
+#endif
+                return _sharedFemaleWorkController;
+            }
+        }
+
         /// <summary>
         /// Transition to resting at campfire (sleep/idle until dawn).
         /// </summary>
@@ -1864,7 +2105,15 @@ namespace Terranova.Population
             _isMoving = false;
             _state = SettlerState.RestingAtCampfire;
             _stateTimer = 0f;
-            Debug.Log($"[{name}] Resting at campfire (sheltered)");
+
+            // v0.5.10: Claim a seat if we don't have one yet (e.g. settler was idle near campfire)
+            if (_campfireSeatIndex < 0)
+                ClaimCampfireSeat();
+
+            // Face the campfire
+            FaceCampfire();
+
+            Debug.Log($"[{name}] Resting at campfire (sheltered, seat={_campfireSeatIndex})");
         }
 
         /// <summary>Walk to campfire for night shelter.</summary>
@@ -2003,6 +2252,9 @@ namespace Terranova.Population
             _isDeathPending = true;
 
             Debug.Log($"[{name}] DIED of {causeOfDeath}!");
+
+            // v0.5.10: Release campfire seat
+            ReleaseCampfireSeat();
 
             // Release any held resources
             if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
@@ -2155,34 +2407,54 @@ namespace Terranova.Population
         /// <summary>
         /// Show a small colored cube above the settler to indicate carried resource.
         /// </summary>
+        /// <summary>
+        /// v0.5.11: Create a resource-specific cargo visual attached to the settler's hand.
+        /// Uses actual asset prefabs (twigs for wood, small rocks for stone, mushrooms for food).
+        /// </summary>
         private void CreateCargo()
         {
             if (_cargoVisual != null) return;
             if (_currentTask == null) return;
 
-            _cargoVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            _cargoVisual.name = "Cargo";
-            _cargoVisual.transform.SetParent(transform, false);
-            _cargoVisual.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
-            _cargoVisual.transform.localPosition = new Vector3(0f, 1.05f, 0f);
-
-            var col = _cargoVisual.GetComponent<Collider>();
-            if (col != null) Destroy(col);
-
-            Color cargoColor = _currentTask.TaskType switch
+            // Select prefab pool and scale based on task type
+            string[] prefabPool;
+            float minScale, maxScale;
+            switch (_currentTask.TaskType)
             {
-                SettlerTaskType.GatherWood => new Color(0.45f, 0.28f, 0.10f),
-                SettlerTaskType.GatherStone => new Color(0.55f, 0.55f, 0.55f),
-                SettlerTaskType.Hunt => new Color(0.20f, 0.65f, 0.20f),
-                _ => Color.white
-            };
+                case SettlerTaskType.GatherWood:
+                    prefabPool = AssetPrefabRegistry.Twigs;
+                    minScale = 0.3f; maxScale = 0.5f;
+                    break;
+                case SettlerTaskType.GatherStone:
+                    prefabPool = AssetPrefabRegistry.RockSmall;
+                    minScale = 0.15f; maxScale = 0.25f;
+                    break;
+                case SettlerTaskType.Hunt:
+                    prefabPool = AssetPrefabRegistry.Mushrooms;
+                    minScale = 0.2f; maxScale = 0.35f;
+                    break;
+                default:
+                    prefabPool = AssetPrefabRegistry.Twigs;
+                    minScale = 0.2f; maxScale = 0.4f;
+                    break;
+            }
 
-            EnsureSharedMaterial();
-            var renderer = _cargoVisual.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _sharedMaterial;
-            var block = new MaterialPropertyBlock();
-            block.SetColor(ColorID, cargoColor);
-            renderer.SetPropertyBlock(block);
+            // Attach to hand bone if available, otherwise above head
+            Transform cargoParent = _rightHandBone ?? transform;
+            var rng = new System.Random(GetInstanceID() + Time.frameCount);
+            _cargoVisual = AssetPrefabRegistry.InstantiateRandom(
+                prefabPool, cargoParent.position, rng, cargoParent, minScale, maxScale);
+
+            if (_cargoVisual != null)
+            {
+                _cargoVisual.name = "Cargo";
+                _cargoVisual.transform.localPosition = Vector3.zero;
+                _cargoVisual.transform.localRotation = Quaternion.identity;
+
+                // Remove all colliders from cargo
+                foreach (var col in _cargoVisual.GetComponentsInChildren<Collider>())
+                    Destroy(col);
+            }
         }
 
         private void DestroyCargo()
@@ -2373,6 +2645,15 @@ namespace Terranova.Population
                     bool isMale = (_colorIndex % 2 == 0);
                     string walkRes = isMale ? "MaleWalkController" : "FemaleWalkController";
                     _walkController = UnityEngine.Resources.Load<RuntimeAnimatorController>(walkRes);
+
+                    // v0.5.10: Load sitting controller for campfire rest
+                    _sitController = LoadSitController();
+
+                    // v0.5.11: Load work controller for stone/build tasks
+                    _workController = LoadWorkController(isMale);
+
+                    // v0.5.11: Cache hand bone for carrying items
+                    _rightHandBone = _animator.GetBoneTransform(HumanBodyBones.RightHand);
                 }
 
                 // Remove any colliders from the prefab (we add our own)

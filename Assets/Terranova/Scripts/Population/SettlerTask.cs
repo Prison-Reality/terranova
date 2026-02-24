@@ -98,14 +98,14 @@ namespace Terranova.Population
 
         /// <summary>
         /// Default work durations per task type (in game-time seconds).
-        /// Epoch I.1: Twigs and stones are picked up instantly (0s).
+        /// v0.5.11: Stone requires chipping/working (4s). Wood twigs are quick (1s).
         /// </summary>
         public static float GetDefaultDuration(SettlerTaskType type)
         {
             return type switch
             {
-                SettlerTaskType.GatherWood => 0f,   // Pick up twig instantly
-                SettlerTaskType.GatherStone => 0f,   // Pick up stone instantly
+                SettlerTaskType.GatherWood => 1f,    // Quick twig pickup
+                SettlerTaskType.GatherStone => 4f,   // Chip/work the stone
                 SettlerTaskType.Hunt => 6f,
                 SettlerTaskType.Build => 8f,
                 _ => 3f

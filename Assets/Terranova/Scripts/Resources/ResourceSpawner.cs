@@ -44,31 +44,10 @@ namespace Terranova.Resources
 
         private bool _hasSpawned;
 
-        // ─── Cached materials (created once, reused) ───────────────
-
-        private static Material _matBerry;
-        private static Material _matBerryPoison;
-        private static Material _matReeds;
-        private static Material _matResin;
-        private static Material _matClay;
-        private static Material _matFish;
-        private static Material _matInsects;
-        private static Material _matRoots;
-        private static Material _matHoney;
-
         /// <summary>Reset static state when domain reload is disabled.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
-            _matBerry = null;
-            _matBerryPoison = null;
-            _matReeds = null;
-            _matResin = null;
-            _matClay = null;
-            _matFish = null;
-            _matInsects = null;
-            _matRoots = null;
-            _matHoney = null;
         }
 
         // ─── Biome spawn tables ─────────────────────────────────────
@@ -184,8 +163,6 @@ namespace Terranova.Resources
             var biome = GameState.SelectedBiome;
             var rng = new System.Random(GameState.Seed);
             var parent = new GameObject("Resources");
-
-            EnsureMaterials();
 
             int targetCount = _minNodes + rng.Next(_maxNodes - _minNodes + 1);
             var spawnTable = GetSpawnTable(biome);
@@ -383,155 +360,195 @@ namespace Terranova.Resources
         // ─── Visual prop creation ───────────────────────────────────
 
         /// <summary>
-        /// v0.5.2: Create a visible prop GameObject for the given material at the given position.
-        /// Uses Explorer Stoneage prefabs where available, falls back to primitive shapes.
-        ///
-        /// GATHERABLE resources with prefabs:
-        ///   deadwood → Tree_Log / Twigs prefabs
-        ///   river_stone/flint/granite/limestone/sandstone → Rock_Small prefabs
-        /// Other resources keep their previous primitive shapes.
+        /// v0.5.11: Create a visible prop GameObject for the given material at the given position.
+        /// All resources use Explorer Stoneage prefabs — no primitives except berry spheres
+        /// which are explicitly small colored indicator spheres on bush prefabs.
         /// </summary>
         private GameObject CreateResourceProp(
             string materialId, Vector3 position, System.Random rng, Transform parent, BiomeType biome)
         {
-            float sizeVariation = 0.8f + (float)rng.NextDouble() * 0.4f;
-            float yRotation = (float)rng.NextDouble() * 360f;
-
             switch (materialId)
             {
+                // Wood: only small twigs (pickable by hand)
                 case "deadwood":
                     return CreatePrefabResourceProp(
-                        rng.Next(3) == 0 ? APR.Twigs : APR.TreeLogs,
+                        APR.Twigs,
                         position, rng, parent, biome == BiomeType.Coast ? "Driftwood" : "Deadwood",
                         0.6f, 1.0f);
 
+                // Stone variants: small rock prefabs
                 case "river_stone":
                 case "sandstone":
                     return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Stone", 0.5f, 0.8f);
-
                 case "flint":
                     return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Flint", 0.4f, 0.7f);
-
                 case "granite":
                     return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Granite", 0.6f, 0.9f);
-
                 case "limestone":
                     return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, "Limestone", 0.5f, 0.8f);
 
+                // Berry bushes: asset bush + small colored sphere berries
                 case "berries_safe":
-                    return CreateBerryProp(position, sizeVariation, yRotation, parent, false);
-
+                    return CreateBerryBushProp(position, rng, parent, false);
                 case "berries_poison":
-                    return CreateBerryProp(position, sizeVariation, yRotation, parent, true);
+                    return CreateBerryBushProp(position, rng, parent, true);
 
+                // Vegetation: fern prefabs
                 case "grasses_reeds":
-                    return CreateReedsProp(position, sizeVariation, yRotation, parent);
-
-                case "resin":
-                    return CreateResinProp(position, sizeVariation, parent);
-
-                case "clay":
-                    return CreateClayProp(position, sizeVariation, yRotation, parent);
-
-                case "fish":
-                    return CreateFishProp(position, sizeVariation, parent);
-
-                case "insects":
-                    return CreateInsectsProp(position, sizeVariation, parent);
-
-                case "roots":
-                    return CreateRootsProp(position, sizeVariation, yRotation, parent);
-
-                case "honey":
-                    return CreateHoneyProp(position, sizeVariation, parent);
-
+                    return CreatePrefabResourceProp(APR.Ferns, position, rng, parent, "Reeds", 0.8f, 1.2f);
                 case "plant_fibers":
-                    return CreateReedsProp(position, sizeVariation * 0.7f, yRotation, parent);
+                    return CreatePrefabResourceProp(APR.Ferns, position, rng, parent, "PlantFiber", 0.5f, 0.8f);
+
+                // Organic: mushroom prefabs (resin = amber-like blob near trees)
+                case "resin":
+                    return CreatePrefabResourceProp(APR.Mushrooms, position, rng, parent, "Resin", 0.3f, 0.5f);
+                case "insects":
+                    return CreatePrefabResourceProp(APR.Mushrooms, position, rng, parent, "Insects", 0.15f, 0.25f);
+
+                // Pottery: clay items
+                case "clay":
+                    return CreatePrefabResourceProp(APR.ClayDishes, position, rng, parent, "Clay", 0.5f, 0.8f);
+
+                // Roots: twig-like prop on ground
+                case "roots":
+                    return CreatePrefabResourceProp(APR.Twigs, position, rng, parent, "Roots", 0.4f, 0.7f);
+
+                // Fish: bones near water
+                case "fish":
+                    return CreatePrefabResourceProp(APR.Bones, position, rng, parent, "FishSpot", 0.4f, 0.6f);
+
+                // Honey: clay vase (honey pot)
+                case "honey":
+                    return CreatePrefabResourceProp(APR.ClayVases, position, rng, parent, "Honey", 0.4f, 0.6f);
 
                 default:
-                    return CreateGenericProp(position, sizeVariation, yRotation, parent, materialId);
+                    return CreatePrefabResourceProp(APR.RockSmall, position, rng, parent, materialId, 0.3f, 0.6f);
             }
         }
 
         /// <summary>
-        /// v0.5.2: Create a gatherable resource prop using an Explorer Stoneage prefab.
-        /// Falls back to a simple cube if the prefab can't be loaded.
+        /// v0.5.11: Create a gatherable resource prop using an Explorer Stoneage prefab.
         /// </summary>
         private GameObject CreatePrefabResourceProp(
             string[] prefabPool, Vector3 position, System.Random rng, Transform parent,
             string label, float minScale, float maxScale)
         {
             var go = APR.InstantiateRandom(prefabPool, position, rng, parent, minScale, maxScale);
-            if (go != null)
-            {
-                go.name = label;
-                // Ensure there's a collider for selection
-                if (go.GetComponent<Collider>() == null && go.GetComponentInChildren<Collider>() == null)
-                {
-                    var col = go.AddComponent<BoxCollider>();
-                    col.isTrigger = true;
-                    col.size = new Vector3(0.5f, 0.5f, 0.5f);
-                    col.center = new Vector3(0f, 0.25f, 0f);
-                }
-                else
-                {
-                    // Make existing colliders triggers
-                    foreach (var col in go.GetComponentsInChildren<Collider>())
-                        col.isTrigger = true;
-                }
-                return go;
-            }
+            if (go == null) return null;
 
-            // Fallback: primitive cube
-            float sizeVariation = minScale + (float)rng.NextDouble() * (maxScale - minScale);
-            float yRotation = (float)rng.NextDouble() * 360f;
-            return CreateGenericProp(position, sizeVariation, yRotation, parent, label);
+            go.name = label;
+            if (go.GetComponent<Collider>() == null && go.GetComponentInChildren<Collider>() == null)
+            {
+                var col = go.AddComponent<BoxCollider>();
+                col.isTrigger = true;
+                col.size = new Vector3(0.5f, 0.5f, 0.5f);
+                col.center = new Vector3(0f, 0.25f, 0f);
+            }
+            else
+            {
+                foreach (var col in go.GetComponentsInChildren<Collider>())
+                    col.isTrigger = true;
+            }
+            return go;
         }
 
-        // ─── Individual prop builders ───────────────────────────────
+        // ─── Berry bush (asset bush + colored sphere berries) ─────
 
-        /// <summary>Berry bush: small green sphere with red/dark top spheres.</summary>
-        private GameObject CreateBerryProp(Vector3 pos, float scale, float yRot, Transform parent, bool poisonous)
+        // One berry color per bush type (Bush_1 through Bush_13)
+        private static readonly Color[] SafeBerryColors = {
+            new Color(0.85f, 0.15f, 0.15f),  // Bush_1: Red
+            new Color(0.20f, 0.20f, 0.80f),  // Bush_2: Blue
+            new Color(0.65f, 0.15f, 0.55f),  // Bush_3: Purple
+            new Color(0.90f, 0.50f, 0.10f),  // Bush_4: Orange
+            new Color(0.85f, 0.35f, 0.55f),  // Bush_5: Pink
+            new Color(0.85f, 0.75f, 0.10f),  // Bush_6: Yellow
+            new Color(0.60f, 0.10f, 0.10f),  // Bush_7: Dark Red
+            new Color(0.10f, 0.65f, 0.55f),  // Bush_8: Teal
+            new Color(0.75f, 0.15f, 0.45f),  // Bush_9: Magenta
+            new Color(0.80f, 0.65f, 0.10f),  // Bush_10: Gold
+            new Color(0.70f, 0.10f, 0.20f),  // Bush_11: Crimson
+            new Color(0.90f, 0.40f, 0.30f),  // Bush_12: Coral
+            new Color(0.50f, 0.20f, 0.50f),  // Bush_13: Plum
+        };
+
+        private static readonly Color[] PoisonBerryColors = {
+            new Color(0.35f, 0.08f, 0.35f),  // Dark purple
+            new Color(0.20f, 0.20f, 0.20f),  // Near black
+            new Color(0.45f, 0.08f, 0.25f),  // Dark magenta
+        };
+
+        /// <summary>
+        /// v0.5.11: Berry bush using asset Bush prefab with small colored sphere berries.
+        /// Each bush type (Bush_1..Bush_13) has a unique berry color.
+        /// </summary>
+        private GameObject CreateBerryBushProp(Vector3 pos, System.Random rng, Transform parent, bool poisonous)
         {
-            var go = new GameObject(poisonous ? "PoisonBerry" : "BerryBush");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
+            // Pick a random bush from the asset pack
+            string[] pool = APR.Bushes;
+            string chosen = pool[rng.Next(pool.Length)];
+            var prefab = APR.LoadPrefab(chosen);
+            if (prefab == null) return null;
 
-            // Bush body (flattened sphere)
-            var body = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            body.name = "Body";
-            body.transform.SetParent(go.transform, false);
-            float r = 0.35f * scale;
-            body.transform.localScale = new Vector3(r * 2f, r * 1.2f, r * 2f);
-            body.transform.localPosition = new Vector3(0f, r * 0.6f, 0f);
+            var go = Object.Instantiate(prefab, pos,
+                Quaternion.Euler(0f, (float)(rng.NextDouble() * 360.0), 0f), parent);
+            float scale = 0.7f + (float)(rng.NextDouble() * 0.4f);
+            go.transform.localScale = prefab.transform.localScale * scale;
+            go.name = poisonous ? "PoisonBerry" : "BerryBush";
 
-            // Green bush material for both types (bush body is always green)
-            body.GetComponent<MeshRenderer>().sharedMaterial =
-                TerrainShaderLibrary.CreateFoliageMaterial("BushBody_Mat",
-                    new Color(0.18f, 0.50f, 0.12f), 0.38f, 0.07f, 1.4f);
-            var bodyCol = body.GetComponent<Collider>();
-            if (bodyCol != null) bodyCol.isTrigger = true;
+            TerrainShaderLibrary.ReplaceWithURPMaterials(go);
 
-            // Berry spheres on top
-            Material berryMat = poisonous ? _matBerryPoison : _matBerry;
-            float berrySize = 0.10f * scale;
-            float berryY = r * 1.0f;
-            Vector3[] berryOffsets =
+            // Make existing colliders triggers
+            foreach (var col in go.GetComponentsInChildren<Collider>())
+                col.isTrigger = true;
+            if (go.GetComponent<Collider>() == null && go.GetComponentInChildren<Collider>() == null)
             {
-                new Vector3(0.12f, berryY, 0.08f),
-                new Vector3(-0.08f, berryY, 0.12f),
-                new Vector3(0.04f, berryY, -0.12f)
-            };
+                var col = go.AddComponent<BoxCollider>();
+                col.isTrigger = true;
+                col.size = new Vector3(0.6f, 0.6f, 0.6f);
+                col.center = new Vector3(0f, 0.3f, 0f);
+            }
 
-            for (int b = 0; b < berryOffsets.Length; b++)
+            // Determine berry color from bush type number
+            Color berryColor;
+            if (poisonous)
+            {
+                berryColor = PoisonBerryColors[rng.Next(PoisonBerryColors.Length)];
+            }
+            else
+            {
+                // Extract bush type number from path (e.g. "Bush_5A" → 5)
+                int bushType = ExtractBushTypeNumber(chosen);
+                int colorIdx = Mathf.Clamp(bushType - 1, 0, SafeBerryColors.Length - 1);
+                berryColor = SafeBerryColors[colorIdx];
+            }
+
+            // Create berry material
+            Material berryMat = poisonous
+                ? TerrainShaderLibrary.CreateEmissivePropMaterial("PoisonBerry_" + berryColor.GetHashCode(),
+                    berryColor, berryColor * 0.3f, 0.35f)
+                : TerrainShaderLibrary.CreateEmissivePropMaterial("Berry_" + berryColor.GetHashCode(),
+                    berryColor, berryColor * 0.3f, 0.35f);
+
+            // Attach 4-6 small berry spheres around the bush top
+            int berryCount = 4 + rng.Next(3);
+            float berrySize = 0.06f;
+            for (int b = 0; b < berryCount; b++)
             {
                 var berry = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 berry.name = $"Berry_{b}";
                 berry.transform.SetParent(go.transform, false);
                 berry.transform.localScale = new Vector3(berrySize, berrySize, berrySize);
-                berry.transform.localPosition = berryOffsets[b];
-                if (berryMat != null)
-                    berry.GetComponent<MeshRenderer>().sharedMaterial = berryMat;
+
+                // Position berries around the bush crown
+                float angle = (b / (float)berryCount) * Mathf.PI * 2f;
+                float radius = 0.15f + (float)rng.NextDouble() * 0.1f;
+                float height = 0.25f + (float)rng.NextDouble() * 0.15f;
+                berry.transform.localPosition = new Vector3(
+                    Mathf.Cos(angle) * radius,
+                    height,
+                    Mathf.Sin(angle) * radius);
+
+                berry.GetComponent<MeshRenderer>().sharedMaterial = berryMat;
                 var berryCol = berry.GetComponent<Collider>();
                 if (berryCol != null) Object.Destroy(berryCol);
             }
@@ -539,228 +556,19 @@ namespace Terranova.Resources
             return go;
         }
 
-        /// <summary>Reeds: thin green cylinder.</summary>
-        private GameObject CreateReedsProp(Vector3 pos, float scale, float yRot, Transform parent)
+        /// <summary>Extract bush type number from prefab path (e.g. "Bush_5A" → 5).</summary>
+        private static int ExtractBushTypeNumber(string prefabPath)
         {
-            var go = new GameObject("Reeds");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-            // Cluster of 3 thin cylinders
-            for (int i = 0; i < 3; i++)
-            {
-                var cyl = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-                cyl.name = $"Reed_{i}";
-                cyl.transform.SetParent(go.transform, false);
-                float h = (0.5f + i * 0.15f) * scale;
-                float r = 0.03f * scale;
-                cyl.transform.localScale = new Vector3(r, h * 0.5f, r);
-                float offset = (i - 1) * 0.08f;
-                cyl.transform.localPosition = new Vector3(offset, h * 0.5f, offset * 0.5f);
-                // Slight lean
-                cyl.transform.localRotation = Quaternion.Euler((i - 1) * 5f, 0f, (i - 1) * 3f);
-
-                if (_matReeds != null)
-                    cyl.GetComponent<MeshRenderer>().sharedMaterial = _matReeds;
-
-                var col = cyl.GetComponent<Collider>();
-                if (col != null) col.isTrigger = true;
-            }
-
-            return go;
+            // Path like "Vegetation/Plants/Bush_5A" → get "Bush_5A" → extract number after "Bush_"
+            int bushIdx = prefabPath.LastIndexOf("Bush_");
+            if (bushIdx < 0) return 1;
+            string suffix = prefabPath.Substring(bushIdx + 5); // "5A", "12B", etc.
+            int num = 0;
+            for (int i = 0; i < suffix.Length && char.IsDigit(suffix[i]); i++)
+                num = num * 10 + (suffix[i] - '0');
+            return num > 0 ? num : 1;
         }
 
-        /// <summary>Resin: small amber sphere on tree surface.</summary>
-        private GameObject CreateResinProp(Vector3 pos, float scale, Transform parent)
-        {
-            var go = new GameObject("Resin");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "Mesh";
-            sphere.transform.SetParent(go.transform, false);
-            float r = 0.15f * scale;
-            sphere.transform.localScale = new Vector3(r, r, r);
-            sphere.transform.localPosition = new Vector3(0f, r * 0.5f, 0f);
-
-            if (_matResin != null)
-                sphere.GetComponent<MeshRenderer>().sharedMaterial = _matResin;
-
-            var col = sphere.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Clay: flat brown cylinder near water.</summary>
-        private GameObject CreateClayProp(Vector3 pos, float scale, float yRot, Transform parent)
-        {
-            var go = new GameObject("Clay");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-            var cyl = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            cyl.name = "Mesh";
-            cyl.transform.SetParent(go.transform, false);
-            float r = 0.4f * scale;
-            float h = 0.1f * scale;
-            cyl.transform.localScale = new Vector3(r, h, r);
-            cyl.transform.localPosition = new Vector3(0f, h * 0.3f, 0f);
-
-            if (_matClay != null)
-                cyl.GetComponent<MeshRenderer>().sharedMaterial = _matClay;
-
-            var col = cyl.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Fish spot: blue shimmer sphere near water.</summary>
-        private GameObject CreateFishProp(Vector3 pos, float scale, Transform parent)
-        {
-            var go = new GameObject("FishSpot");
-            go.transform.SetParent(parent);
-            // Fish spots sit slightly lower (at water level)
-            go.transform.position = pos + new Vector3(0f, -0.1f, 0f);
-
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "Mesh";
-            sphere.transform.SetParent(go.transform, false);
-            float r = 0.3f * scale;
-            sphere.transform.localScale = new Vector3(r, r * 0.5f, r);
-            sphere.transform.localPosition = new Vector3(0f, 0.05f, 0f);
-
-            if (_matFish != null)
-                sphere.GetComponent<MeshRenderer>().sharedMaterial = _matFish;
-
-            var col = sphere.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Insects: tiny brown sphere.</summary>
-        private GameObject CreateInsectsProp(Vector3 pos, float scale, Transform parent)
-        {
-            var go = new GameObject("Insects");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "Mesh";
-            sphere.transform.SetParent(go.transform, false);
-            float r = 0.08f * scale;
-            sphere.transform.localScale = new Vector3(r, r, r);
-            sphere.transform.localPosition = new Vector3(0f, r * 0.5f, 0f);
-
-            if (_matInsects != null)
-                sphere.GetComponent<MeshRenderer>().sharedMaterial = _matInsects;
-
-            var col = sphere.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Roots: brown elongated cube near water.</summary>
-        private GameObject CreateRootsProp(Vector3 pos, float scale, float yRot, Transform parent)
-        {
-            var go = new GameObject("Roots");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "Mesh";
-            cube.transform.SetParent(go.transform, false);
-            float length = 0.4f * scale;
-            float height = 0.08f * scale;
-            float width = 0.1f * scale;
-            cube.transform.localScale = new Vector3(length, height, width);
-            cube.transform.localPosition = new Vector3(0f, height * 0.3f, 0f);
-            // Roots twist slightly
-            cube.transform.localRotation = Quaternion.Euler(5f, 0f, 8f);
-
-            if (_matRoots != null)
-                cube.GetComponent<MeshRenderer>().sharedMaterial = _matRoots;
-
-            var col = cube.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Honey: golden sphere in forest areas.</summary>
-        private GameObject CreateHoneyProp(Vector3 pos, float scale, Transform parent)
-        {
-            var go = new GameObject("Honey");
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "Mesh";
-            sphere.transform.SetParent(go.transform, false);
-            float r = 0.18f * scale;
-            sphere.transform.localScale = new Vector3(r, r * 0.8f, r);
-            sphere.transform.localPosition = new Vector3(0f, r * 0.5f + 0.3f, 0f); // elevated (on tree)
-
-            if (_matHoney != null)
-                sphere.GetComponent<MeshRenderer>().sharedMaterial = _matHoney;
-
-            var col = sphere.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        /// <summary>Fallback generic prop: small grey cube.</summary>
-        private GameObject CreateGenericProp(Vector3 pos, float scale, float yRot, Transform parent, string name)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent);
-            go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "Mesh";
-            cube.transform.SetParent(go.transform, false);
-            float sz = 0.25f * scale;
-            cube.transform.localScale = new Vector3(sz, sz, sz);
-            cube.transform.localPosition = new Vector3(0f, sz * 0.5f, 0f);
-
-            var col = cube.GetComponent<Collider>();
-            if (col != null) col.isTrigger = true;
-
-            return go;
-        }
-
-        // ─── Material setup (v0.5.1: uses TerrainShaderLibrary) ────
-
-        private static void EnsureMaterials()
-        {
-            if (_matBerry != null) return;
-
-            // Berries: emissive red/purple glow so visible from distance
-            _matBerry       = TerrainShaderLibrary.CreateEmissivePropMaterial("Berry_Mat",
-                new Color(0.80f, 0.20f, 0.20f), new Color(0.25f, 0.03f, 0.03f), 0.35f);
-            _matBerryPoison = TerrainShaderLibrary.CreateEmissivePropMaterial("BerryPoison_Mat",
-                new Color(0.45f, 0.10f, 0.35f), new Color(0.12f, 0.02f, 0.08f), 0.35f);
-
-            // Vegetation: foliage shader with wind
-            _matReeds     = TerrainShaderLibrary.CreateFoliageMaterial("Reeds_Mat", new Color(0.30f, 0.55f, 0.20f), 0.25f, 0.15f, 2.0f);
-
-            // Organic resources: standard prop lit
-            _matResin     = TerrainShaderLibrary.CreatePropMaterial("Resin_Mat",   new Color(0.80f, 0.60f, 0.20f), 0.5f);
-            _matClay      = TerrainShaderLibrary.CreatePropMaterial("Clay_Mat",    new Color(0.55f, 0.35f, 0.20f), 0.1f);
-            _matFish      = TerrainShaderLibrary.CreatePropMaterial("Fish_Mat",    new Color(0.20f, 0.50f, 0.80f), 0.6f);
-            _matInsects   = TerrainShaderLibrary.CreatePropMaterial("Insects_Mat", new Color(0.40f, 0.30f, 0.15f), 0.1f);
-            _matRoots     = TerrainShaderLibrary.CreateWoodMaterial("Roots_Mat",   new Color(0.45f, 0.30f, 0.18f));
-            _matHoney     = TerrainShaderLibrary.CreateEmissivePropMaterial("Honey_Mat",
-                new Color(0.85f, 0.65f, 0.10f), new Color(0.15f, 0.10f, 0.0f), 0.5f);
-        }
+        // v0.5.11: All cached material fields removed — prefabs carry their own materials.
     }
 }

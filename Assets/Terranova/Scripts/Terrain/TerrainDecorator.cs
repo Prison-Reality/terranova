@@ -177,7 +177,7 @@ namespace Terranova.Terrain
             switch (biome)
             {
                 case BiomeType.Forest:
-                    count = 200 + rng.Next(51); // 200-250: very dense forest
+                    count = 400 + rng.Next(101); // 400-500: extremely dense forest
                     // Mix pine and deciduous trees
                     pool = new string[AssetPrefabRegistry.PineTrees.Length + AssetPrefabRegistry.DeciduousTrees.Length];
                     AssetPrefabRegistry.PineTrees.CopyTo(pool, 0);
@@ -236,7 +236,7 @@ namespace Terranova.Terrain
             switch (biome)
             {
                 case BiomeType.Forest:
-                    count = 80 + rng.Next(41); // 80-120: very dense undergrowth
+                    count = 160 + rng.Next(81); // 160-240: extremely dense undergrowth
                     pool = AssetPrefabRegistry.Bushes;
                     break;
                 case BiomeType.Mountains:
@@ -297,7 +297,7 @@ namespace Terranova.Terrain
             int count;
             switch (biome)
             {
-                case BiomeType.Forest: count = 30 + rng.Next(11); break; // 30-40
+                case BiomeType.Forest: count = 60 + rng.Next(21); break; // 60-80
                 case BiomeType.Coast:  count = 10 + rng.Next(6); break; // 10-15 (as reeds near water)
                 default:               count = 5; break;
             }
@@ -336,7 +336,7 @@ namespace Terranova.Terrain
         {
             if (biome != BiomeType.Forest) return;
 
-            int count = 40 + rng.Next(21); // 40-60: scattered wildflowers
+            int count = 80 + rng.Next(41); // 80-120: dense wildflowers
             _flowerContainer = new GameObject("Flowers");
             _flowerContainer.transform.SetParent(parent, false);
 
@@ -385,7 +385,7 @@ namespace Terranova.Terrain
             int count;
             switch (biome)
             {
-                case BiomeType.Forest: count = 50 + rng.Next(21); break; // 50-70
+                case BiomeType.Forest: count = 100 + rng.Next(41); break; // 100-140
                 case BiomeType.Coast:  count = 5 + rng.Next(4);   break; // 5-8
                 default: return;
             }
