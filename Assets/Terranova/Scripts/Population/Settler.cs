@@ -176,6 +176,8 @@ namespace Terranova.Population
             _totalFoodDelivered = 0;
             _sharedMaterial = null;
             _sharedSitController = null;
+            _sharedMaleWorkController = null;
+            _sharedFemaleWorkController = null;
             for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++) _campfireSeats[i] = false;
         }
 
@@ -377,9 +379,14 @@ namespace Terranova.Population
         private RuntimeAnimatorController _idleController;  // Original idle controller from prefab
         private RuntimeAnimatorController _walkController;  // Walk controller loaded from Resources
         private RuntimeAnimatorController _sitController;   // v0.5.10: Sitting controller for campfire rest
+        private RuntimeAnimatorController _workController;  // v0.5.11: Work controller for stone/build
         private bool _isPlayingWalk; // Track current animation state
         private bool _isPlayingSit;  // v0.5.10: Track sitting animation state
+        private bool _isPlayingWork; // v0.5.11: Track work animation state
+        private Transform _rightHandBone;                  // v0.5.11: Hand bone for carrying items
         private static RuntimeAnimatorController _sharedSitController; // Shared across all settlers
+        private static RuntimeAnimatorController _sharedMaleWorkController;
+        private static RuntimeAnimatorController _sharedFemaleWorkController;
         private int _colorIndex;
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
@@ -720,6 +727,7 @@ namespace Terranova.Population
 
             bool isMoving = _agent != null && _agent.velocity.sqrMagnitude > 0.1f;
             bool shouldSit = _state == SettlerState.RestingAtCampfire && !isMoving;
+            bool shouldWork = _state == SettlerState.Working && !isMoving;
 
             // v0.5.10: Sitting animation for campfire rest
             if (shouldSit && !_isPlayingSit && _sitController != null)
@@ -727,13 +735,27 @@ namespace Terranova.Population
                 _animator.runtimeAnimatorController = _sitController;
                 _isPlayingSit = true;
                 _isPlayingWalk = false;
+                _isPlayingWork = false;
+            }
+            // v0.5.11: Work animation for stone/build tasks
+            else if (shouldWork && !_isPlayingWork && _workController != null)
+            {
+                _animator.runtimeAnimatorController = _workController;
+                _isPlayingWork = true;
+                _isPlayingWalk = false;
+                _isPlayingSit = false;
             }
             else if (!shouldSit && _isPlayingSit)
             {
                 _animator.runtimeAnimatorController = _idleController;
                 _isPlayingSit = false;
             }
-            else if (!shouldSit)
+            else if (!shouldWork && _isPlayingWork)
+            {
+                _animator.runtimeAnimatorController = _idleController;
+                _isPlayingWork = false;
+            }
+            else if (!shouldSit && !shouldWork)
             {
                 if (isMoving && !_isPlayingWalk && _walkController != null)
                 {
@@ -2041,6 +2063,40 @@ namespace Terranova.Population
         }
 
         /// <summary>
+        /// v0.5.11: Load the work animation controller.
+        /// Males: Work_1 (stone chipping). Females: Pray_1 (kneeling as work substitute).
+        /// </summary>
+        private static RuntimeAnimatorController LoadWorkController(bool isMale)
+        {
+            if (isMale)
+            {
+                if (_sharedMaleWorkController != null) return _sharedMaleWorkController;
+
+                _sharedMaleWorkController = UnityEngine.Resources.Load<RuntimeAnimatorController>("MaleWorkController");
+                if (_sharedMaleWorkController != null) return _sharedMaleWorkController;
+
+#if UNITY_EDITOR
+                _sharedMaleWorkController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
+                    "Assets/EXPLORER - Stone Age/Animations/Controllers/Prehistoric_Male_Avatar_Work_1.controller");
+#endif
+                return _sharedMaleWorkController;
+            }
+            else
+            {
+                if (_sharedFemaleWorkController != null) return _sharedFemaleWorkController;
+
+                _sharedFemaleWorkController = UnityEngine.Resources.Load<RuntimeAnimatorController>("FemaleWorkController");
+                if (_sharedFemaleWorkController != null) return _sharedFemaleWorkController;
+
+#if UNITY_EDITOR
+                _sharedFemaleWorkController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(
+                    "Assets/EXPLORER - Stone Age/Animations/Controllers/Prehistoric_Female_Avatar_Pray_1.controller");
+#endif
+                return _sharedFemaleWorkController;
+            }
+        }
+
+        /// <summary>
         /// Transition to resting at campfire (sleep/idle until dawn).
         /// </summary>
         private void StartRestingAtCampfire()
@@ -2351,34 +2407,54 @@ namespace Terranova.Population
         /// <summary>
         /// Show a small colored cube above the settler to indicate carried resource.
         /// </summary>
+        /// <summary>
+        /// v0.5.11: Create a resource-specific cargo visual attached to the settler's hand.
+        /// Uses actual asset prefabs (twigs for wood, small rocks for stone, mushrooms for food).
+        /// </summary>
         private void CreateCargo()
         {
             if (_cargoVisual != null) return;
             if (_currentTask == null) return;
 
-            _cargoVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            _cargoVisual.name = "Cargo";
-            _cargoVisual.transform.SetParent(transform, false);
-            _cargoVisual.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
-            _cargoVisual.transform.localPosition = new Vector3(0f, 1.05f, 0f);
-
-            var col = _cargoVisual.GetComponent<Collider>();
-            if (col != null) Destroy(col);
-
-            Color cargoColor = _currentTask.TaskType switch
+            // Select prefab pool and scale based on task type
+            string[] prefabPool;
+            float minScale, maxScale;
+            switch (_currentTask.TaskType)
             {
-                SettlerTaskType.GatherWood => new Color(0.45f, 0.28f, 0.10f),
-                SettlerTaskType.GatherStone => new Color(0.55f, 0.55f, 0.55f),
-                SettlerTaskType.Hunt => new Color(0.20f, 0.65f, 0.20f),
-                _ => Color.white
-            };
+                case SettlerTaskType.GatherWood:
+                    prefabPool = AssetPrefabRegistry.Twigs;
+                    minScale = 0.3f; maxScale = 0.5f;
+                    break;
+                case SettlerTaskType.GatherStone:
+                    prefabPool = AssetPrefabRegistry.RockSmall;
+                    minScale = 0.15f; maxScale = 0.25f;
+                    break;
+                case SettlerTaskType.Hunt:
+                    prefabPool = AssetPrefabRegistry.Mushrooms;
+                    minScale = 0.2f; maxScale = 0.35f;
+                    break;
+                default:
+                    prefabPool = AssetPrefabRegistry.Twigs;
+                    minScale = 0.2f; maxScale = 0.4f;
+                    break;
+            }
 
-            EnsureSharedMaterial();
-            var renderer = _cargoVisual.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = _sharedMaterial;
-            var block = new MaterialPropertyBlock();
-            block.SetColor(ColorID, cargoColor);
-            renderer.SetPropertyBlock(block);
+            // Attach to hand bone if available, otherwise above head
+            Transform cargoParent = _rightHandBone ?? transform;
+            var rng = new System.Random(GetInstanceID() + Time.frameCount);
+            _cargoVisual = AssetPrefabRegistry.InstantiateRandom(
+                prefabPool, cargoParent.position, rng, cargoParent, minScale, maxScale);
+
+            if (_cargoVisual != null)
+            {
+                _cargoVisual.name = "Cargo";
+                _cargoVisual.transform.localPosition = Vector3.zero;
+                _cargoVisual.transform.localRotation = Quaternion.identity;
+
+                // Remove all colliders from cargo
+                foreach (var col in _cargoVisual.GetComponentsInChildren<Collider>())
+                    Destroy(col);
+            }
         }
 
         private void DestroyCargo()
@@ -2572,6 +2648,12 @@ namespace Terranova.Population
 
                     // v0.5.10: Load sitting controller for campfire rest
                     _sitController = LoadSitController();
+
+                    // v0.5.11: Load work controller for stone/build tasks
+                    _workController = LoadWorkController(isMale);
+
+                    // v0.5.11: Cache hand bone for carrying items
+                    _rightHandBone = _animator.GetBoneTransform(HumanBodyBones.RightHand);
                 }
 
                 // Remove any colliders from the prefab (we add our own)
