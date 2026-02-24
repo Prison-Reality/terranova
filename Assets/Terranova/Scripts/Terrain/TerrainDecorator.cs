@@ -34,6 +34,9 @@ namespace Terranova.Terrain
         // v0.5.8: Flower container reference for spring-only visibility
         private GameObject _flowerContainer;
 
+        // v0.5.12: Rare mix pool for forest biome (1-in-50 trees from alternate type)
+        private string[] _forestMixPool;
+
         private void OnEnable()
         {
             EventBus.Subscribe<SeasonChangedEvent>(OnSeasonChanged);
@@ -178,10 +181,12 @@ namespace Terranova.Terrain
             {
                 case BiomeType.Forest:
                     count = 400 + rng.Next(101); // 400-500: extremely dense forest
-                    // Mix pine and deciduous trees
-                    pool = new string[AssetPrefabRegistry.PineTrees.Length + AssetPrefabRegistry.DeciduousTrees.Length];
-                    AssetPrefabRegistry.PineTrees.CopyTo(pool, 0);
-                    AssetPrefabRegistry.DeciduousTrees.CopyTo(pool, AssetPrefabRegistry.PineTrees.Length);
+                    // v0.5.12: Realistic forest — primarily one tree type per seed.
+                    // Seed determines if this is a deciduous or coniferous forest.
+                    // Only 1 in 50 trees may be of the other kind.
+                    bool isConiferous = (rng.Next(2) == 0);
+                    pool = isConiferous ? AssetPrefabRegistry.PineTrees : AssetPrefabRegistry.DeciduousTrees;
+                    _forestMixPool = isConiferous ? AssetPrefabRegistry.DeciduousTrees : AssetPrefabRegistry.PineTrees;
                     minCampDist = 12f; // larger clearing around campfire
                     break;
                 case BiomeType.Mountains:
@@ -213,7 +218,9 @@ namespace Terranova.Terrain
                 if (!TryFindPosition(world, rng, campX, campZ, minCampDist, out Vector3 pos))
                     continue;
 
-                var tree = AssetPrefabRegistry.InstantiateRandom(pool, pos, rng, treeContainer.transform, 0.8f, 1.2f);
+                // v0.5.12: 1-in-50 chance to use the alternate tree type for natural forest diversity
+                string[] treePool = (_forestMixPool != null && rng.Next(50) == 0) ? _forestMixPool : pool;
+                var tree = AssetPrefabRegistry.InstantiateRandom(treePool, pos, rng, treeContainer.transform, 0.8f, 1.2f);
                 if (tree != null)
                 {
                     tree.name = "Tree";
