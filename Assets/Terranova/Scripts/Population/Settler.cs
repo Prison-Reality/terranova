@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.UI;
@@ -550,12 +551,14 @@ namespace Terranova.Population
         /// </summary>
         private bool CanPerformTask(SettlerTaskType taskType)
         {
-            // v0.5.12: Without an axe, settlers can only collect sticks (GatherWood),
-            // drink water, seek food/shelter. An axe enables stone gathering, building, etc.
+            // v0.5.12: Without an axe, settlers can collect sticks (GatherWood),
+            // pick up small stones (GatherStone — ≤30cm diameter only),
+            // drink water, seek food/shelter. An axe enables building, crafting, etc.
             if (_equippedTool != null) return true; // With any tool, all tasks available
 
-            // Toolless: survival tasks + stick collection only
+            // Toolless: survival tasks + stick/small stone collection
             return taskType == SettlerTaskType.GatherWood
+                || taskType == SettlerTaskType.GatherStone  // Small stones only (≤30cm)
                 || taskType == SettlerTaskType.DrinkWater
                 || taskType == SettlerTaskType.SeekFood
                 || taskType == SettlerTaskType.SeekShelter
