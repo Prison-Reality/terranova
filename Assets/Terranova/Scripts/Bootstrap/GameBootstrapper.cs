@@ -90,6 +90,7 @@ namespace Terranova.Core
             EnsureSeasonManager(); // Feature 10: Seasons
             EnsureOrderSystem(); // Feature 7: Order grammar & Klappbuch
             EnsureChronicle(); // v0.5.10 Feature 12: Tribal Chronicle
+            EnsureResourceStockpile(); // v0.5.12: Visual stockpile near campfire
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
@@ -444,6 +445,17 @@ namespace Terranova.Core
                 hud.gameObject.AddComponent<ChronicleUI>();
 
             Debug.Log("GameBootstrapper: Created Chronicle (ChronicleManager, ChronicleUI).");
+        }
+
+        /// <summary>v0.5.12: Visual resource stockpiles near campfire.</summary>
+        private static void EnsureResourceStockpile()
+        {
+            if (ResourceStockpileManager.Instance != null)
+                return;
+
+            var go = new GameObject("ResourceStockpile");
+            go.AddComponent<ResourceStockpileManager>();
+            Debug.Log("GameBootstrapper: Created ResourceStockpileManager.");
         }
 
         /// <summary>
