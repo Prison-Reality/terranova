@@ -168,14 +168,27 @@ namespace Terranova.Population
         private static int _totalStoneDelivered;
         private static int _totalFoodDelivered;
 
-        // v0.5.12: Wood pile system — sticks drop at fixed spot, become Wood_Pile_1C after 5
-        private const int STICKS_PER_WOOD_PILE = 5;
-        private const float STICK_DROP_OFFSET = 3.0f; // Distance from campfire center
-        private static int _stickDropCount;
-        private static readonly List<GameObject> _droppedSticks = new();
-        private static GameObject _woodPile;
-        private static Vector3 _stickDropPosition;
-        private static bool _stickDropPositionSet;
+        // v0.5.12: Resource stockpile system — resources drop at fixed spots near campfire
+        private const int ITEMS_PER_PILE = 5;
+        private const float DROP_OFFSET = 3.0f; // Distance from campfire center
+
+        // Wood stockpile (East of campfire)
+        private static int _woodDropCount;
+        private static int _woodPileCount;
+        private static readonly List<GameObject> _droppedWoodItems = new();
+        private static readonly List<GameObject> _woodPiles = new();
+
+        // Stone stockpile (South of campfire)
+        private static int _stoneDropCount;
+        private static int _stonePileCount;
+        private static readonly List<GameObject> _droppedStoneItems = new();
+
+        // Food stockpile (West of campfire)
+        private static int _foodDropCount;
+        private static readonly List<GameObject> _droppedFoodItems = new();
+
+        private static Vector3 _woodDropPos, _stoneDropPos, _foodDropPos;
+        private static bool _dropPositionsSet;
 
         /// <summary>Reset static state when domain reload is disabled.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -188,10 +201,12 @@ namespace Terranova.Population
             _sharedSitController = null;
             _sharedMaleWorkController = null;
             _sharedFemaleWorkController = null;
-            _stickDropCount = 0;
-            _droppedSticks.Clear();
-            _woodPile = null;
-            _stickDropPositionSet = false;
+            _woodDropCount = 0; _woodPileCount = 0;
+            _stoneDropCount = 0; _stonePileCount = 0;
+            _foodDropCount = 0;
+            _droppedWoodItems.Clear(); _woodPiles.Clear();
+            _droppedStoneItems.Clear(); _droppedFoodItems.Clear();
+            _dropPositionsSet = false;
             for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++) _campfireSeats[i] = false;
         }
 
@@ -1075,9 +1090,8 @@ namespace Terranova.Population
             {
                 string resourceName = TrackDelivery(_currentTask.TaskType);
 
-                // v0.5.12: Drop sticks at fixed location for wood deliveries
-                if (_currentTask.TaskType == SettlerTaskType.GatherWood)
-                    DropStickAtCampfire();
+                // v0.5.12: Drop resource at fixed stockpile location near campfire
+                DropResourceAtCampfire(_currentTask.TaskType);
 
                 // XP bonus on delivery (Curious trait: +20% XP)
                 float xpGain = 10f;
@@ -2350,93 +2364,169 @@ namespace Terranova.Population
             }
         }
 
-        // ─── v0.5.12: Wood Pile System ──────────────────────────────
+        // ─── v0.5.12: Resource Stockpile System ─────────────────────
 
         /// <summary>
-        /// Get the fixed stick drop position near the campfire.
-        /// Calculated once and reused for all settlers.
+        /// Initialize the three fixed drop positions around the campfire.
+        /// Wood=East, Stone=South, Food=West.
         /// </summary>
-        private Vector3 GetStickDropPosition()
+        private void EnsureDropPositions()
         {
-            if (!_stickDropPositionSet)
-            {
-                // Fixed position offset from campfire (East side)
-                _stickDropPosition = new Vector3(
-                    _campfirePosition.x + STICK_DROP_OFFSET,
-                    _campfirePosition.y,
-                    _campfirePosition.z);
+            if (_dropPositionsSet) return;
 
-                // Sample NavMesh height at drop position for correct Y
-                var world = WorldManager.Instance;
-                if (world != null)
-                    _stickDropPosition.y = world.GetSmoothedHeightAtWorldPos(
-                        _stickDropPosition.x, _stickDropPosition.z);
+            var world = WorldManager.Instance;
 
-                _stickDropPositionSet = true;
-            }
-            return _stickDropPosition;
+            // Wood: East of campfire
+            _woodDropPos = _campfirePosition + new Vector3(DROP_OFFSET, 0f, 0f);
+            if (world != null)
+                _woodDropPos.y = world.GetSmoothedHeightAtWorldPos(_woodDropPos.x, _woodDropPos.z);
+
+            // Stone: South of campfire
+            _stoneDropPos = _campfirePosition + new Vector3(0f, 0f, -DROP_OFFSET);
+            if (world != null)
+                _stoneDropPos.y = world.GetSmoothedHeightAtWorldPos(_stoneDropPos.x, _stoneDropPos.z);
+
+            // Food: West of campfire
+            _foodDropPos = _campfirePosition + new Vector3(-DROP_OFFSET, 0f, 0f);
+            if (world != null)
+                _foodDropPos.y = world.GetSmoothedHeightAtWorldPos(_foodDropPos.x, _foodDropPos.z);
+
+            _dropPositionsSet = true;
         }
 
         /// <summary>
-        /// v0.5.12: Drop a stick at the fixed drop location near the campfire.
-        /// After STICKS_PER_WOOD_PILE sticks, replace them all with a Wood_Pile_1C prop.
+        /// Drop a visual resource item at the appropriate stockpile near the campfire.
+        /// After ITEMS_PER_PILE items, wood is replaced by a Wood_Pile_1C (which persists).
         /// </summary>
-        private void DropStickAtCampfire()
+        private void DropResourceAtCampfire(SettlerTaskType taskType)
         {
-            Vector3 dropPos = GetStickDropPosition();
-            _stickDropCount++;
+            EnsureDropPositions();
 
-            if (_stickDropCount < STICKS_PER_WOOD_PILE)
+            switch (taskType)
             {
-                // Place a visual stick with slight random offset for natural look
-                var rng = new System.Random(_stickDropCount * 7919 + GameState.Seed);
-                float ox = (float)(rng.NextDouble() - 0.5) * 0.8f;
-                float oz = (float)(rng.NextDouble() - 0.5) * 0.8f;
-                float rot = (float)(rng.NextDouble() * 360.0);
-                Vector3 stickPos = dropPos + new Vector3(ox, 0f, oz);
+                case SettlerTaskType.GatherWood:
+                    DropWoodAtCampfire();
+                    break;
+                case SettlerTaskType.GatherStone:
+                    DropStoneAtCampfire();
+                    break;
+                case SettlerTaskType.Hunt:
+                    DropFoodAtCampfire();
+                    break;
+            }
+        }
 
-                var stick = AssetPrefabRegistry.InstantiateRandom(
-                    AssetPrefabRegistry.Twigs, stickPos, rng, null, 0.5f, 0.8f);
-                if (stick != null)
-                {
-                    stick.name = $"DroppedStick_{_stickDropCount}";
-                    stick.transform.rotation = Quaternion.Euler(0f, rot, 0f);
-                    // Remove colliders so sticks don't block movement
-                    foreach (var col in stick.GetComponentsInChildren<Collider>())
-                        Destroy(col);
-                    _droppedSticks.Add(stick);
-                }
+        private void DropWoodAtCampfire()
+        {
+            _woodDropCount++;
 
-                Debug.Log($"[{name}] Dropped stick {_stickDropCount}/{STICKS_PER_WOOD_PILE} at campfire");
+            if (_woodDropCount < ITEMS_PER_PILE)
+            {
+                var rng = new System.Random(_woodDropCount * 7919 + _woodPileCount * 3571 + GameState.Seed);
+                SpawnDropItem(AssetPrefabRegistry.Twigs, _woodDropPos, rng, 0.5f, 0.8f,
+                    $"DroppedStick_{_woodPileCount}_{_woodDropCount}", _droppedWoodItems);
+                Debug.Log($"[{name}] Dropped stick {_woodDropCount}/{ITEMS_PER_PILE} at campfire");
             }
             else
             {
-                // Replace all dropped sticks with a Wood_Pile_1C
-                foreach (var stick in _droppedSticks)
+                // Replace loose sticks with a Wood_Pile_1C (keep existing piles!)
+                foreach (var item in _droppedWoodItems)
+                    if (item != null) Destroy(item);
+                _droppedWoodItems.Clear();
+
+                // Offset each new pile slightly so they don't overlap
+                float pileOffset = _woodPileCount * 1.2f;
+                Vector3 pilePos = _woodDropPos + new Vector3(pileOffset, 0f, 0f);
+
+                var pile = AssetPrefabRegistry.InstantiateSpecific(
+                    "Props/Wood_Pile_1C", pilePos, Quaternion.Euler(0f, _woodPileCount * 45f, 0f), null, 0.6f);
+                if (pile != null)
                 {
-                    if (stick != null) Destroy(stick);
-                }
-                _droppedSticks.Clear();
-
-                // Destroy previous wood pile if one already exists (shouldn't normally happen)
-                if (_woodPile != null)
-                    Destroy(_woodPile);
-
-                _woodPile = AssetPrefabRegistry.InstantiateSpecific(
-                    "Props/Wood_Pile_1C", dropPos, Quaternion.identity, null, 0.6f);
-
-                if (_woodPile != null)
-                {
-                    _woodPile.name = "WoodPile";
-                    // Remove colliders so pile doesn't block movement
-                    foreach (var col in _woodPile.GetComponentsInChildren<Collider>())
+                    pile.name = $"WoodPile_{_woodPileCount}";
+                    foreach (var col in pile.GetComponentsInChildren<Collider>())
                         Destroy(col);
+                    _woodPiles.Add(pile);
                 }
 
-                Debug.Log($"[{name}] {STICKS_PER_WOOD_PILE} sticks collected — created Wood Pile at campfire!");
+                _woodPileCount++;
+                _woodDropCount = 0;
+                Debug.Log($"[{name}] Created Wood Pile #{_woodPileCount} at campfire!");
+            }
+        }
 
-                // Reset counter for next batch
-                _stickDropCount = 0;
+        private void DropStoneAtCampfire()
+        {
+            _stoneDropCount++;
+            var rng = new System.Random(_stoneDropCount * 6271 + _stonePileCount * 4219 + GameState.Seed);
+
+            if (_stoneDropCount >= ITEMS_PER_PILE)
+            {
+                // After 5 stones, pile gets bigger — destroy loose ones and make a cluster
+                foreach (var item in _droppedStoneItems)
+                    if (item != null) Destroy(item);
+                _droppedStoneItems.Clear();
+
+                float pileOffset = _stonePileCount * 1.0f;
+                Vector3 clusterPos = _stoneDropPos + new Vector3(pileOffset, 0f, 0f);
+
+                // Create a tight cluster of 3 rocks as a "stone pile"
+                for (int i = 0; i < 3; i++)
+                {
+                    float ox = (float)(rng.NextDouble() - 0.5) * 0.4f;
+                    float oz = (float)(rng.NextDouble() - 0.5) * 0.4f;
+                    var rock = AssetPrefabRegistry.InstantiateRandom(
+                        AssetPrefabRegistry.RockSmall, clusterPos + new Vector3(ox, 0f, oz),
+                        rng, null, 0.6f, 0.9f);
+                    if (rock != null)
+                    {
+                        rock.name = $"StonePile_{_stonePileCount}_{i}";
+                        foreach (var col in rock.GetComponentsInChildren<Collider>())
+                            Destroy(col);
+                    }
+                }
+
+                _stonePileCount++;
+                _stoneDropCount = 0;
+                Debug.Log($"[{name}] Created Stone Pile #{_stonePileCount} at campfire!");
+            }
+            else
+            {
+                SpawnDropItem(AssetPrefabRegistry.RockSmall, _stoneDropPos, rng, 0.3f, 0.5f,
+                    $"DroppedStone_{_stonePileCount}_{_stoneDropCount}", _droppedStoneItems);
+                Debug.Log($"[{name}] Dropped stone {_stoneDropCount}/{ITEMS_PER_PILE} at campfire");
+            }
+        }
+
+        private void DropFoodAtCampfire()
+        {
+            _foodDropCount++;
+            var rng = new System.Random(_foodDropCount * 8387 + GameState.Seed);
+
+            // Food items just accumulate at the spot (no "pile" replacement — perishable)
+            SpawnDropItem(AssetPrefabRegistry.Mushrooms, _foodDropPos, rng, 0.25f, 0.4f,
+                $"DroppedFood_{_foodDropCount}", _droppedFoodItems);
+            Debug.Log($"[{name}] Dropped food {_foodDropCount} at campfire");
+        }
+
+        /// <summary>
+        /// Spawn a single dropped resource item with random offset near a base position.
+        /// </summary>
+        private void SpawnDropItem(string[] prefabPool, Vector3 basePos, System.Random rng,
+            float minScale, float maxScale, string itemName, List<GameObject> trackList)
+        {
+            float ox = (float)(rng.NextDouble() - 0.5) * 0.8f;
+            float oz = (float)(rng.NextDouble() - 0.5) * 0.8f;
+            float rot = (float)(rng.NextDouble() * 360.0);
+            Vector3 pos = basePos + new Vector3(ox, 0f, oz);
+
+            var item = AssetPrefabRegistry.InstantiateRandom(prefabPool, pos, rng, null, minScale, maxScale);
+            if (item != null)
+            {
+                item.name = itemName;
+                item.transform.rotation = Quaternion.Euler(0f, rot, 0f);
+                foreach (var col in item.GetComponentsInChildren<Collider>())
+                    Destroy(col);
+                trackList.Add(item);
             }
         }
 
