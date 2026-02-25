@@ -39,6 +39,14 @@ namespace Terranova.Orders
         /// <summary>All orders (active, paused, completed, failed).</summary>
         public IReadOnlyList<OrderDefinition> AllOrders => _orders;
 
+        /// <summary>v0.5.10: Get an order by ID.</summary>
+        public OrderDefinition GetOrder(int orderId)
+        {
+            foreach (var order in _orders)
+                if (order.Id == orderId) return order;
+            return null;
+        }
+
         /// <summary>Only active orders.</summary>
         public List<OrderDefinition> ActiveOrders
         {

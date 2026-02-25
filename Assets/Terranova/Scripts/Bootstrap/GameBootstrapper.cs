@@ -89,6 +89,7 @@ namespace Terranova.Core
             EnsureDayNightCycle(); // MS4: Day-night cycle
             EnsureSeasonManager(); // Feature 10: Seasons
             EnsureOrderSystem(); // Feature 7: Order grammar & Klappbuch
+            EnsureChronicle(); // v0.5.10 Feature 12: Tribal Chronicle
 
             Debug.Log("GameBootstrapper: All systems ready.");
         }
@@ -426,6 +427,23 @@ namespace Terranova.Core
             go.AddComponent<OrderManager>();
             go.AddComponent<OrderVocabulary>();
             Debug.Log("GameBootstrapper: Created OrderSystem (OrderManager, OrderVocabulary).");
+        }
+
+        /// <summary>v0.5.10 Feature 12: Tribal Chronicle system.</summary>
+        private static void EnsureChronicle()
+        {
+            if (ChronicleManager.Instance != null)
+                return;
+
+            var go = new GameObject("Chronicle");
+            go.AddComponent<ChronicleManager>();
+
+            // ChronicleUI needs a Canvas to render — attach to the HUD Canvas
+            var hud = Object.FindFirstObjectByType<ResourceDisplay>();
+            if (hud != null && ChronicleUI.Instance == null)
+                hud.gameObject.AddComponent<ChronicleUI>();
+
+            Debug.Log("GameBootstrapper: Created Chronicle (ChronicleManager, ChronicleUI).");
         }
 
         /// <summary>

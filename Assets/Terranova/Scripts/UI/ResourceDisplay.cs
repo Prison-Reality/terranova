@@ -816,6 +816,10 @@ namespace Terranova.UI
                     OrderManager.Instance.CancelOrder(order.Id);
             }
 
+            // v0.5.10: Record new tribe in chronicle before spawning
+            var chronicle = ChronicleManager.Instance;
+            if (chronicle != null) chronicle.RecordNewTribe();
+
             // Spawn new settlers at campfire
             var spawner = Object.FindFirstObjectByType<SettlerSpawner>();
             if (spawner != null) spawner.RespawnSettlers();
@@ -929,7 +933,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.8";
+            versionText.text = "v0.5.10";
         }
 
         /// <summary>
@@ -1204,6 +1208,41 @@ namespace Terranova.UI
             dlText.alignment = TextAnchor.MiddleCenter;
             dlText.fontStyle = FontStyle.Bold;
             dlText.text = "Discoveries";
+
+            // v0.5.10: Chronicle button — right of Discoveries
+            float chronicleX = discoveriesX + btnW + 10 + spacing;
+            var chronObj = new GameObject("ChronicleButton");
+            chronObj.transform.SetParent(transform, false);
+            var chronRect = chronObj.AddComponent<RectTransform>();
+            chronRect.anchorMin = new Vector2(0, 0);
+            chronRect.anchorMax = new Vector2(0, 0);
+            chronRect.pivot = new Vector2(0, 0);
+            chronRect.anchoredPosition = new Vector2(chronicleX, 20);
+            chronRect.sizeDelta = new Vector2(btnW + 10, btnH);
+
+            var chronImg = chronObj.AddComponent<Image>();
+            chronImg.color = new Color(0.35f, 0.25f, 0.12f, 0.9f); // Parchment brown
+            var chronBtn = chronObj.AddComponent<Button>();
+            chronBtn.targetGraphic = chronImg;
+            chronBtn.onClick.AddListener(() =>
+            {
+                var chronicleUI = ChronicleUI.Instance;
+                if (chronicleUI != null) chronicleUI.Toggle();
+            });
+
+            var chronLabel = new GameObject("Label");
+            chronLabel.transform.SetParent(chronObj.transform, false);
+            var clRect = chronLabel.AddComponent<RectTransform>();
+            clRect.anchorMin = Vector2.zero;
+            clRect.anchorMax = Vector2.one;
+            clRect.sizeDelta = Vector2.zero;
+            var clText = chronLabel.AddComponent<Text>();
+            clText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            clText.fontSize = 15;
+            clText.color = new Color(0.90f, 0.85f, 0.70f);
+            clText.alignment = TextAnchor.MiddleCenter;
+            clText.fontStyle = FontStyle.Bold;
+            clText.text = "Chronicle";
         }
 
         private void SetSpeed(int speedIndex)
