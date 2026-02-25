@@ -216,11 +216,15 @@ namespace Terranova.UI
             if (OrderQueryBridge.GetActiveOrderSentence != null)
                 orderSentence = OrderQueryBridge.GetActiveOrderSentence(settler.name);
 
+            // v0.5.9 P4: Show player-facing order text, not internal state names
             string task;
             if (!string.IsNullOrEmpty(orderSentence))
-                task = $"Order: {orderSentence}";
+                task = orderSentence;
             else if (settler.HasTask)
-                task = settler.CurrentTask?.TaskType.ToString() ?? "Eating";
+            {
+                var ct = settler.CurrentTask;
+                task = ct != null ? GetFriendlyTaskName(ct.TaskType) : "Eating";
+            }
             else
                 task = "Free";
             string state = settler.StateName;
@@ -479,10 +483,37 @@ namespace Terranova.UI
         }
 
         /// <summary>
-        /// Get shelter status text. Uses reflection for ShelterState if available.
+        /// Get shelter status text. v0.5.9: Only show shelter state at night
+        /// when near campfire or inside shelter. During daytime, show activity.
         /// </summary>
         private string GetSettlerShelterStatus(Settler settler)
         {
+            var cycle = DayNightCycle.Instance;
+            bool isNight = cycle != null && cycle.IsNight;
+
+            if (!isNight)
+            {
+                // Daytime: show current activity instead of shelter state
+                string activity = settler.StateName;
+                return activity switch
+                {
+                    "IdlePausing" => "Resting",
+                    "IdleWalking" => "Wandering",
+                    "WalkingToTarget" => "Traveling",
+                    "Working" => "Working",
+                    "ReturningToBase" => "Returning",
+                    "Delivering" => "Delivering",
+                    "WalkingToEat" => "Seeking food",
+                    "Eating" => "Eating",
+                    "WalkingToDrink" => "Seeking water",
+                    "Drinking" => "Drinking",
+                    "SeekingFood" => "Foraging",
+                    "GatheringFood" => "Gathering food",
+                    _ => "Active"
+                };
+            }
+
+            // Nighttime: show actual shelter state
             var prop = settler.GetType().GetProperty("CurrentShelterState");
             if (prop != null)
             {
@@ -508,6 +539,26 @@ namespace Terranova.UI
             if (settler.IsStarving) return "Critical";
             if (settler.HungerPercent > 0.7f) return "Weakened";
             return "Healthy";
+        }
+
+        /// <summary>
+        /// v0.5.9 P4: Convert internal task type to player-facing text.
+        /// </summary>
+        private static string GetFriendlyTaskName(SettlerTaskType taskType)
+        {
+            return taskType switch
+            {
+                SettlerTaskType.GatherWood => "Gathering wood",
+                SettlerTaskType.GatherStone => "Gathering stone",
+                SettlerTaskType.Hunt => "Gathering food",
+                SettlerTaskType.Build => "Building",
+                SettlerTaskType.GatherMaterial => "Gathering",
+                SettlerTaskType.CraftTool => "Crafting",
+                SettlerTaskType.DrinkWater => "Drinking",
+                SettlerTaskType.SeekFood => "Seeking food",
+                SettlerTaskType.SeekShelter => "Seeking shelter",
+                _ => "Working"
+            };
         }
 
         // ─── Building Info ──────────────────────────────────────

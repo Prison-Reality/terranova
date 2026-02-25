@@ -4,6 +4,7 @@ using UnityEngine.AI;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Buildings;
+using Terranova.Discovery;
 using Terranova.Resources;
 using Terranova.Terrain;
 
@@ -319,7 +320,7 @@ namespace Terranova.Population
         public float ThirstPercent => _thirst / 100f;
 
         /// <summary>Health status string for UI display.</summary>
-        public string HealthStatus => _isSick ? "Sick" :
+        public string HealthStatus => _isSick ? (_poisonSeverity >= 2 ? "Poisoned!" : "Sick") :
             (CurrentHungerState == HungerState.Starving ? "Critical" :
             (CurrentHungerState == HungerState.Exhausted ? "Weakened" : "Healthy"));
 
@@ -420,6 +421,8 @@ namespace Terranova.Population
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
         private float _sicknessTimer;
+        private int _poisonSeverity;         // v0.5.9: 0=none, 1=mild, 2=severe, 3=fatal
+        private GameObject _sickParticle;    // v0.5.9: Green particle near head when sick
 
         public int ColorIndex => _colorIndex;
 
@@ -490,6 +493,7 @@ namespace Terranova.Population
         private void OnDestroy()
         {
             ReleaseCampfireSeat();
+            DestroySickParticle();
             SettlerLocator.Unregister(transform);
         }
 
@@ -871,6 +875,9 @@ namespace Terranova.Population
 
             // Use the worst penalty
             float mult = Mathf.Min(hungerMult, thirstMult);
+
+            // v0.5.9 P12: Sick settlers move at 50% speed
+            if (_isSick) mult *= 0.5f;
 
             // v0.5.1: Speed bonus on trampled paths
             var paths = TrampledPaths.Instance;
@@ -1379,14 +1386,15 @@ namespace Terranova.Population
             }
 
             // MS4 Feature 4.1: Thirsty settlers abandon task and seek water autonomously
+            // v0.5.9 P9: Do NOT interrupt night campfire rest — settlers stay put until dawn
             if (CurrentThirstState == ThirstState.Thirsty
                 || CurrentThirstState == ThirstState.Dehydrated
                 || CurrentThirstState == ThirstState.Dying)
             {
-                // Thirst overrides EVERYTHING except already walking-to/drinking.
-                // Drinking requires no tool. Priority above hunger and work.
                 if (_state != SettlerState.WalkingToDrink
-                    && _state != SettlerState.Drinking)
+                    && _state != SettlerState.Drinking
+                    && _state != SettlerState.RestingAtCampfire
+                    && _state != SettlerState.WalkingToCampfire)
                 {
                     StartDrinking();
                 }
@@ -1667,14 +1675,16 @@ namespace Terranova.Population
             _isStarving = false;
             Debug.Log($"[{name}] Foraged food - hunger at {_hunger:F0}");
 
+            // v0.5.9 P12: Food poisoning chance when eating foraged food
+            TryApplyFoodPoisoning("wild berries");
+
             UpdateVisualColor();
             ResumeAfterNeedsFulfilled();
         }
 
         /// <summary>
         /// Apply food nutrition and handle poisonous food effects.
-        /// MS4 Feature 4.3: Different foods restore different amounts.
-        /// Poisonous berries cause SettlerPoisonedEvent.
+        /// v0.5.9 P12: Uses new poison severity system with Plant Knowledge check.
         /// </summary>
         public void ConsumeFood(MaterialDefinition food)
         {
@@ -1686,27 +1696,13 @@ namespace Terranova.Population
 
             Debug.Log($"[{name}] Consumed {food.DisplayName} (+{nutrition} hunger, now {_hunger:F0})");
 
-            // MS4 Feature 4.3: Poisonous berries cause sickness
-            // Cautious trait: 30% chance to avoid poison
-            if (food.IsPoisonous && !(_trait == SettlerTrait.Cautious && Random.value < 0.3f))
-            {
-                _isSick = true;
-                _sicknessTimer = 30f; // 30 seconds of sickness
-                // Poisoned food gives minimal nutrition
-                _hunger = Mathf.Max(0f, _hunger - nutrition * 0.5f);
-
-                EventBus.Publish(new SettlerPoisonedEvent
-                {
-                    SettlerName = name,
-                    FoodName = food.DisplayName
-                });
-
-                Debug.Log($"[{name}] POISONED by {food.DisplayName}!");
-            }
+            // v0.5.9 P12: Apply food poisoning chance
+            TryApplyFoodPoisoning(food.DisplayName);
         }
 
         /// <summary>
-        /// Update sickness timer. Sick settlers have reduced speed.
+        /// Update sickness timer. v0.5.9 P12: Severity-based effects.
+        /// Sick settlers have green tint and 50% speed. Severe = -50% HP.
         /// </summary>
         private void UpdateSickness()
         {
@@ -1716,7 +1712,147 @@ namespace Terranova.Population
             if (_sicknessTimer <= 0f)
             {
                 _isSick = false;
+                _poisonSeverity = 0;
+                DestroySickParticle();
+                UpdateVisualColor();
                 Debug.Log($"[{name}] Recovered from sickness");
+            }
+        }
+
+        // ─── v0.5.9 P12: Food Poisoning System ────────────────────
+
+        private const float POISON_CHANCE_BASE = 0.15f;        // 15% without Plant Knowledge
+        private const float POISON_CHANCE_WITH_KNOWLEDGE = 0.03f; // 3% with Plant Knowledge
+
+        /// <summary>
+        /// v0.5.9 P12: Roll for food poisoning when eating.
+        /// Without Plant Knowledge: 15% chance. With: 3%.
+        /// Severity: Mild (60%), Severe (30%), Fatal (10%).
+        /// Cautious trait: 30% chance to avoid poison entirely.
+        /// </summary>
+        private void TryApplyFoodPoisoning(string foodName)
+        {
+            if (_isSick) return; // Already sick, skip
+
+            // Cautious trait: 30% chance to avoid poison
+            if (_trait == SettlerTrait.Cautious && Random.value < 0.3f)
+                return;
+
+            // Check Plant Knowledge discovery
+            bool hasPlantKnowledge = false;
+            var dsm = DiscoveryStateManager.Instance;
+            if (dsm != null)
+                hasPlantKnowledge = dsm.IsDiscovered("Plant Knowledge");
+
+            float poisonChance = hasPlantKnowledge ? POISON_CHANCE_WITH_KNOWLEDGE : POISON_CHANCE_BASE;
+
+            if (Random.value > poisonChance) return; // No poisoning
+
+            // Determine severity
+            float roll = Random.value;
+            if (roll < 0.10f)
+            {
+                // FATAL (10%)
+                _poisonSeverity = 3;
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] ATE DEADLY {foodName} — FATAL POISONING!");
+
+                // Trigger Plant Knowledge discovery chance
+                TryTriggerPlantKnowledgeDiscovery();
+
+                Die("food poisoning");
+                return;
+            }
+            else if (roll < 0.40f)
+            {
+                // SEVERE (30%)
+                _isSick = true;
+                _poisonSeverity = 2;
+                _sicknessTimer = DayNightCycle.SECONDS_PER_DAY * 2f; // 2 game-days
+                _hunger = Mathf.Max(0f, _hunger * 0.5f); // Lose 50% HP (hunger)
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] SEVERELY POISONED by {foodName}! Sick for 2 days.");
+
+                // Trigger Plant Knowledge discovery chance
+                TryTriggerPlantKnowledgeDiscovery();
+            }
+            else
+            {
+                // MILD (60%)
+                _isSick = true;
+                _poisonSeverity = 1;
+                _sicknessTimer = DayNightCycle.SECONDS_PER_DAY; // 1 game-day
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] Mildly poisoned by {foodName}. Sick for 1 day.");
+            }
+
+            // Visual: green tint + particle
+            ApplySickVisual();
+        }
+
+        /// <summary>
+        /// v0.5.9 P12: After severe/fatal poisoning, chance to discover Plant Knowledge.
+        /// Learning through failure — the tribe remembers which foods are dangerous.
+        /// </summary>
+        private void TryTriggerPlantKnowledgeDiscovery()
+        {
+            var dsm = DiscoveryStateManager.Instance;
+            if (dsm == null) return;
+            if (dsm.IsDiscovered("Plant Knowledge")) return;
+
+            // 40% chance to trigger Plant Knowledge after severe/fatal poisoning
+            if (Random.value > 0.4f) return;
+
+            // Create and complete a Plant Knowledge discovery
+            var def = ScriptableObject.CreateInstance<DiscoveryDefinition>();
+            def.DisplayName = "Plant Knowledge";
+            def.Description = "Through bitter experience, the tribe has learned to identify poisonous plants. Food poisoning is now much less likely.";
+            def.UnlockedCapabilities = new[] { "plant_knowledge" };
+            dsm.CompleteDiscovery(def, "a settler's poisoning");
+        }
+
+        /// <summary>
+        /// v0.5.9 P12: Apply green tint and spawn a small green particle near the settler's head.
+        /// </summary>
+        private void ApplySickVisual()
+        {
+            // Green tint
+            ApplyColorToRenderers(new Color(0.5f, 0.8f, 0.4f));
+
+            // Small green particle above head
+            if (_sickParticle != null) return;
+            _sickParticle = new GameObject("SickParticle");
+            _sickParticle.transform.SetParent(transform, false);
+            _sickParticle.transform.localPosition = new Vector3(0f, 1.5f, 0f);
+
+            var ps = _sickParticle.AddComponent<ParticleSystem>();
+            var main = ps.main;
+            main.startLifetime = 1.5f;
+            main.startSpeed = 0.3f;
+            main.startSize = 0.08f;
+            main.startColor = new Color(0.3f, 0.85f, 0.2f, 0.7f);
+            main.maxParticles = 5;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+            var emission = ps.emission;
+            emission.rateOverTime = 2f;
+
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = 0.1f;
+
+            // Use default particle material
+            var renderer = ps.GetComponent<ParticleSystemRenderer>();
+            renderer.material = new Material(Shader.Find("Particles/Standard Unlit"));
+            renderer.material.color = new Color(0.3f, 0.85f, 0.2f, 0.7f);
+        }
+
+        private void DestroySickParticle()
+        {
+            if (_sickParticle != null)
+            {
+                Destroy(_sickParticle);
+                _sickParticle = null;
             }
         }
 
@@ -1753,6 +1889,8 @@ namespace Terranova.Population
                 // Dawn: if resting at campfire, resume normal behavior
                 if (_state == SettlerState.RestingAtCampfire)
                 {
+                    // v0.5.9 P9: Re-enable movement after night freeze
+                    _agent.isStopped = false;
                     _coldExposureTimer = 0f;
                     _shelterState = ShelterState.Sheltered;
 
@@ -2141,6 +2279,8 @@ namespace Terranova.Population
         private void StartRestingAtCampfire()
         {
             _agent.ResetPath();
+            _agent.isStopped = true;
+            _agent.velocity = Vector3.zero;
             _isMoving = false;
             _state = SettlerState.RestingAtCampfire;
             _stateTimer = 0f;
@@ -2175,7 +2315,8 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Rest at campfire until dawn. Settler stops moving (sleep state).
+        /// Rest at campfire until dawn. Settler stops moving completely (sleep state).
+        /// v0.5.9 P9: Full movement freeze — no wandering, no path, agent velocity zeroed.
         /// Dawn detection is handled by UpdateShelterState.
         /// </summary>
         private void UpdateRestingAtCampfire()
@@ -2188,9 +2329,11 @@ namespace Terranova.Population
                 return;
             }
 
-            // Sleep: stay completely still until dawn
+            // v0.5.9 P9: Complete freeze — no movement at all while resting
             if (_agent.hasPath)
                 _agent.ResetPath();
+            _agent.velocity = Vector3.zero;
+            _agent.isStopped = true;
             _isMoving = false;
         }
 
@@ -2304,6 +2447,7 @@ namespace Terranova.Population
 
             // v0.5.10: Release campfire seat
             ReleaseCampfireSeat();
+            DestroySickParticle();
 
             // Release any held resources
             if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)

@@ -220,5 +220,70 @@ namespace Terranova.Buildings
                 transform.localScale = scale;
             }
         }
+
+        // ─── v0.5.9 P10: Building Decay ─────────────────────────
+
+        private float _condition = 1f;
+        private bool _decaySubscribed;
+
+        /// <summary>Building condition from 0 to 1. Decays without maintenance.</summary>
+        public float Condition => _condition;
+
+        /// <summary>Whether the building is still functional (condition > 0 and constructed).</summary>
+        public bool IsFunctional => _isConstructed && _condition > 0f;
+
+        private void OnEnable()
+        {
+            if (!_decaySubscribed)
+            {
+                EventBus.Subscribe<DayChangedEvent>(OnDayChangedDecay);
+                _decaySubscribed = true;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (_decaySubscribed)
+            {
+                EventBus.Unsubscribe<DayChangedEvent>(OnDayChangedDecay);
+                _decaySubscribed = false;
+            }
+        }
+
+        /// <summary>
+        /// v0.5.9: Each game-day, buildings lose 10% condition if no worker is assigned.
+        /// At 0% condition the building becomes non-functional (dimmed visual).
+        /// </summary>
+        private void OnDayChangedDecay(DayChangedEvent evt)
+        {
+            if (!_isConstructed) return;
+
+            if (HasWorker)
+            {
+                // Maintenance: slowly restore condition
+                _condition = Mathf.Min(1f, _condition + 0.05f);
+            }
+            else
+            {
+                // Decay: lose 10% per day without maintenance
+                _condition = Mathf.Max(0f, _condition - 0.10f);
+
+                if (_condition <= 0f)
+                {
+                    Debug.Log($"[Building] {name} has collapsed from neglect!");
+                    // Dim the building to show it's non-functional
+                    if (_propBlock != null && _renderers != null)
+                    {
+                        Color decayColor = new Color(0.3f, 0.25f, 0.2f, 0.7f);
+                        foreach (var r in _renderers)
+                        {
+                            if (r == null) continue;
+                            _propBlock.SetColor(ColorID, decayColor);
+                            r.SetPropertyBlock(_propBlock);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

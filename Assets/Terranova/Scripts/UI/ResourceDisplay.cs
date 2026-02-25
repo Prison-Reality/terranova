@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -160,8 +161,9 @@ namespace Terranova.UI
             if (_settlers > 0)
                 _gameStarted = true;
 
+            // v0.5.9 P10: Auto-respawn after 5 seconds instead of game-over screen
             if (_gameStarted && _settlers <= 0)
-                ShowGameOver();
+                StartCoroutine(AutoRespawnTribe());
         }
 
         private void OnResourceChanged(ResourceChangedEvent evt)
@@ -607,7 +609,68 @@ namespace Terranova.UI
             text.text = label;
         }
 
-        // ─── Game Over ────────────────────────────────────────────
+        // ─── v0.5.9 P10: Auto Tribe Respawn ─────────────────────
+
+        private bool _respawnInProgress;
+
+        /// <summary>
+        /// v0.5.9 P10: When all settlers die, wait 5 seconds, show message,
+        /// then automatically spawn a new tribe. No game-over screen.
+        /// </summary>
+        private IEnumerator AutoRespawnTribe()
+        {
+            if (_respawnInProgress) yield break;
+            _respawnInProgress = true;
+
+            // Show "tribe lost" message overlay
+            var messagePanel = new GameObject("TribeDeathMessage");
+            messagePanel.transform.SetParent(transform, false);
+            messagePanel.transform.SetAsLastSibling();
+            var bgImage = messagePanel.AddComponent<Image>();
+            bgImage.color = new Color(0f, 0f, 0f, 0.6f);
+            var bgRect = messagePanel.GetComponent<RectTransform>();
+            bgRect.anchorMin = Vector2.zero;
+            bgRect.anchorMax = Vector2.one;
+            bgRect.offsetMin = Vector2.zero;
+            bgRect.offsetMax = Vector2.zero;
+
+            var textObj = new GameObject("Message");
+            textObj.transform.SetParent(messagePanel.transform, false);
+            var textRect = textObj.AddComponent<RectTransform>();
+            textRect.anchorMin = new Vector2(0.1f, 0.35f);
+            textRect.anchorMax = new Vector2(0.9f, 0.65f);
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+            var msgText = textObj.AddComponent<Text>();
+            msgText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            msgText.fontSize = 36;
+            msgText.color = new Color(0.9f, 0.85f, 0.7f);
+            msgText.alignment = TextAnchor.MiddleCenter;
+            msgText.fontStyle = FontStyle.Italic;
+
+            var dnc = DayNightCycle.Instance;
+            int dayCount = dnc != null ? dnc.DayCount : GameState.DayCount;
+            msgText.text = $"All settlers perished on Day {dayCount}...";
+
+            // Wait 3 seconds with death message
+            yield return new WaitForSecondsRealtime(3f);
+
+            msgText.text = "A new tribe arrives at the abandoned camp.";
+
+            // Wait 2 more seconds
+            yield return new WaitForSecondsRealtime(2f);
+
+            // Spawn new tribe (reuses existing SpawnNewTribe logic)
+            SpawnNewTribe();
+
+            // Clean up message
+            if (messagePanel != null)
+                Destroy(messagePanel);
+
+            _respawnInProgress = false;
+        }
+
+        // ─── Game Over (legacy, kept for Restart button) ─────────
 
         private void ShowGameOver()
         {

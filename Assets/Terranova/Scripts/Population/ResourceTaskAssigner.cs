@@ -103,7 +103,7 @@ namespace Terranova.Population
                         continue;
                 }
 
-                ResourceNode nearest = FindNearest(nodes, settler.transform.position, targetType);
+                ResourceNode nearest = FindNearest(nodes, settler.transform.position, targetType, settler.name);
 
                 if (nearest == null) continue;
                 if (!nearest.TryReserve()) continue;
@@ -125,7 +125,7 @@ namespace Terranova.Population
             }
         }
 
-        private static ResourceNode FindNearest(ResourceNode[] nodes, Vector3 position, ResourceType type)
+        private static ResourceNode FindNearest(ResourceNode[] nodes, Vector3 position, ResourceType type, string settlerName = null)
         {
             ResourceNode nearest = null;
             float nearestDist = float.MaxValue;
@@ -134,6 +134,12 @@ namespace Terranova.Population
             {
                 if (node.Type != type) continue;
                 if (!node.IsAvailable) continue;
+
+                // v0.5.9 P12: Skip resources that are avoided via "Avoid" orders
+                if (!string.IsNullOrEmpty(settlerName)
+                    && OrderQueryBridge.IsMaterialForbidden != null
+                    && OrderQueryBridge.IsMaterialForbidden(settlerName, node.MaterialId))
+                    continue;
 
                 float dist = Vector3.Distance(position, node.transform.position);
                 if (dist < nearestDist)
