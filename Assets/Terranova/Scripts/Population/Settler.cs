@@ -1,9 +1,9 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Buildings;
+using Terranova.Discovery;
 using Terranova.Resources;
 using Terranova.Terrain;
 
@@ -168,27 +168,7 @@ namespace Terranova.Population
         private static int _totalStoneDelivered;
         private static int _totalFoodDelivered;
 
-        // v0.5.12: Resource stockpile system — resources drop at fixed spots near campfire
-        private const int ITEMS_PER_PILE = 5;
-        private const float DROP_OFFSET = 3.0f; // Distance from campfire center
-
-        // Wood stockpile (East of campfire)
-        private static int _woodDropCount;
-        private static int _woodPileCount;
-        private static readonly List<GameObject> _droppedWoodItems = new();
-        private static readonly List<GameObject> _woodPiles = new();
-
-        // Stone stockpile (South of campfire)
-        private static int _stoneDropCount;
-        private static int _stonePileCount;
-        private static readonly List<GameObject> _droppedStoneItems = new();
-
-        // Food stockpile (West of campfire)
-        private static int _foodDropCount;
-        private static readonly List<GameObject> _droppedFoodItems = new();
-
-        private static Vector3 _woodDropPos, _stoneDropPos, _foodDropPos;
-        private static bool _dropPositionsSet;
+        // v0.5.12: Resource stockpile visuals managed by ResourceStockpileManager
 
         /// <summary>Reset static state when domain reload is disabled.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -201,12 +181,6 @@ namespace Terranova.Population
             _sharedSitController = null;
             _sharedMaleWorkController = null;
             _sharedFemaleWorkController = null;
-            _woodDropCount = 0; _woodPileCount = 0;
-            _stoneDropCount = 0; _stonePileCount = 0;
-            _foodDropCount = 0;
-            _droppedWoodItems.Clear(); _woodPiles.Clear();
-            _droppedStoneItems.Clear(); _droppedFoodItems.Clear();
-            _dropPositionsSet = false;
             for (int i = 0; i < MAX_CAMPFIRE_SEATS; i++) _campfireSeats[i] = false;
         }
 
@@ -319,7 +293,7 @@ namespace Terranova.Population
         public float ThirstPercent => _thirst / 100f;
 
         /// <summary>Health status string for UI display.</summary>
-        public string HealthStatus => _isSick ? "Sick" :
+        public string HealthStatus => _isSick ? (_poisonSeverity >= 2 ? "Poisoned!" : "Sick") :
             (CurrentHungerState == HungerState.Starving ? "Critical" :
             (CurrentHungerState == HungerState.Exhausted ? "Weakened" : "Healthy"));
 
@@ -420,6 +394,8 @@ namespace Terranova.Population
         private bool _isDeathPending;       // Prevent double-death
         private bool _isSick;               // Poison sickness flag
         private float _sicknessTimer;
+        private int _poisonSeverity;         // v0.5.9: 0=none, 1=mild, 2=severe, 3=fatal
+        private GameObject _sickParticle;    // v0.5.9: Green particle near head when sick
 
         public int ColorIndex => _colorIndex;
 
@@ -490,6 +466,7 @@ namespace Terranova.Population
         private void OnDestroy()
         {
             ReleaseCampfireSeat();
+            DestroySickParticle();
             SettlerLocator.Unregister(transform);
         }
 
@@ -872,6 +849,9 @@ namespace Terranova.Population
             // Use the worst penalty
             float mult = Mathf.Min(hungerMult, thirstMult);
 
+            // v0.5.9 P12: Sick settlers move at 50% speed
+            if (_isSick) mult *= 0.5f;
+
             // v0.5.1: Speed bonus on trampled paths
             var paths = TrampledPaths.Instance;
             if (paths != null)
@@ -1091,7 +1071,8 @@ namespace Terranova.Population
                 string resourceName = TrackDelivery(_currentTask.TaskType);
 
                 // v0.5.12: Drop resource at fixed stockpile location near campfire
-                DropResourceAtCampfire(_currentTask.TaskType);
+                ResourceStockpileManager.Instance?.DropResource(
+                    _currentTask.TaskType, _campfirePosition, name);
 
                 // XP bonus on delivery (Curious trait: +20% XP)
                 float xpGain = 10f;
@@ -1379,14 +1360,15 @@ namespace Terranova.Population
             }
 
             // MS4 Feature 4.1: Thirsty settlers abandon task and seek water autonomously
+            // v0.5.9 P9: Do NOT interrupt night campfire rest — settlers stay put until dawn
             if (CurrentThirstState == ThirstState.Thirsty
                 || CurrentThirstState == ThirstState.Dehydrated
                 || CurrentThirstState == ThirstState.Dying)
             {
-                // Thirst overrides EVERYTHING except already walking-to/drinking.
-                // Drinking requires no tool. Priority above hunger and work.
                 if (_state != SettlerState.WalkingToDrink
-                    && _state != SettlerState.Drinking)
+                    && _state != SettlerState.Drinking
+                    && _state != SettlerState.RestingAtCampfire
+                    && _state != SettlerState.WalkingToCampfire)
                 {
                     StartDrinking();
                 }
@@ -1667,14 +1649,16 @@ namespace Terranova.Population
             _isStarving = false;
             Debug.Log($"[{name}] Foraged food - hunger at {_hunger:F0}");
 
+            // v0.5.9 P12: Food poisoning chance when eating foraged food
+            TryApplyFoodPoisoning("wild berries");
+
             UpdateVisualColor();
             ResumeAfterNeedsFulfilled();
         }
 
         /// <summary>
         /// Apply food nutrition and handle poisonous food effects.
-        /// MS4 Feature 4.3: Different foods restore different amounts.
-        /// Poisonous berries cause SettlerPoisonedEvent.
+        /// v0.5.9 P12: Uses new poison severity system with Plant Knowledge check.
         /// </summary>
         public void ConsumeFood(MaterialDefinition food)
         {
@@ -1686,27 +1670,13 @@ namespace Terranova.Population
 
             Debug.Log($"[{name}] Consumed {food.DisplayName} (+{nutrition} hunger, now {_hunger:F0})");
 
-            // MS4 Feature 4.3: Poisonous berries cause sickness
-            // Cautious trait: 30% chance to avoid poison
-            if (food.IsPoisonous && !(_trait == SettlerTrait.Cautious && Random.value < 0.3f))
-            {
-                _isSick = true;
-                _sicknessTimer = 30f; // 30 seconds of sickness
-                // Poisoned food gives minimal nutrition
-                _hunger = Mathf.Max(0f, _hunger - nutrition * 0.5f);
-
-                EventBus.Publish(new SettlerPoisonedEvent
-                {
-                    SettlerName = name,
-                    FoodName = food.DisplayName
-                });
-
-                Debug.Log($"[{name}] POISONED by {food.DisplayName}!");
-            }
+            // v0.5.9 P12: Apply food poisoning chance
+            TryApplyFoodPoisoning(food.DisplayName);
         }
 
         /// <summary>
-        /// Update sickness timer. Sick settlers have reduced speed.
+        /// Update sickness timer. v0.5.9 P12: Severity-based effects.
+        /// Sick settlers have green tint and 50% speed. Severe = -50% HP.
         /// </summary>
         private void UpdateSickness()
         {
@@ -1716,7 +1686,147 @@ namespace Terranova.Population
             if (_sicknessTimer <= 0f)
             {
                 _isSick = false;
+                _poisonSeverity = 0;
+                DestroySickParticle();
+                UpdateVisualColor();
                 Debug.Log($"[{name}] Recovered from sickness");
+            }
+        }
+
+        // ─── v0.5.9 P12: Food Poisoning System ────────────────────
+
+        private const float POISON_CHANCE_BASE = 0.15f;        // 15% without Plant Knowledge
+        private const float POISON_CHANCE_WITH_KNOWLEDGE = 0.03f; // 3% with Plant Knowledge
+
+        /// <summary>
+        /// v0.5.9 P12: Roll for food poisoning when eating.
+        /// Without Plant Knowledge: 15% chance. With: 3%.
+        /// Severity: Mild (60%), Severe (30%), Fatal (10%).
+        /// Cautious trait: 30% chance to avoid poison entirely.
+        /// </summary>
+        private void TryApplyFoodPoisoning(string foodName)
+        {
+            if (_isSick) return; // Already sick, skip
+
+            // Cautious trait: 30% chance to avoid poison
+            if (_trait == SettlerTrait.Cautious && Random.value < 0.3f)
+                return;
+
+            // Check Plant Knowledge discovery
+            bool hasPlantKnowledge = false;
+            var dsm = DiscoveryStateManager.Instance;
+            if (dsm != null)
+                hasPlantKnowledge = dsm.IsDiscovered("Plant Knowledge");
+
+            float poisonChance = hasPlantKnowledge ? POISON_CHANCE_WITH_KNOWLEDGE : POISON_CHANCE_BASE;
+
+            if (Random.value > poisonChance) return; // No poisoning
+
+            // Determine severity
+            float roll = Random.value;
+            if (roll < 0.10f)
+            {
+                // FATAL (10%)
+                _poisonSeverity = 3;
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] ATE DEADLY {foodName} — FATAL POISONING!");
+
+                // Trigger Plant Knowledge discovery chance
+                TryTriggerPlantKnowledgeDiscovery();
+
+                Die("food poisoning");
+                return;
+            }
+            else if (roll < 0.40f)
+            {
+                // SEVERE (30%)
+                _isSick = true;
+                _poisonSeverity = 2;
+                _sicknessTimer = DayNightCycle.SECONDS_PER_DAY * 2f; // 2 game-days
+                _hunger = Mathf.Max(0f, _hunger * 0.5f); // Lose 50% HP (hunger)
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] SEVERELY POISONED by {foodName}! Sick for 2 days.");
+
+                // Trigger Plant Knowledge discovery chance
+                TryTriggerPlantKnowledgeDiscovery();
+            }
+            else
+            {
+                // MILD (60%)
+                _isSick = true;
+                _poisonSeverity = 1;
+                _sicknessTimer = DayNightCycle.SECONDS_PER_DAY; // 1 game-day
+                EventBus.Publish(new SettlerPoisonedEvent { SettlerName = name, FoodName = foodName });
+                Debug.Log($"[{name}] Mildly poisoned by {foodName}. Sick for 1 day.");
+            }
+
+            // Visual: green tint + particle
+            ApplySickVisual();
+        }
+
+        /// <summary>
+        /// v0.5.9 P12: After severe/fatal poisoning, chance to discover Plant Knowledge.
+        /// Learning through failure — the tribe remembers which foods are dangerous.
+        /// </summary>
+        private void TryTriggerPlantKnowledgeDiscovery()
+        {
+            var dsm = DiscoveryStateManager.Instance;
+            if (dsm == null) return;
+            if (dsm.IsDiscovered("Plant Knowledge")) return;
+
+            // 40% chance to trigger Plant Knowledge after severe/fatal poisoning
+            if (Random.value > 0.4f) return;
+
+            // Create and complete a Plant Knowledge discovery
+            var def = ScriptableObject.CreateInstance<DiscoveryDefinition>();
+            def.DisplayName = "Plant Knowledge";
+            def.Description = "Through bitter experience, the tribe has learned to identify poisonous plants. Food poisoning is now much less likely.";
+            def.UnlockedCapabilities = new[] { "plant_knowledge" };
+            dsm.CompleteDiscovery(def, "a settler's poisoning");
+        }
+
+        /// <summary>
+        /// v0.5.9 P12: Apply green tint and spawn a small green particle near the settler's head.
+        /// </summary>
+        private void ApplySickVisual()
+        {
+            // Green tint
+            ApplyColorToRenderers(new Color(0.5f, 0.8f, 0.4f));
+
+            // Small green particle above head
+            if (_sickParticle != null) return;
+            _sickParticle = new GameObject("SickParticle");
+            _sickParticle.transform.SetParent(transform, false);
+            _sickParticle.transform.localPosition = new Vector3(0f, 1.5f, 0f);
+
+            var ps = _sickParticle.AddComponent<ParticleSystem>();
+            var main = ps.main;
+            main.startLifetime = 1.5f;
+            main.startSpeed = 0.3f;
+            main.startSize = 0.08f;
+            main.startColor = new Color(0.3f, 0.85f, 0.2f, 0.7f);
+            main.maxParticles = 5;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+            var emission = ps.emission;
+            emission.rateOverTime = 2f;
+
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = 0.1f;
+
+            // Use default particle material
+            var renderer = ps.GetComponent<ParticleSystemRenderer>();
+            renderer.material = new Material(Shader.Find("Particles/Standard Unlit"));
+            renderer.material.color = new Color(0.3f, 0.85f, 0.2f, 0.7f);
+        }
+
+        private void DestroySickParticle()
+        {
+            if (_sickParticle != null)
+            {
+                Destroy(_sickParticle);
+                _sickParticle = null;
             }
         }
 
@@ -1753,6 +1863,8 @@ namespace Terranova.Population
                 // Dawn: if resting at campfire, resume normal behavior
                 if (_state == SettlerState.RestingAtCampfire)
                 {
+                    // v0.5.9 P9: Re-enable movement after night freeze
+                    _agent.isStopped = false;
                     _coldExposureTimer = 0f;
                     _shelterState = ShelterState.Sheltered;
 
@@ -2141,6 +2253,8 @@ namespace Terranova.Population
         private void StartRestingAtCampfire()
         {
             _agent.ResetPath();
+            _agent.isStopped = true;
+            _agent.velocity = Vector3.zero;
             _isMoving = false;
             _state = SettlerState.RestingAtCampfire;
             _stateTimer = 0f;
@@ -2175,7 +2289,8 @@ namespace Terranova.Population
         }
 
         /// <summary>
-        /// Rest at campfire until dawn. Settler stops moving (sleep state).
+        /// Rest at campfire until dawn. Settler stops moving completely (sleep state).
+        /// v0.5.9 P9: Full movement freeze — no wandering, no path, agent velocity zeroed.
         /// Dawn detection is handled by UpdateShelterState.
         /// </summary>
         private void UpdateRestingAtCampfire()
@@ -2188,9 +2303,11 @@ namespace Terranova.Population
                 return;
             }
 
-            // Sleep: stay completely still until dawn
+            // v0.5.9 P9: Complete freeze — no movement at all while resting
             if (_agent.hasPath)
                 _agent.ResetPath();
+            _agent.velocity = Vector3.zero;
+            _agent.isStopped = true;
             _isMoving = false;
         }
 
@@ -2304,6 +2421,7 @@ namespace Terranova.Population
 
             // v0.5.10: Release campfire seat
             ReleaseCampfireSeat();
+            DestroySickParticle();
 
             // Release any held resources
             if (_currentTask?.TargetResource != null && _currentTask.TargetResource.IsReserved)
@@ -2361,172 +2479,6 @@ namespace Terranova.Population
                     return "1x Food";
                 default:
                     return $"1x {taskType}";
-            }
-        }
-
-        // ─── v0.5.12: Resource Stockpile System ─────────────────────
-
-        /// <summary>
-        /// Initialize the three fixed drop positions around the campfire.
-        /// Wood=East, Stone=South, Food=West.
-        /// </summary>
-        private void EnsureDropPositions()
-        {
-            if (_dropPositionsSet) return;
-
-            var world = WorldManager.Instance;
-
-            // Wood: East of campfire
-            _woodDropPos = _campfirePosition + new Vector3(DROP_OFFSET, 0f, 0f);
-            if (world != null)
-                _woodDropPos.y = world.GetSmoothedHeightAtWorldPos(_woodDropPos.x, _woodDropPos.z);
-
-            // Stone: South of campfire
-            _stoneDropPos = _campfirePosition + new Vector3(0f, 0f, -DROP_OFFSET);
-            if (world != null)
-                _stoneDropPos.y = world.GetSmoothedHeightAtWorldPos(_stoneDropPos.x, _stoneDropPos.z);
-
-            // Food: West of campfire
-            _foodDropPos = _campfirePosition + new Vector3(-DROP_OFFSET, 0f, 0f);
-            if (world != null)
-                _foodDropPos.y = world.GetSmoothedHeightAtWorldPos(_foodDropPos.x, _foodDropPos.z);
-
-            _dropPositionsSet = true;
-        }
-
-        /// <summary>
-        /// Drop a visual resource item at the appropriate stockpile near the campfire.
-        /// After ITEMS_PER_PILE items, wood is replaced by a Wood_Pile_1C (which persists).
-        /// </summary>
-        private void DropResourceAtCampfire(SettlerTaskType taskType)
-        {
-            EnsureDropPositions();
-
-            switch (taskType)
-            {
-                case SettlerTaskType.GatherWood:
-                    DropWoodAtCampfire();
-                    break;
-                case SettlerTaskType.GatherStone:
-                    DropStoneAtCampfire();
-                    break;
-                case SettlerTaskType.Hunt:
-                    DropFoodAtCampfire();
-                    break;
-            }
-        }
-
-        private void DropWoodAtCampfire()
-        {
-            _woodDropCount++;
-
-            if (_woodDropCount < ITEMS_PER_PILE)
-            {
-                var rng = new System.Random(_woodDropCount * 7919 + _woodPileCount * 3571 + GameState.Seed);
-                SpawnDropItem(AssetPrefabRegistry.Twigs, _woodDropPos, rng, 0.5f, 0.8f,
-                    $"DroppedStick_{_woodPileCount}_{_woodDropCount}", _droppedWoodItems);
-                Debug.Log($"[{name}] Dropped stick {_woodDropCount}/{ITEMS_PER_PILE} at campfire");
-            }
-            else
-            {
-                // Replace loose sticks with a Wood_Pile_1C (keep existing piles!)
-                foreach (var item in _droppedWoodItems)
-                    if (item != null) Destroy(item);
-                _droppedWoodItems.Clear();
-
-                // Offset each new pile slightly so they don't overlap
-                float pileOffset = _woodPileCount * 1.2f;
-                Vector3 pilePos = _woodDropPos + new Vector3(pileOffset, 0f, 0f);
-
-                var pile = AssetPrefabRegistry.InstantiateSpecific(
-                    "Props/Wood_Pile_1C", pilePos, Quaternion.Euler(0f, _woodPileCount * 45f, 0f), null, 0.6f);
-                if (pile != null)
-                {
-                    pile.name = $"WoodPile_{_woodPileCount}";
-                    foreach (var col in pile.GetComponentsInChildren<Collider>())
-                        Destroy(col);
-                    _woodPiles.Add(pile);
-                }
-
-                _woodPileCount++;
-                _woodDropCount = 0;
-                Debug.Log($"[{name}] Created Wood Pile #{_woodPileCount} at campfire!");
-            }
-        }
-
-        private void DropStoneAtCampfire()
-        {
-            _stoneDropCount++;
-            var rng = new System.Random(_stoneDropCount * 6271 + _stonePileCount * 4219 + GameState.Seed);
-
-            if (_stoneDropCount >= ITEMS_PER_PILE)
-            {
-                // After 5 stones, pile gets bigger — destroy loose ones and make a cluster
-                foreach (var item in _droppedStoneItems)
-                    if (item != null) Destroy(item);
-                _droppedStoneItems.Clear();
-
-                float pileOffset = _stonePileCount * 1.0f;
-                Vector3 clusterPos = _stoneDropPos + new Vector3(pileOffset, 0f, 0f);
-
-                // Create a tight cluster of 3 rocks as a "stone pile"
-                for (int i = 0; i < 3; i++)
-                {
-                    float ox = (float)(rng.NextDouble() - 0.5) * 0.4f;
-                    float oz = (float)(rng.NextDouble() - 0.5) * 0.4f;
-                    var rock = AssetPrefabRegistry.InstantiateRandom(
-                        AssetPrefabRegistry.RockSmall, clusterPos + new Vector3(ox, 0f, oz),
-                        rng, null, 0.6f, 0.9f);
-                    if (rock != null)
-                    {
-                        rock.name = $"StonePile_{_stonePileCount}_{i}";
-                        foreach (var col in rock.GetComponentsInChildren<Collider>())
-                            Destroy(col);
-                    }
-                }
-
-                _stonePileCount++;
-                _stoneDropCount = 0;
-                Debug.Log($"[{name}] Created Stone Pile #{_stonePileCount} at campfire!");
-            }
-            else
-            {
-                SpawnDropItem(AssetPrefabRegistry.RockSmall, _stoneDropPos, rng, 0.3f, 0.5f,
-                    $"DroppedStone_{_stonePileCount}_{_stoneDropCount}", _droppedStoneItems);
-                Debug.Log($"[{name}] Dropped stone {_stoneDropCount}/{ITEMS_PER_PILE} at campfire");
-            }
-        }
-
-        private void DropFoodAtCampfire()
-        {
-            _foodDropCount++;
-            var rng = new System.Random(_foodDropCount * 8387 + GameState.Seed);
-
-            // Food items just accumulate at the spot (no "pile" replacement — perishable)
-            SpawnDropItem(AssetPrefabRegistry.Mushrooms, _foodDropPos, rng, 0.25f, 0.4f,
-                $"DroppedFood_{_foodDropCount}", _droppedFoodItems);
-            Debug.Log($"[{name}] Dropped food {_foodDropCount} at campfire");
-        }
-
-        /// <summary>
-        /// Spawn a single dropped resource item with random offset near a base position.
-        /// </summary>
-        private void SpawnDropItem(string[] prefabPool, Vector3 basePos, System.Random rng,
-            float minScale, float maxScale, string itemName, List<GameObject> trackList)
-        {
-            float ox = (float)(rng.NextDouble() - 0.5) * 0.8f;
-            float oz = (float)(rng.NextDouble() - 0.5) * 0.8f;
-            float rot = (float)(rng.NextDouble() * 360.0);
-            Vector3 pos = basePos + new Vector3(ox, 0f, oz);
-
-            var item = AssetPrefabRegistry.InstantiateRandom(prefabPool, pos, rng, null, minScale, maxScale);
-            if (item != null)
-            {
-                item.name = itemName;
-                item.transform.rotation = Quaternion.Euler(0f, rot, 0f);
-                foreach (var col in item.GetComponentsInChildren<Collider>())
-                    Destroy(col);
-                trackList.Add(item);
             }
         }
 

@@ -84,7 +84,7 @@ namespace Terranova.UI
             seedTextRect.offsetMin = new Vector2(8, 0);
             seedTextRect.offsetMax = new Vector2(-8, 0);
             var seedText = seedTextGo.AddComponent<Text>();
-            seedText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            seedText.font = UIHelpers.GetFont();
             seedText.fontSize = 24;
             seedText.color = Color.white;
             seedText.alignment = TextAnchor.MiddleLeft;
@@ -131,7 +131,7 @@ namespace Terranova.UI
                 labelRect.anchorMax = Vector2.one;
                 labelRect.sizeDelta = Vector2.zero;
                 var label = labelGo.AddComponent<Text>();
-                label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.font = UIHelpers.GetFont();
                 label.fontSize = 22;
                 label.color = Color.white;
                 label.alignment = TextAnchor.MiddleCenter;
@@ -159,7 +159,7 @@ namespace Terranova.UI
             verRect.anchoredPosition = new Vector2(-12, 8);
             verRect.sizeDelta = new Vector2(200, 30);
             _versionText = verGo.AddComponent<Text>();
-            _versionText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _versionText.font = UIHelpers.GetFont();
             _versionText.fontSize = 18;
             _versionText.color = new Color(0.5f, 0.5f, 0.5f);
             _versionText.alignment = TextAnchor.LowerRight;
@@ -252,7 +252,7 @@ namespace Terranova.UI
             rect.anchoredPosition = position;
             rect.sizeDelta = new Vector2(600, fontSize + 20);
             var text = go.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = UIHelpers.GetFont();
             text.fontSize = fontSize;
             text.color = color;
             text.alignment = TextAnchor.MiddleCenter;
@@ -288,7 +288,7 @@ namespace Terranova.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.sizeDelta = Vector2.zero;
             var text = labelGo.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = UIHelpers.GetFont();
             text.fontSize = fontSize;
             text.color = Color.white;
             text.alignment = TextAnchor.MiddleCenter;

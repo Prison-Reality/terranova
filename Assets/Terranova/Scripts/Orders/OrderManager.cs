@@ -39,6 +39,14 @@ namespace Terranova.Orders
         /// <summary>All orders (active, paused, completed, failed).</summary>
         public IReadOnlyList<OrderDefinition> AllOrders => _orders;
 
+        /// <summary>v0.5.10: Get an order by ID.</summary>
+        public OrderDefinition GetOrder(int orderId)
+        {
+            foreach (var order in _orders)
+                if (order.Id == orderId) return order;
+            return null;
+        }
+
         /// <summary>Only active orders.</summary>
         public List<OrderDefinition> ActiveOrders
         {
@@ -62,6 +70,7 @@ namespace Terranova.Orders
             OrderQueryBridge.HasOrderForSettler = HasOrderForSettler;
             OrderQueryBridge.IsTaskForbidden = IsTaskForbidden;
             OrderQueryBridge.GetActiveOrderSentence = GetActiveOrderSentence;
+            OrderQueryBridge.IsMaterialForbidden = IsMaterialForbidden;
         }
 
         private void OnDestroy()
@@ -72,6 +81,7 @@ namespace Terranova.Orders
                 OrderQueryBridge.HasOrderForSettler = null;
                 OrderQueryBridge.IsTaskForbidden = null;
                 OrderQueryBridge.GetActiveOrderSentence = null;
+                OrderQueryBridge.IsMaterialForbidden = null;
             }
         }
 
@@ -232,6 +242,39 @@ namespace Terranova.Orders
                 var forbiddenType = order.ToTaskType();
                 if (forbiddenType == taskType)
                     return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// v0.5.9 P12: Check if an Avoid order forbids a specific material for a settler.
+        /// E.g. "All avoid Mushrooms" → material "mushrooms" is forbidden for all.
+        /// </summary>
+        public bool IsMaterialForbidden(string settlerName, string materialId)
+        {
+            if (string.IsNullOrEmpty(materialId)) return false;
+            string matLower = materialId.ToLower();
+
+            foreach (var order in _orders)
+            {
+                if (order.Status != OrderStatus.Active) continue;
+                if (order.Predicate != OrderPredicate.Avoid) continue;
+
+                bool applies = order.Subject == OrderSubject.All
+                    || (order.Subject == OrderSubject.Named && order.SettlerName == settlerName);
+                if (!applies) continue;
+
+                foreach (var obj in order.Objects)
+                {
+                    string objId = obj.Id?.ToLower() ?? "";
+                    string objName = obj.DisplayName?.ToLower() ?? "";
+
+                    // Match "mushrooms" against material IDs containing "mushroom"
+                    // Match "berries" against material IDs containing "berry" or "berries"
+                    if (matLower.Contains(objId) || objId.Contains(matLower)
+                        || matLower.Contains(objName) || objName.Contains(matLower))
+                        return true;
+                }
             }
             return false;
         }

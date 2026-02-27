@@ -559,12 +559,16 @@ namespace Terranova.Core
         /// <summary>Get the display sentence for a settler's active order, or null if none.</summary>
         public static System.Func<string, string> GetActiveOrderSentence;
 
+        /// <summary>v0.5.9 P12: Check if a specific food/material is avoided (e.g. "avoid mushrooms").</summary>
+        public static System.Func<string, string, bool> IsMaterialForbidden;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
             HasOrderForSettler = null;
             IsTaskForbidden = null;
             GetActiveOrderSentence = null;
+            IsMaterialForbidden = null;
         }
     }
 }

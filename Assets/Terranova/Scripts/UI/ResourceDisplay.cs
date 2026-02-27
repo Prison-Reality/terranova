@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -160,8 +161,9 @@ namespace Terranova.UI
             if (_settlers > 0)
                 _gameStarted = true;
 
+            // v0.5.9 P10: Auto-respawn after 5 seconds instead of game-over screen
             if (_gameStarted && _settlers <= 0)
-                ShowGameOver();
+                StartCoroutine(AutoRespawnTribe());
         }
 
         private void OnResourceChanged(ResourceChangedEvent evt)
@@ -565,7 +567,7 @@ namespace Terranova.UI
             rect.anchoredPosition = position;
             rect.sizeDelta = size;
             var text = go.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = UIHelpers.GetFont();
             text.fontSize = fontSize;
             text.color = color;
             text.alignment = TextAnchor.MiddleCenter;
@@ -599,7 +601,7 @@ namespace Terranova.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.sizeDelta = Vector2.zero;
             var text = labelObj.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = UIHelpers.GetFont();
             text.fontSize = fontSize;
             text.color = Color.white;
             text.alignment = TextAnchor.MiddleCenter;
@@ -607,7 +609,68 @@ namespace Terranova.UI
             text.text = label;
         }
 
-        // ─── Game Over ────────────────────────────────────────────
+        // ─── v0.5.9 P10: Auto Tribe Respawn ─────────────────────
+
+        private bool _respawnInProgress;
+
+        /// <summary>
+        /// v0.5.9 P10: When all settlers die, wait 5 seconds, show message,
+        /// then automatically spawn a new tribe. No game-over screen.
+        /// </summary>
+        private IEnumerator AutoRespawnTribe()
+        {
+            if (_respawnInProgress) yield break;
+            _respawnInProgress = true;
+
+            // Show "tribe lost" message overlay
+            var messagePanel = new GameObject("TribeDeathMessage");
+            messagePanel.transform.SetParent(transform, false);
+            messagePanel.transform.SetAsLastSibling();
+            var bgImage = messagePanel.AddComponent<Image>();
+            bgImage.color = new Color(0f, 0f, 0f, 0.6f);
+            var bgRect = messagePanel.GetComponent<RectTransform>();
+            bgRect.anchorMin = Vector2.zero;
+            bgRect.anchorMax = Vector2.one;
+            bgRect.offsetMin = Vector2.zero;
+            bgRect.offsetMax = Vector2.zero;
+
+            var textObj = new GameObject("Message");
+            textObj.transform.SetParent(messagePanel.transform, false);
+            var textRect = textObj.AddComponent<RectTransform>();
+            textRect.anchorMin = new Vector2(0.1f, 0.35f);
+            textRect.anchorMax = new Vector2(0.9f, 0.65f);
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+            var msgText = textObj.AddComponent<Text>();
+            msgText.font = UIHelpers.GetFont();
+            msgText.fontSize = 36;
+            msgText.color = new Color(0.9f, 0.85f, 0.7f);
+            msgText.alignment = TextAnchor.MiddleCenter;
+            msgText.fontStyle = FontStyle.Italic;
+
+            var dnc = DayNightCycle.Instance;
+            int dayCount = dnc != null ? dnc.DayCount : GameState.DayCount;
+            msgText.text = $"All settlers perished on Day {dayCount}...";
+
+            // Wait 3 seconds with death message
+            yield return new WaitForSecondsRealtime(3f);
+
+            msgText.text = "A new tribe arrives at the abandoned camp.";
+
+            // Wait 2 more seconds
+            yield return new WaitForSecondsRealtime(2f);
+
+            // Spawn new tribe (reuses existing SpawnNewTribe logic)
+            SpawnNewTribe();
+
+            // Clean up message
+            if (messagePanel != null)
+                Destroy(messagePanel);
+
+            _respawnInProgress = false;
+        }
+
+        // ─── Game Over (legacy, kept for Restart button) ─────────
 
         private void ShowGameOver()
         {
@@ -636,7 +699,7 @@ namespace Terranova.UI
             titleRect.anchoredPosition = new Vector2(0, 60);
             titleRect.sizeDelta = new Vector2(700, 100);
             var titleText = titleObj.AddComponent<Text>();
-            titleText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            titleText.font = UIHelpers.GetFont();
             titleText.fontSize = 72;
             titleText.color = new Color(0.9f, 0.3f, 0.3f);
             titleText.alignment = TextAnchor.MiddleCenter;
@@ -655,7 +718,7 @@ namespace Terranova.UI
             subRect.anchoredPosition = new Vector2(0, 10);
             subRect.sizeDelta = new Vector2(700, 50);
             var subText = subtitleObj.AddComponent<Text>();
-            subText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            subText.font = UIHelpers.GetFont();
             subText.fontSize = 32;
             subText.color = new Color(0.8f, 0.8f, 0.8f);
             subText.alignment = TextAnchor.MiddleCenter;
@@ -705,7 +768,7 @@ namespace Terranova.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.sizeDelta = Vector2.zero;
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = UIHelpers.GetFont();
             label.fontSize = 28;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleCenter;
@@ -752,6 +815,10 @@ namespace Terranova.UI
                 foreach (var order in OrderManager.Instance.AllOrders)
                     OrderManager.Instance.CancelOrder(order.Id);
             }
+
+            // v0.5.10: Record new tribe in chronicle before spawning
+            var chronicle = ChronicleManager.Instance;
+            if (chronicle != null) chronicle.RecordNewTribe();
 
             // Spawn new settlers at campfire
             var spawner = Object.FindFirstObjectByType<SettlerSpawner>();
@@ -866,7 +933,7 @@ namespace Terranova.UI
             versionText.fontSize = 18;
             versionText.fontStyle = FontStyle.Bold;
             versionText.color = Color.white;
-            versionText.text = "v0.5.8";
+            versionText.text = "v0.5.10";
         }
 
         /// <summary>
@@ -938,7 +1005,7 @@ namespace Terranova.UI
                 labelRect.offsetMin = new Vector2(15, 0);
                 labelRect.offsetMax = Vector2.zero;
                 var labelText = labelObj.AddComponent<Text>();
-                labelText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                labelText.font = UIHelpers.GetFont();
                 labelText.fontSize = 14;
                 labelText.color = Color.white;
                 labelText.alignment = TextAnchor.MiddleLeft;
@@ -1008,7 +1075,7 @@ namespace Terranova.UI
                 labelRect.sizeDelta = Vector2.zero;
 
                 var label = labelObj.AddComponent<Text>();
-                label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.font = UIHelpers.GetFont();
                 label.fontSize = _fontSize - 4;
                 label.color = Color.white;
                 label.alignment = TextAnchor.MiddleCenter;
@@ -1054,7 +1121,7 @@ namespace Terranova.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.sizeDelta = Vector2.zero;
             var label = labelObj.AddComponent<Text>();
-            label.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.font = UIHelpers.GetFont();
             label.fontSize = _fontSize - 4;
             label.color = Color.white;
             label.alignment = TextAnchor.MiddleCenter;
@@ -1100,7 +1167,7 @@ namespace Terranova.UI
             olRect.anchorMax = Vector2.one;
             olRect.sizeDelta = Vector2.zero;
             var olText = ordersLabel.AddComponent<Text>();
-            olText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            olText.font = UIHelpers.GetFont();
             olText.fontSize = 16;
             olText.color = Color.white;
             olText.alignment = TextAnchor.MiddleCenter;
@@ -1135,12 +1202,47 @@ namespace Terranova.UI
             dlRect.anchorMax = Vector2.one;
             dlRect.sizeDelta = Vector2.zero;
             var dlText = discLabel.AddComponent<Text>();
-            dlText.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            dlText.font = UIHelpers.GetFont();
             dlText.fontSize = 15;
             dlText.color = Color.white;
             dlText.alignment = TextAnchor.MiddleCenter;
             dlText.fontStyle = FontStyle.Bold;
             dlText.text = "Discoveries";
+
+            // v0.5.10: Chronicle button — right of Discoveries
+            float chronicleX = discoveriesX + btnW + 10 + spacing;
+            var chronObj = new GameObject("ChronicleButton");
+            chronObj.transform.SetParent(transform, false);
+            var chronRect = chronObj.AddComponent<RectTransform>();
+            chronRect.anchorMin = new Vector2(0, 0);
+            chronRect.anchorMax = new Vector2(0, 0);
+            chronRect.pivot = new Vector2(0, 0);
+            chronRect.anchoredPosition = new Vector2(chronicleX, 20);
+            chronRect.sizeDelta = new Vector2(btnW + 10, btnH);
+
+            var chronImg = chronObj.AddComponent<Image>();
+            chronImg.color = new Color(0.35f, 0.25f, 0.12f, 0.9f); // Parchment brown
+            var chronBtn = chronObj.AddComponent<Button>();
+            chronBtn.targetGraphic = chronImg;
+            chronBtn.onClick.AddListener(() =>
+            {
+                var chronicleUI = ChronicleUI.Instance;
+                if (chronicleUI != null) chronicleUI.Toggle();
+            });
+
+            var chronLabel = new GameObject("Label");
+            chronLabel.transform.SetParent(chronObj.transform, false);
+            var clRect = chronLabel.AddComponent<RectTransform>();
+            clRect.anchorMin = Vector2.zero;
+            clRect.anchorMax = Vector2.one;
+            clRect.sizeDelta = Vector2.zero;
+            var clText = chronLabel.AddComponent<Text>();
+            clText.font = UIHelpers.GetFont();
+            clText.fontSize = 15;
+            clText.color = new Color(0.90f, 0.85f, 0.70f);
+            clText.alignment = TextAnchor.MiddleCenter;
+            clText.fontStyle = FontStyle.Bold;
+            clText.text = "Chronicle";
         }
 
         private void SetSpeed(int speedIndex)
@@ -1200,7 +1302,7 @@ namespace Terranova.UI
             rectTransform.sizeDelta = size;
 
             var text = textObj.AddComponent<Text>();
-            text.font = UnityEngine.Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.font = UIHelpers.GetFont();
             text.fontSize = _fontSize;
             text.color = Color.white;
             text.alignment = alignment;

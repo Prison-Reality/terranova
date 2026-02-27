@@ -82,6 +82,10 @@ namespace Terranova.Population
             // Spawn settlers in a circle around the campfire
             SpawnSettlers(world, campfirePos);
 
+            // v0.5.10: Record game start in the tribal chronicle
+            var chronicle = Terranova.UI.ChronicleManager.Instance;
+            if (chronicle != null) chronicle.RecordGameStart();
+
             // Dismiss loading screen — everything is ready
             EventBus.Publish(new WorldGenerationProgressEvent
             {
