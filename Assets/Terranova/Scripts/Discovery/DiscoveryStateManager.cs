@@ -31,6 +31,18 @@ namespace Terranova.Discovery
                 return;
             }
             Instance = this;
+
+            // Register bridge callbacks so Population can query/trigger discoveries
+            // without a direct assembly reference (avoids circular dependency).
+            DiscoveryQueryBridge.IsDiscovered = IsDiscovered;
+            DiscoveryQueryBridge.CompleteDiscoveryByName = (displayName, description, capabilities, reason) =>
+            {
+                var def = ScriptableObject.CreateInstance<DiscoveryDefinition>();
+                def.DisplayName = displayName;
+                def.Description = description;
+                def.UnlockedCapabilities = capabilities;
+                CompleteDiscovery(def, reason);
+            };
         }
 
         private void OnDestroy()

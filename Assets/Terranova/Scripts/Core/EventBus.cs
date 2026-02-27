@@ -571,4 +571,28 @@ namespace Terranova.Core
             IsMaterialForbidden = null;
         }
     }
+
+    /// <summary>
+    /// Bridge for cross-assembly discovery queries.
+    /// Lives in Core so Population can check/trigger discoveries without
+    /// referencing the Discovery assembly (which would create a circular dependency).
+    /// DiscoveryStateManager registers its callbacks on Awake.
+    /// </summary>
+    public static class DiscoveryQueryBridge
+    {
+        /// <summary>Check if a discovery with the given name has been completed.</summary>
+        public static System.Func<string, bool> IsDiscovered;
+
+        /// <summary>
+        /// Complete a discovery by name. Parameters: displayName, description, unlockedCapabilities, triggerSource.
+        /// </summary>
+        public static System.Action<string, string, string[], string> CompleteDiscoveryByName;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            IsDiscovered = null;
+            CompleteDiscoveryByName = null;
+        }
+    }
 }

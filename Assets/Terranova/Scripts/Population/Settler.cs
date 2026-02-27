@@ -3,7 +3,6 @@ using UnityEngine.AI;
 using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Buildings;
-using Terranova.Discovery;
 using Terranova.Resources;
 using Terranova.Terrain;
 
@@ -1712,11 +1711,9 @@ namespace Terranova.Population
             if (_trait == SettlerTrait.Cautious && Random.value < 0.3f)
                 return;
 
-            // Check Plant Knowledge discovery
-            bool hasPlantKnowledge = false;
-            var dsm = DiscoveryStateManager.Instance;
-            if (dsm != null)
-                hasPlantKnowledge = dsm.IsDiscovered("Plant Knowledge");
+            // Check Plant Knowledge discovery via bridge (avoids circular assembly ref)
+            bool hasPlantKnowledge = DiscoveryQueryBridge.IsDiscovered != null
+                && DiscoveryQueryBridge.IsDiscovered("Plant Knowledge");
 
             float poisonChance = hasPlantKnowledge ? POISON_CHANCE_WITH_KNOWLEDGE : POISON_CHANCE_BASE;
 
@@ -1770,19 +1767,18 @@ namespace Terranova.Population
         /// </summary>
         private void TryTriggerPlantKnowledgeDiscovery()
         {
-            var dsm = DiscoveryStateManager.Instance;
-            if (dsm == null) return;
-            if (dsm.IsDiscovered("Plant Knowledge")) return;
+            if (DiscoveryQueryBridge.IsDiscovered == null || DiscoveryQueryBridge.CompleteDiscoveryByName == null) return;
+            if (DiscoveryQueryBridge.IsDiscovered("Plant Knowledge")) return;
 
             // 40% chance to trigger Plant Knowledge after severe/fatal poisoning
             if (Random.value > 0.4f) return;
 
-            // Create and complete a Plant Knowledge discovery
-            var def = ScriptableObject.CreateInstance<DiscoveryDefinition>();
-            def.DisplayName = "Plant Knowledge";
-            def.Description = "Through bitter experience, the tribe has learned to identify poisonous plants. Food poisoning is now much less likely.";
-            def.UnlockedCapabilities = new[] { "plant_knowledge" };
-            dsm.CompleteDiscovery(def, "a settler's poisoning");
+            // Complete Plant Knowledge discovery via bridge (avoids circular assembly ref)
+            DiscoveryQueryBridge.CompleteDiscoveryByName(
+                "Plant Knowledge",
+                "Through bitter experience, the tribe has learned to identify poisonous plants. Food poisoning is now much less likely.",
+                new[] { "plant_knowledge" },
+                "a settler's poisoning");
         }
 
         /// <summary>
