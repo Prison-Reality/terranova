@@ -12,37 +12,46 @@ using Terranova.Terrain;
 namespace Terranova.UI
 {
     /// <summary>
-    /// HUD showing day counter, categorized resource panel, speed controls,
-    /// event/tool-break/needs notifications, game over panel, pause menu,
-    /// discovery modal overlays, and version label.
+    /// Screens 3, 8 and 9 of the "Kodex" design.
     ///
-    /// MS4 Changes:
-    ///   Feature 1.5 - "Day X" counter via DayNightCycle.Instance.DayCount.
-    ///   Feature 2.4 - Categorized resource panel with expand/collapse per category.
-    ///   Feature 3.4 - Tool break notifications.
-    ///   Feature 4.5 - Warning notifications for critical thirst/hunger.
+    /// Screen 3 — the in-game HUD: a leather stock bar top-left, the season/day and
+    /// speed cluster top-right, warning and event bands under the stock bar, and the
+    /// tab row bottom-left that opens orders, discoveries, chronicle and the build
+    /// tray.
+    /// Screen 8 — the "Innehalten" pause card.
+    /// Screen 9 — the discovery moment modal.
     ///
-    /// v0.4.6 Changes:
-    ///   - Pause menu with Resume and Back to Main Menu.
-    ///   - Discovery modal overlay (tap OK to dismiss) replaces toast.
-    ///
-    /// Scene setup:
-    ///   1. Create Canvas (Screen Space - Overlay)
-    ///   2. Add this component to the Canvas
-    ///   3. It auto-creates UI elements on Start
+    /// This is presentation only: every event subscription, the speed values, the
+    /// discovery queue and the tribe respawn behave exactly as before.
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
-        [Header("UI Settings")]
-        [Tooltip("Font size for resource text.")]
-        [SerializeField] private int _fontSize = 24;
+        // ═══════════════════════════════════════════════════════════
+        //  L A Y O U T   ( 1 5 3 6  x  1 1 5 2 )
+        // ═══════════════════════════════════════════════════════════
 
-        [Tooltip("Minimum touch target size in points (Apple HIG: 44pt).")]
-        [SerializeField] private float _minTouchTarget = 44f;
+        private const float MARGIN = 24f;
+        private const float TILE_H = 72f;
+        private const float TRAY_PAD = 8f;
+        private const float TILE_GAP = 6f;
+        private const float STOCK_LABEL_W = 118f;
+        private const float STOCK_TILE_W = 176f;
+        private const float BAND_H = 48f;
+        private const float BAND_MIN_W = 320f;
+        private const float BAND_MAX_W = 900f;
+        private const float BAND_TEXT_PAD = 20f;
+        private const float BAND_Y = 120f;
+        private const float TIME_TILE_W = 264f;
+        private const float SPEED_TILE = 68f;
+        private const float SPEED_Y = 120f;
+        private const float TAB_H = 84f;
+        private const float TAB_GAP = 10f;
+        private const float TAB_PAD = 30f;
+        private const float TAB_ACCENT_H = 6f;
 
         // ─── Speed Widget ─────────────────────────────────────────
         private static readonly float[] SPEED_VALUES = { 0f, 1f, 3f, 20f };
-        private static readonly string[] SPEED_LABELS = { "||", "1x", "3x", "20x" };
+        private static readonly string[] SPEED_LABELS = { "II", "1×", "3×", "20×" };
         private int _currentSpeedIndex = 1;
 
         // ─── Game State ───────────────────────────────────────────
@@ -50,39 +59,60 @@ namespace Terranova.UI
         private bool _foodWarning;
         private bool _gameStarted;
 
-        // ─── Category Colors ──────────────────────────────────────
-        private static readonly Color COLOR_WOOD  = new Color(0.55f, 0.33f, 0.14f);
-        private static readonly Color COLOR_STONE = new Color(0.60f, 0.60f, 0.60f);
-        private static readonly Color COLOR_PLANT = new Color(0.30f, 0.75f, 0.30f);
-        private static readonly Color COLOR_ANIMAL = new Color(0.75f, 0.40f, 0.30f);
-        private static readonly Color COLOR_OTHER = new Color(0.50f, 0.50f, 0.70f);
+        // ─── Stock Bar ────────────────────────────────────────────
 
-        // ─── Category Expand/Collapse State ───────────────────────
-        private bool _woodExpanded;
-        private bool _stoneExpanded;
-        private bool _plantExpanded;
-        private bool _animalExpanded;
-        private bool _otherExpanded;
+        /// <summary>One parchment tile in the stock bar.</summary>
+        private struct StockTile
+        {
+            public GameObject Root;
+            public Text Value;
+        }
 
-        // Track which categories have discoveries unlocked (show detail after)
-        private readonly HashSet<string> _discoveredCategories = new();
+        private StockTile _woodTile;
+        private StockTile _stoneTile;
+        private StockTile _foodTile;
+        private StockTile _settlerTile;
 
-        // ─── UI References ────────────────────────────────────────
-        private Text _resourceText;
-        private Text _eventText;
-        private Text _dayCounterText;
+        // ─── Bands ────────────────────────────────────────────────
+        private GameObject _warningBand;
         private Text _warningText;
-        private Button[] _speedButtons;
-        private Text[] _speedButtonTexts;
+        private GameObject _eventBand;
+        private Image _eventBandImage;
+        private Text _eventText;
         private float _eventDisplayTimer;
-        private GameObject _gameOverPanel;
 
-        // Category buttons for expand/collapse
-        private Button _woodButton;
-        private Button _stoneButton;
-        private Button _plantButton;
-        private Button _animalButton;
-        private Button _otherButton;
+        /// <summary>Fade-out length of the event band, per the design.</summary>
+        private const float FADE_DURATION = 0.3f;
+
+        // ─── Time & Speed ─────────────────────────────────────────
+        private Text _seasonDayText;
+        private Text _tribeDayText;
+        private Image[] _speedTileBgs;
+
+        // ─── Tabs ─────────────────────────────────────────────────
+
+        /// <summary>A bottom-left tab. Trays and overlays own their own state;
+        /// the tab only reflects it.</summary>
+        private struct Tab
+        {
+            public GameObject Root;
+            public Image Background;
+            public GameObject AccentEdge;
+            public GameObject Counter;
+            public Text CounterText;
+            public bool OnLeather;
+        }
+
+        private const int TAB_ORDERS = 0;
+        private const int TAB_DISCOVERIES = 1;
+        private const int TAB_CHRONICLE = 2;
+        private const int TAB_BUILD = 3;
+
+        private Tab[] _tabs;
+        private BuildMenu _buildMenu;
+
+        /// <summary>Discoveries made since the log was last opened.</summary>
+        private int _unreadDiscoveries;
 
         // ─── Pause Menu ──────────────────────────────────────────
         private GameObject _pauseMenuPanel;
@@ -92,12 +122,14 @@ namespace Terranova.UI
         private GameObject _discoveryModalPanel;
         private readonly Queue<DiscoveryMadeEvent> _discoveryQueue = new();
 
-        // ─── Lifecycle ────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  L I F E C Y C L E
+        // ═══════════════════════════════════════════════════════════
 
         private void Start()
         {
             CreateUI();
-            UpdateDisplay();
+            UpdateStock();
 
             // Legacy events
             EventBus.Subscribe<BuildingPlacedEvent>(OnBuildingPlaced);
@@ -118,25 +150,453 @@ namespace Terranova.UI
 
         private void Update()
         {
-            // Fade out event notification after timer expires
-            if (_eventDisplayTimer > 0)
-            {
-                _eventDisplayTimer -= Time.deltaTime;
-                if (_eventDisplayTimer <= 0 && _eventText != null)
-                {
-                    _eventText.text = "";
-                    _eventText.color = Color.yellow;
-                }
-            }
-
-            // Check food supply for warning
+            TickEventBand();
             CheckFoodWarning();
-
-            // Update day counter display
-            UpdateDayCounter();
+            UpdateTimeCluster();
+            UpdateTabStates();
         }
 
-        // ─── Food Warning ─────────────────────────────────────────
+        private void OnDestroy()
+        {
+            // Legacy events
+            EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
+            EventBus.Unsubscribe<BuildingCompletedEvent>(OnBuildingCompleted);
+            EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
+            EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
+            EventBus.Unsubscribe<SettlerDiedEvent>(OnSettlerDied);
+            EventBus.Unsubscribe<FoodWarningEvent>(OnFoodWarning);
+            EventBus.Unsubscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
+
+            // MS4 events
+            EventBus.Unsubscribe<DayChangedEvent>(OnDayChanged);
+            EventBus.Unsubscribe<ToolBrokeEvent>(OnToolBroke);
+            EventBus.Unsubscribe<NeedsCriticalEvent>(OnNeedsCritical);
+            EventBus.Unsubscribe<SettlerPoisonedEvent>(OnSettlerPoisoned);
+            EventBus.Unsubscribe<SeasonNotificationEvent>(OnSeasonNotification);
+
+            Time.timeScale = 1f;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  H U D   C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
+
+        private void CreateUI()
+        {
+            var canvas = GetComponent<Canvas>();
+            if (canvas == null)
+            {
+                canvas = gameObject.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.sortingOrder = 100;
+            }
+
+            var scaler = GetComponent<CanvasScaler>();
+            if (scaler == null) scaler = gameObject.AddComponent<CanvasScaler>();
+            UITheme.ConfigureScaler(scaler);
+
+            // GraphicRaycaster required for button clicks and IsPointerOverGameObject()
+            if (GetComponent<GraphicRaycaster>() == null)
+                gameObject.AddComponent<GraphicRaycaster>();
+
+            _buildMenu = GetComponent<BuildMenu>();
+
+            BuildStockBar();
+            BuildBands();
+            BuildTimeCluster();
+            BuildSpeedCluster();
+            BuildTabRow();
+            BuildVersionLabel();
+
+            UpdateSpeedTiles();
+        }
+
+        /// <summary>Top-left leather tray with the "Vorrat" label and four value tiles.</summary>
+        private void BuildStockBar()
+        {
+            float trayW = TRAY_PAD * 2f + STOCK_LABEL_W + TRAY_PAD
+                          + 4f * STOCK_TILE_W + 3f * TILE_GAP;
+            float trayH = TRAY_PAD * 2f + TILE_H;
+
+            var tray = UIKit.Anchored(transform, "StockTray", new Vector2(0f, 1f),
+                new Vector2(MARGIN, -MARGIN), new Vector2(trayW, trayH));
+            UIKit.Fill(tray, UITheme.Leather, blocksTaps: false);
+
+            // Label tile
+            var label = TileRect(tray.transform, "VorratLabel", TRAY_PAD, STOCK_LABEL_W);
+            UIKit.Fill(label, UITheme.Paper, blocksTaps: false);
+            UIKit.FillText(label.transform, "Vorrat", UITheme.Display, 22, UITheme.Ink);
+
+            float x = TRAY_PAD + STOCK_LABEL_W + TRAY_PAD;
+            _woodTile = BuildStockTile(tray.transform, "Holz", UITheme.MatWood, x);
+            x += STOCK_TILE_W + TILE_GAP;
+            _stoneTile = BuildStockTile(tray.transform, "Stein", UITheme.MatStone, x);
+            x += STOCK_TILE_W + TILE_GAP;
+            _foodTile = BuildStockTile(tray.transform, "Nahrung", UITheme.MatFood, x);
+            x += STOCK_TILE_W + TILE_GAP;
+            _settlerTile = BuildStockTile(tray.transform, "Siedler", UITheme.MatSettler, x);
+        }
+
+        /// <summary>
+        /// One stock tile: colour square, material name, right-aligned amount.
+        /// </summary>
+        private StockTile BuildStockTile(Transform tray, string name, Color dot, float x)
+        {
+            var tile = TileRect(tray, $"Stock_{name}", x, STOCK_TILE_W);
+            UIKit.Fill(tile, UITheme.Paper, blocksTaps: false);
+
+            // Anchored to the tile edges rather than centred, so a long name and a
+            // three-digit amount cannot collide in the middle.
+            const float dotSize = 16f;
+            const float edgePad = 16f;
+            const float valueWidth = 62f;
+
+            UIKit.MaterialDot(tile.transform,
+                new Vector2(-STOCK_TILE_W * 0.5f + edgePad + dotSize * 0.5f, 0f), dotSize, dot);
+
+            float nameLeft = edgePad + dotSize + 12f;
+            var nameGo = UIKit.Anchored(tile.transform, "Name", new Vector2(0f, 0.5f),
+                new Vector2(nameLeft, 0f),
+                new Vector2(STOCK_TILE_W - nameLeft - valueWidth - edgePad, TILE_H));
+            UIKit.Label(nameGo, name, UITheme.Body, 26, UITheme.Ink, TextAnchor.MiddleLeft);
+
+            var valueGo = UIKit.Anchored(tile.transform, "Value", new Vector2(1f, 0.5f),
+                new Vector2(-edgePad, 0f), new Vector2(valueWidth, TILE_H));
+            var value = UIKit.Label(valueGo, "0", UITheme.Body, 30, UITheme.Ink,
+                TextAnchor.MiddleRight);
+
+            // Border last so a shortage frame draws over the tile contents.
+            UIKit.Border(tile.transform, UITheme.Paper, 0f);
+
+            return new StockTile { Root = tile, Value = value };
+        }
+
+        /// <summary>A fixed-height tile pinned to the left edge of a tray.</summary>
+        private static GameObject TileRect(Transform tray, string name, float x, float width)
+        {
+            return UIKit.Anchored(tray, name, new Vector2(0f, 0.5f),
+                new Vector2(x, 0f), new Vector2(width, TILE_H));
+        }
+
+        /// <summary>
+        /// The warning band (persistent while food is short) and the event band
+        /// (transient notifications), both under the stock bar.
+        /// </summary>
+        private void BuildBands()
+        {
+            _warningBand = UIKit.Anchored(transform, "WarningBand", new Vector2(0f, 1f),
+                new Vector2(MARGIN, -BAND_Y), new Vector2(BAND_MIN_W, BAND_H));
+            UIKit.Fill(_warningBand, UITheme.Danger, blocksTaps: false);
+            _warningText = UIKit.FillText(_warningBand.transform, "", UITheme.Body, 24,
+                UITheme.CreamBright, TextAnchor.MiddleLeft, inset: BAND_TEXT_PAD);
+            _warningBand.SetActive(false);
+
+            _eventBand = UIKit.Anchored(transform, "EventBand", new Vector2(0f, 1f),
+                new Vector2(MARGIN, -(BAND_Y + BAND_H + 8f)), new Vector2(BAND_MIN_W, BAND_H));
+            _eventBandImage = UIKit.Fill(_eventBand, UITheme.Accent, blocksTaps: false);
+            _eventText = UIKit.FillText(_eventBand.transform, "", UITheme.Body, 24,
+                UITheme.CreamBright, TextAnchor.MiddleLeft, inset: BAND_TEXT_PAD);
+            _eventBand.SetActive(false);
+        }
+
+        /// <summary>Top-right tray with season, day-in-season and total tribe day.</summary>
+        private void BuildTimeCluster()
+        {
+            float trayW = TRAY_PAD * 2f + TIME_TILE_W;
+            float trayH = TRAY_PAD * 2f + TILE_H;
+
+            var tray = UIKit.Anchored(transform, "TimeTray", new Vector2(1f, 1f),
+                new Vector2(-MARGIN, -MARGIN), new Vector2(trayW, trayH));
+            UIKit.Fill(tray, UITheme.Leather, blocksTaps: false);
+
+            var tile = UIKit.Anchored(tray.transform, "TimeTile", new Vector2(0f, 0.5f),
+                new Vector2(TRAY_PAD, 0f), new Vector2(TIME_TILE_W, TILE_H));
+            UIKit.Fill(tile, UITheme.Paper, blocksTaps: false);
+
+            var seasonGo = UIKit.Centered(tile.transform, "SeasonDay", new Vector2(0f, 15f),
+                new Vector2(TIME_TILE_W - 24f, 34f));
+            _seasonDayText = UIKit.Label(seasonGo, "Frühling · Tag 1", UITheme.Display, 26,
+                UITheme.Ink, TextAnchor.MiddleLeft);
+
+            var tribeGo = UIKit.Centered(tile.transform, "TribeDay", new Vector2(0f, -14f),
+                new Vector2(TIME_TILE_W - 24f, 26f));
+            _tribeDayText = UIKit.Label(tribeGo, "1. Tag des Stammes", UITheme.Body,
+                UITheme.FontMin, UITheme.InkMuted, TextAnchor.MiddleLeft);
+        }
+
+        /// <summary>Second top-right tray: the four speed steps plus the menu tile.</summary>
+        private void BuildSpeedCluster()
+        {
+            int tileCount = SPEED_LABELS.Length + 1;   // + "Menü"
+            float trayW = TRAY_PAD * 2f + tileCount * SPEED_TILE + (tileCount - 1) * TILE_GAP;
+            float trayH = TRAY_PAD * 2f + SPEED_TILE;
+
+            var tray = UIKit.Anchored(transform, "SpeedTray", new Vector2(1f, 1f),
+                new Vector2(-MARGIN, -SPEED_Y), new Vector2(trayW, trayH));
+            UIKit.Fill(tray, UITheme.Leather, blocksTaps: false);
+
+            _speedTileBgs = new Image[SPEED_LABELS.Length];
+
+            for (int i = 0; i < SPEED_LABELS.Length; i++)
+            {
+                int index = i;
+                var tile = UIKit.Anchored(tray.transform, $"Speed_{SPEED_LABELS[i]}",
+                    new Vector2(0f, 0.5f),
+                    new Vector2(TRAY_PAD + i * (SPEED_TILE + TILE_GAP), 0f),
+                    new Vector2(SPEED_TILE, SPEED_TILE));
+                var button = UIKit.Surface(tile, UITheme.PaperDeep, () => SetSpeed(index));
+                _speedTileBgs[i] = button.targetGraphic as Image;
+                UIKit.FillText(tile.transform, SPEED_LABELS[i], UITheme.Body, 26, UITheme.Ink);
+            }
+
+            var menuTile = UIKit.Anchored(tray.transform, "MenuTile", new Vector2(0f, 0.5f),
+                new Vector2(TRAY_PAD + SPEED_LABELS.Length * (SPEED_TILE + TILE_GAP), 0f),
+                new Vector2(SPEED_TILE, SPEED_TILE));
+            UIKit.Surface(menuTile, UITheme.PaperDeep, ShowPauseMenu);
+            UIKit.FillText(menuTile.transform, "Menü", UITheme.Display, 22, UITheme.Ink);
+        }
+
+        /// <summary>Bottom-left tab row: orders, discoveries, chronicle, build tray.</summary>
+        private void BuildTabRow()
+        {
+            _tabs = new Tab[4];
+
+            string[] labels = { "Befehle", "Entdeckungen", "Chronik", "Bauen" };
+            float x = MARGIN;
+
+            for (int i = 0; i < labels.Length; i++)
+            {
+                int index = i;
+                bool onLeather = index == TAB_BUILD;
+                float width = UIKit.EstimateTextWidth(labels[i], 26) + 2f * TAB_PAD;
+                if (index == TAB_DISCOVERIES) width += 46f;   // room for the counter chip
+
+                var tab = UIKit.Anchored(transform, $"Tab_{labels[i]}", new Vector2(0f, 0f),
+                    new Vector2(x, MARGIN), new Vector2(width, TAB_H));
+                var button = UIKit.Surface(tab, onLeather ? UITheme.Leather : UITheme.PaperDeep,
+                    () => OnTabTapped(index));
+
+                var labelGo = UIKit.Centered(tab.transform, "Label",
+                    new Vector2(index == TAB_DISCOVERIES ? -20f : 0f, 0f),
+                    new Vector2(width - 2f * TAB_PAD, TAB_H));
+                UIKit.Label(labelGo, labels[i], UITheme.Display, 26,
+                    onLeather ? UITheme.Cream : UITheme.Ink, TextAnchor.MiddleCenter);
+
+                GameObject counter = null;
+                Text counterText = null;
+                if (index == TAB_DISCOVERIES)
+                {
+                    counter = UIKit.Centered(tab.transform, "Counter",
+                        new Vector2(width * 0.5f - 40f, 0f), new Vector2(40f, 40f));
+                    UIKit.Fill(counter, UITheme.Danger, blocksTaps: false);
+                    counterText = UIKit.FillText(counter.transform, "", UITheme.Body, 20,
+                        UITheme.CreamBright);
+                    counter.SetActive(false);
+                }
+
+                var accent = UIKit.TopEdge(tab.transform, UITheme.Accent, TAB_ACCENT_H);
+                accent.SetActive(false);
+
+                _tabs[i] = new Tab
+                {
+                    Root = tab,
+                    Background = button.targetGraphic as Image,
+                    AccentEdge = accent,
+                    Counter = counter,
+                    CounterText = counterText,
+                    OnLeather = onLeather
+                };
+
+                x += width + TAB_GAP;
+            }
+        }
+
+        private void BuildVersionLabel()
+        {
+            var go = UIKit.Anchored(transform, "Version", new Vector2(1f, 0f),
+                new Vector2(-MARGIN, 20f), new Vector2(240f, 32f));
+            UIKit.Label(go, GameVersion.Label, UITheme.Body, 20,
+                new Color(1f, 1f, 1f, 0.55f), TextAnchor.LowerRight);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  H U D   U P D A T E S
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>Refresh the four stock tiles from the resource manager.</summary>
+        private void UpdateStock()
+        {
+            var rm = ResourceManager.Instance;
+            SetTile(_woodTile, rm != null ? rm.Wood : 0, false);
+            SetTile(_stoneTile, rm != null ? rm.Stone : 0, false);
+            SetTile(_foodTile, rm != null ? rm.Food : 0, _foodWarning);
+            SetTile(_settlerTile, _settlers, false);
+        }
+
+        /// <summary>
+        /// Write a value into a tile. On shortage the tile gains a terracotta frame
+        /// and the number turns terracotta too.
+        /// </summary>
+        private static void SetTile(StockTile tile, int amount, bool isShort)
+        {
+            if (tile.Value == null) return;
+            tile.Value.text = amount.ToString();
+            tile.Value.color = isShort ? UITheme.Danger : UITheme.Ink;
+            UIKit.SetBorder(tile.Root.transform,
+                isShort ? UITheme.Danger : UITheme.Paper,
+                isShort ? UITheme.Border : 0f);
+        }
+
+        /// <summary>Season, day in season, and total days survived.</summary>
+        private void UpdateTimeCluster()
+        {
+            if (_seasonDayText == null) return;
+
+            var dnc = DayNightCycle.Instance;
+            int totalDay = dnc != null ? dnc.DayCount : GameState.DayCount;
+
+            var season = SeasonManager.Instance;
+            _seasonDayText.text = season != null
+                ? $"{UIStrings.Season(season.CurrentSeason)} · Tag {season.DayInSeason}"
+                : $"Tag {totalDay}";
+            _tribeDayText.text = $"{totalDay}. Tag des Stammes";
+        }
+
+        /// <summary>
+        /// Active speed step is accented, the rest sit on recessed parchment.
+        /// The labels stay ink in either state, so only the fill changes.
+        /// </summary>
+        private void UpdateSpeedTiles()
+        {
+            if (_speedTileBgs == null) return;
+
+            for (int i = 0; i < _speedTileBgs.Length; i++)
+            {
+                if (_speedTileBgs[i] == null) continue;
+                _speedTileBgs[i].color = i == _currentSpeedIndex
+                    ? UITheme.Accent
+                    : UITheme.PaperDeep;
+            }
+        }
+
+        /// <summary>
+        /// Tabs mirror whatever overlay is currently open. The overlays own their
+        /// state, so polling keeps the tabs honest without extra events.
+        /// </summary>
+        private void UpdateTabStates()
+        {
+            if (_tabs == null) return;
+
+            SetTabActive(TAB_ORDERS, KlappbuchUI.Instance != null && KlappbuchUI.Instance.IsOpen);
+            SetTabActive(TAB_DISCOVERIES, DiscoveryLogUI.Instance != null && DiscoveryLogUI.Instance.IsOpen);
+            SetTabActive(TAB_CHRONICLE, ChronicleUI.Instance != null && ChronicleUI.Instance.IsOpen);
+            SetTabActive(TAB_BUILD, _buildMenu != null && _buildMenu.IsOpen);
+
+            // Clear the unread badge once the player has the log open.
+            if (DiscoveryLogUI.Instance != null && DiscoveryLogUI.Instance.IsOpen && _unreadDiscoveries > 0)
+            {
+                _unreadDiscoveries = 0;
+                UpdateDiscoveryCounter();
+            }
+        }
+
+        private void SetTabActive(int index, bool active)
+        {
+            var tab = _tabs[index];
+            if (tab.Root == null) return;
+
+            if (tab.AccentEdge != null) tab.AccentEdge.SetActive(active);
+
+            if (tab.OnLeather)
+            {
+                // The build tab keeps its leather face; only the accent edge changes.
+                if (tab.Background != null)
+                    tab.Background.color = active ? UITheme.LeatherLight : UITheme.Leather;
+                return;
+            }
+
+            if (tab.Background != null)
+                tab.Background.color = active ? UITheme.Paper : UITheme.PaperDeep;
+        }
+
+        private void UpdateDiscoveryCounter()
+        {
+            var tab = _tabs[TAB_DISCOVERIES];
+            if (tab.Counter == null) return;
+
+            bool show = _unreadDiscoveries > 0;
+            tab.Counter.SetActive(show);
+            if (show) tab.CounterText.text = _unreadDiscoveries.ToString();
+        }
+
+        private void OnTabTapped(int index)
+        {
+            switch (index)
+            {
+                case TAB_ORDERS:
+                    EventBus.Publish(new OpenKlappbuchEvent());
+                    break;
+                case TAB_DISCOVERIES:
+                    if (DiscoveryLogUI.Instance != null) DiscoveryLogUI.Instance.Toggle();
+                    break;
+                case TAB_CHRONICLE:
+                    if (ChronicleUI.Instance != null) ChronicleUI.Instance.Toggle();
+                    break;
+                case TAB_BUILD:
+                    if (_buildMenu != null) _buildMenu.Toggle();
+                    break;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  B A N D S
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Show a transient message in the event band: 4 s at full opacity, then a
+        /// 0.3 s fade, matching the design's notification behaviour.
+        /// </summary>
+        private void ShowEvent(string message, Color bandColor, float duration = 4f)
+        {
+            if (_eventBand == null) return;
+
+            _eventText.text = message;
+            _eventBandImage.color = bandColor;
+            _eventText.color = UITheme.CreamBright;
+            FitBand(_eventBand, message);
+            _eventDisplayTimer = duration + FADE_DURATION;
+            _eventBand.SetActive(true);
+        }
+
+        /// <summary>
+        /// Size a band to its message. The design's bands hug their text, and a
+        /// fixed width would either clip a season notice or leave a wide empty slab
+        /// behind a short warning.
+        /// </summary>
+        private static void FitBand(GameObject band, string message)
+        {
+            var rect = (RectTransform)band.transform;
+            float width = UIKit.EstimateTextWidth(message, 24) + 2f * BAND_TEXT_PAD;
+            rect.sizeDelta = new Vector2(Mathf.Clamp(width, BAND_MIN_W, BAND_MAX_W), BAND_H);
+        }
+
+        private void TickEventBand()
+        {
+            if (_eventDisplayTimer <= 0f || _eventBand == null) return;
+
+            _eventDisplayTimer -= Time.unscaledDeltaTime;
+
+            if (_eventDisplayTimer <= 0f)
+            {
+                _eventBand.SetActive(false);
+                return;
+            }
+
+            // Fade over the last FADE_DURATION seconds.
+            float alpha = Mathf.Clamp01(_eventDisplayTimer / FADE_DURATION);
+            _eventBandImage.color = UITheme.WithAlpha(_eventBandImage.color, alpha);
+            _eventText.color = UITheme.WithAlpha(UITheme.CreamBright, alpha);
+        }
 
         private void CheckFoodWarning()
         {
@@ -151,56 +611,62 @@ namespace Terranova.UI
             }
         }
 
-        // ─── Event Handlers ───────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  E V E N T   H A N D L E R S
+        // ═══════════════════════════════════════════════════════════
 
         private void OnPopulationChanged(PopulationChangedEvent evt)
         {
             _settlers = evt.CurrentPopulation;
-            UpdateDisplay();
+            UpdateStock();
 
             if (_settlers > 0)
                 _gameStarted = true;
 
-            // v0.5.9 P10: Auto-respawn after 5 seconds instead of game-over screen
+            // v0.5.9 P10: Auto-respawn after a few seconds instead of a game-over screen
             if (_gameStarted && _settlers <= 0)
                 StartCoroutine(AutoRespawnTribe());
         }
 
-        private void OnResourceChanged(ResourceChangedEvent evt)
-        {
-            UpdateDisplay();
-        }
+        private void OnResourceChanged(ResourceChangedEvent evt) => UpdateStock();
 
         private void OnBuildingPlaced(BuildingPlacedEvent evt)
         {
-            UpdateDisplay();
-            ShowEvent($"Building {evt.BuildingName}...", Color.yellow, 3f);
+            UpdateStock();
+            ShowEvent($"{UIStrings.Building(evt.BuildingName)} wird gebaut", UITheme.Accent, 3f);
         }
 
         private void OnBuildingCompleted(BuildingCompletedEvent evt)
         {
-            ShowEvent($"{evt.BuildingName} complete!", Color.yellow, 3f);
+            ShowEvent($"{UIStrings.Building(evt.BuildingName)} steht", UITheme.Accent, 3f);
         }
 
         private void OnSettlerDied(SettlerDiedEvent evt)
         {
-            ShowEvent($"{evt.SettlerName} died ({evt.CauseOfDeath})", new Color(0.9f, 0.3f, 0.3f), 4f);
+            ShowEvent($"{evt.SettlerName} starb {UIStrings.DeathCause(evt.CauseOfDeath)}",
+                UITheme.Danger);
         }
 
         private void OnFoodWarning(FoodWarningEvent evt)
         {
             _foodWarning = evt.IsWarning;
-            if (_warningText != null)
-                _warningText.text = _foodWarning ? "Food is running low!" : "";
+            if (_warningBand == null) return;
+
+            _warningBand.SetActive(_foodWarning);
+            if (_foodWarning)
+            {
+                const string message = "Die Nahrung geht zur Neige";
+                _warningText.text = message;
+                FitBand(_warningBand, message);
+            }
+            UpdateStock();
         }
 
         private void OnDiscoveryMade(DiscoveryMadeEvent evt)
         {
-            // Track that categories may now show detail
-            _discoveredCategories.Add(evt.DiscoveryName);
-            UpdateDisplay();
+            _unreadDiscoveries++;
+            UpdateDiscoveryCounter();
 
-            // Queue discovery for modal display
             _discoveryQueue.Enqueue(evt);
 
             // Show immediately if no modal is currently active
@@ -208,201 +674,119 @@ namespace Terranova.UI
                 ShowNextDiscoveryModal();
         }
 
-        /// <summary>Feature 1.5: Day counter updated via event.</summary>
-        private void OnDayChanged(DayChangedEvent evt)
-        {
-            UpdateDayCounter();
-        }
+        /// <summary>Feature 1.5: day counter refresh.</summary>
+        private void OnDayChanged(DayChangedEvent evt) => UpdateTimeCluster();
 
-        /// <summary>Feature 3.4: Tool break notification.</summary>
+        /// <summary>Feature 3.4: tool break notification.</summary>
         private void OnToolBroke(ToolBrokeEvent evt)
         {
-            ShowEvent($"{evt.SettlerName}'s {evt.ToolName} broke!", new Color(1f, 0.6f, 0.2f), 4f);
+            ShowEvent($"{evt.SettlerName}: {evt.ToolName} ist zerbrochen", UITheme.Danger);
         }
 
-        /// <summary>Feature 4.5: Critical needs warning.</summary>
+        /// <summary>Feature 4.5: critical needs warning.</summary>
         private void OnNeedsCritical(NeedsCriticalEvent evt)
         {
-            Color warningColor = evt.NeedType == "Thirst"
-                ? new Color(0.3f, 0.6f, 1f)   // Blue for thirst
-                : new Color(1f, 0.5f, 0.2f);   // Orange for hunger
-            ShowEvent($"{evt.SettlerName}: {evt.NeedType} critical!", warningColor, 3f);
+            string need = evt.NeedType == "Thirst" ? "verdurstet fast" : "hungert";
+            ShowEvent($"{evt.SettlerName} {need}", UITheme.Danger, 3f);
         }
 
-        /// <summary>Feature 4.3: Settler poisoned notification.</summary>
+        /// <summary>Feature 4.3: settler poisoned notification.</summary>
         private void OnSettlerPoisoned(SettlerPoisonedEvent evt)
         {
-            ShowEvent($"{evt.SettlerName} poisoned by {evt.FoodName}!", new Color(0.6f, 0.2f, 0.8f), 4f);
+            ShowEvent($"{evt.SettlerName} hat sich vergiftet", UITheme.Danger);
         }
 
-        /// <summary>Feature 10: Season change notification.</summary>
+        /// <summary>Feature 10: season change notification.</summary>
         private void OnSeasonNotification(SeasonNotificationEvent evt)
         {
-            var season = SeasonManager.Instance;
-            Color color = season != null ? season.CurrentSeason switch
-            {
-                Season.Spring => new Color(0.5f, 0.9f, 0.4f),
-                Season.Summer => new Color(1f, 0.85f, 0.3f),
-                Season.Autumn => new Color(0.9f, 0.6f, 0.2f),
-                Season.Winter => new Color(0.7f, 0.8f, 1f),
-                _ => Color.white
-            } : Color.white;
-            ShowEvent(evt.Message, color, 5f);
+            ShowEvent(UIStrings.SeasonMessage(evt.Message), UITheme.Accent, 5f);
         }
-
-        // ─── Display Helpers ──────────────────────────────────────
-
-        private void ShowEvent(string message, Color color, float duration)
-        {
-            if (_eventText == null) return;
-            _eventText.text = message;
-            _eventText.color = color;
-            _eventDisplayTimer = duration;
-        }
-
-        /// <summary>
-        /// Feature 1.5 + 10: Update "Spring - Day 3  |  Day 13" counter.
-        /// </summary>
-        private void UpdateDayCounter()
-        {
-            if (_dayCounterText == null) return;
-            var dnc = DayNightCycle.Instance;
-            int day = dnc != null ? dnc.DayCount : GameState.DayCount;
-
-            // v0.5.6: Show season + day-in-season alongside total day count
-            var season = SeasonManager.Instance;
-            if (season != null)
-                _dayCounterText.text = $"{season.GetDisplayString()}  |  Day {day}";
-            else
-                _dayCounterText.text = $"Day {day}";
-        }
-
-        /// <summary>
-        /// Feature 2.4: Categorized resource panel.
-        /// At start: simple "Wood: 12 | Stone: 8 | Food: 5"
-        /// After discoveries: categories expand to show individual materials.
-        /// </summary>
-        private void UpdateDisplay()
-        {
-            if (_resourceText == null) return;
-
-            // Always read from ResourceManager for accurate counters
-            var rm = ResourceManager.Instance;
-            if (rm != null)
-            {
-                _resourceText.text = $"Wood: {rm.Wood} | Stone: {rm.Stone} | Food: {rm.Food} | Settlers: {_settlers}";
-            }
-            else
-            {
-                _resourceText.text = $"Settlers: {_settlers}";
-            }
-        }
-
-        /// <summary>
-        /// Build category header line (e.g., "Wood: 12").
-        /// If expanded and has discovered materials, append detail underneath.
-        /// </summary>
-        private string BuildCategoryLine(string label, int total, MaterialCategory category,
-            bool expanded, MaterialInventory inv)
-        {
-            string line = $"{label}: {total}";
-
-            if (expanded && HasDiscoveredMaterials(category, inv))
-            {
-                line += BuildCategoryDetail(category, inv);
-            }
-
-            return line;
-        }
-
-        /// <summary>
-        /// Build detail breakdown for a category showing individual materials.
-        /// Uses colored square icon per material type: [#] Name: count
-        /// </summary>
-        private string BuildCategoryDetail(MaterialCategory category, MaterialInventory inv)
-        {
-            var breakdown = inv.GetCategoryBreakdown(category);
-            if (breakdown.Count == 0) return "";
-
-            System.Text.StringBuilder detail = new();
-            foreach (var kvp in breakdown)
-            {
-                string displayName = inv.GetDisplayName(kvp.Key);
-                detail.Append($"\n  \u25A0 {displayName}: {kvp.Value}");
-            }
-
-            return detail.ToString();
-        }
-
-        /// <summary>
-        /// Check if a category has any materials whose discovery is unlocked
-        /// (meaning we can show individual detail).
-        /// </summary>
-        private bool HasDiscoveredMaterials(MaterialCategory category, MaterialInventory inv)
-        {
-            var materials = MaterialDatabase.GetByCategory(category);
-            foreach (var mat in materials)
-            {
-                if (!string.IsNullOrEmpty(mat.DiscoveryRequired) && inv.IsMaterialDiscovered(mat.Id))
-                    return true;
-            }
-            return false;
-        }
-
-        // ─── Category Toggle ──────────────────────────────────────
-
-        private void ToggleWood() { _woodExpanded = !_woodExpanded; UpdateDisplay(); }
-        private void ToggleStone() { _stoneExpanded = !_stoneExpanded; UpdateDisplay(); }
-        private void TogglePlant() { _plantExpanded = !_plantExpanded; UpdateDisplay(); }
-        private void ToggleAnimal() { _animalExpanded = !_animalExpanded; UpdateDisplay(); }
-        private void ToggleOther() { _otherExpanded = !_otherExpanded; UpdateDisplay(); }
 
         // ═══════════════════════════════════════════════════════════
-        //
-        //  P A U S E   M E N U
-        //
+        //  S P E E D
         // ═══════════════════════════════════════════════════════════
 
+        private void SetSpeed(int speedIndex)
+        {
+            if (speedIndex < 0 || speedIndex >= SPEED_VALUES.Length) return;
+            if (_pauseMenuPanel != null) return;
+            if (_discoveryModalPanel != null) return;
+
+            _currentSpeedIndex = speedIndex;
+            Time.timeScale = SPEED_VALUES[speedIndex];
+            UpdateSpeedTiles();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  S C R E E N   8  —  P A U S E
+        // ═══════════════════════════════════════════════════════════
+
+        private const float PAUSE_CARD_W = 760f;
+        private const float PAUSE_CARD_H = 712f;
+        private const float PAUSE_PAD = 56f;
+
         /// <summary>
-        /// Show the pause menu overlay. Pauses the game and offers
-        /// Resume and Back to Main Menu options.
+        /// The "Innehalten" card: resume, read the chronicle, settings, and back to
+        /// the main menu. Pauses the game while open.
         /// </summary>
         private void ShowPauseMenu()
         {
-            // Don't open if game over, discovery modal, or already paused
-            if (_gameOverPanel != null) return;
             if (_discoveryModalPanel != null) return;
             if (_pauseMenuPanel != null) return;
 
             _savedTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
-            // Full-screen dark overlay
-            _pauseMenuPanel = new GameObject("PauseMenuPanel");
-            _pauseMenuPanel.transform.SetParent(transform, false);
-            _pauseMenuPanel.transform.SetAsLastSibling();
-            var panelImage = _pauseMenuPanel.AddComponent<Image>();
-            panelImage.color = new Color(0f, 0f, 0f, 0.7f);
-            var panelRect = _pauseMenuPanel.GetComponent<RectTransform>();
-            panelRect.anchorMin = Vector2.zero;
-            panelRect.anchorMax = Vector2.one;
-            panelRect.offsetMin = Vector2.zero;
-            panelRect.offsetMax = Vector2.zero;
+            _pauseMenuPanel = UIKit.Scrim(transform, "PausePanel", UITheme.ScrimPause, null);
 
-            // "PAUSED" title
-            var titleObj = CreateModalText(_pauseMenuPanel.transform, "PAUSED",
-                48, Color.white, new Vector2(0, 80), new Vector2(400, 70));
-            titleObj.fontStyle = FontStyle.Bold;
+            var paper = UIKit.Card(_pauseMenuPanel.transform, "PauseCard", Vector2.zero,
+                new Vector2(PAUSE_CARD_W, PAUSE_CARD_H));
+            UIKit.BlockTaps(paper);
 
-            // Resume button
-            CreateModalButton(_pauseMenuPanel.transform, "Resume",
-                new Vector2(0, 0), new Vector2(250, 60),
-                new Color(0.2f, 0.5f, 0.3f, 0.95f), 28, HidePauseMenu);
+            float innerH = PAUSE_CARD_H - 2f * UITheme.FrameWide;
+            float contentW = PAUSE_CARD_W - 2f * UITheme.FrameWide - 2f * PAUSE_PAD;
+            float top = innerH * 0.5f - PAUSE_PAD;
 
-            // Back to Main Menu button
-            CreateModalButton(_pauseMenuPanel.transform, "Back to Main Menu",
-                new Vector2(0, -80), new Vector2(250, 60),
-                new Color(0.5f, 0.25f, 0.2f, 0.95f), 24, BackToMainMenu);
+            UIKit.Heading(paper.transform, UITheme.Track("Innehalten", UITheme.Tracking.Tight),
+                52, UITheme.Ink, new Vector2(0f, top - 35f), new Vector2(contentW, 70f));
+            top -= 70f + 8f;
+
+            var dnc = DayNightCycle.Instance;
+            int totalDay = dnc != null ? dnc.DayCount : GameState.DayCount;
+            var season = SeasonManager.Instance;
+            string subtitle = season != null
+                ? $"{UIStrings.Season(season.CurrentSeason)} · Tag {season.DayInSeason} · {totalDay}. Tag des Stammes"
+                : $"{totalDay}. Tag des Stammes";
+            UIKit.Body(paper.transform, subtitle, 23, UITheme.InkMuted,
+                new Vector2(0f, top - 17f), new Vector2(contentW, 34f), TextAnchor.MiddleCenter);
+            top -= 34f + 20f;
+
+            UIKit.Rule(paper.transform, new Vector2(0f, top - 1f), 180f, UITheme.Rule);
+            top -= 2f + 26f;
+
+            UIKit.PrimaryButton(paper.transform, "Weiterspielen",
+                new Vector2(0f, top - UITheme.ButtonHeight * 0.5f),
+                new Vector2(contentW, UITheme.ButtonHeight), 30, HidePauseMenu);
+            top -= UITheme.ButtonHeight + 20f;
+
+            UIKit.SecondaryButton(paper.transform, "Chronik lesen",
+                new Vector2(0f, top - UITheme.ButtonHeight * 0.5f),
+                new Vector2(contentW, UITheme.ButtonHeight), 28, OpenChronicleFromPause);
+            top -= UITheme.ButtonHeight + 20f;
+
+            // Settings has no screen yet — shown, but visibly unavailable rather
+            // than a button that silently does nothing.
+            var settings = UIKit.SecondaryButton(paper.transform, "Einstellungen",
+                new Vector2(0f, top - UITheme.ButtonHeight * 0.5f),
+                new Vector2(contentW, UITheme.ButtonHeight), 28, null);
+            settings.interactable = false;
+            var settingsLabel = settings.GetComponentInChildren<Text>();
+            if (settingsLabel != null) settingsLabel.color = UITheme.InkMuted;
+            top -= UITheme.ButtonHeight + 20f;
+
+            UIKit.DangerButton(paper.transform, "Zurück zum Hauptmenü",
+                new Vector2(0f, top - UITheme.ButtonHeight * 0.5f),
+                new Vector2(contentW, UITheme.ButtonHeight), 28, BackToMainMenu);
         }
 
         private void HidePauseMenu()
@@ -411,6 +795,13 @@ namespace Terranova.UI
             Destroy(_pauseMenuPanel);
             _pauseMenuPanel = null;
             Time.timeScale = _savedTimeScale;
+        }
+
+        /// <summary>Close the pause card and open the chronicle straight away.</summary>
+        private void OpenChronicleFromPause()
+        {
+            HidePauseMenu();
+            if (ChronicleUI.Instance != null) ChronicleUI.Instance.Open();
         }
 
         private void BackToMainMenu()
@@ -427,14 +818,18 @@ namespace Terranova.UI
         }
 
         // ═══════════════════════════════════════════════════════════
-        //
-        //  D I S C O V E R Y   M O D A L
-        //
+        //  S C R E E N   9  —  D I S C O V E R Y   M O M E N T
         // ═══════════════════════════════════════════════════════════
 
+        private const float DISC_CARD_W = 900f;
+        private const float DISC_CARD_H = 834f;
+        private const float DISC_IMAGE_H = 280f;
+        private const float DISC_PAD_X = 56f;
+        private const float DISC_PAD_Y = 38f;
+
         /// <summary>
-        /// Show the next queued discovery as a modal overlay.
-        /// Pauses the game. Player must tap OK to dismiss.
+        /// Show the next queued discovery. Pauses the game; the player taps
+        /// "Weiter" to continue, which then works through the rest of the queue.
         /// </summary>
         private void ShowNextDiscoveryModal()
         {
@@ -450,85 +845,82 @@ namespace Terranova.UI
                 Time.timeScale = 0f;
             }
 
-            // Full-screen dark overlay
-            _discoveryModalPanel = new GameObject("DiscoveryModalPanel");
-            _discoveryModalPanel.transform.SetParent(transform, false);
-            _discoveryModalPanel.transform.SetAsLastSibling();
-            var panelImage = _discoveryModalPanel.AddComponent<Image>();
-            panelImage.color = new Color(0f, 0f, 0f, 0.8f);
-            var panelRect = _discoveryModalPanel.GetComponent<RectTransform>();
-            panelRect.anchorMin = Vector2.zero;
-            panelRect.anchorMax = Vector2.one;
-            panelRect.offsetMin = Vector2.zero;
-            panelRect.offsetMax = Vector2.zero;
+            _discoveryModalPanel = UIKit.Scrim(transform, "DiscoveryModal",
+                UITheme.ScrimDiscovery, null);
 
-            // Inner card background
-            var cardObj = new GameObject("Card");
-            cardObj.transform.SetParent(_discoveryModalPanel.transform, false);
-            var cardImage = cardObj.AddComponent<Image>();
-            cardImage.color = new Color(0.12f, 0.15f, 0.10f, 0.95f);
-            var cardRect = cardObj.GetComponent<RectTransform>();
-            cardRect.anchorMin = new Vector2(0.5f, 0.5f);
-            cardRect.anchorMax = new Vector2(0.5f, 0.5f);
-            cardRect.pivot = new Vector2(0.5f, 0.5f);
-            cardRect.anchoredPosition = Vector2.zero;
-            cardRect.sizeDelta = new Vector2(600, 420);
+            var paper = UIKit.Card(_discoveryModalPanel.transform, "DiscoveryCard", Vector2.zero,
+                new Vector2(DISC_CARD_W, DISC_CARD_H));
+            UIKit.BlockTaps(paper);
 
-            // Border accent
-            var borderObj = new GameObject("Border");
-            borderObj.transform.SetParent(cardObj.transform, false);
-            var borderImage = borderObj.AddComponent<Image>();
-            borderImage.color = new Color(0.3f, 0.8f, 0.4f, 0.8f);
-            var borderRect = borderObj.GetComponent<RectTransform>();
-            borderRect.anchorMin = Vector2.zero;
-            borderRect.anchorMax = new Vector2(1f, 0f);
-            borderRect.pivot = new Vector2(0.5f, 0f);
-            borderRect.anchoredPosition = new Vector2(0, -3);
-            borderRect.sizeDelta = new Vector2(0, 3);
+            float innerW = DISC_CARD_W - 2f * UITheme.FrameWide;
+            float innerH = DISC_CARD_H - 2f * UITheme.FrameWide;
+            float contentW = innerW - 2f * DISC_PAD_X;
+            float top = innerH * 0.5f;
 
-            // "DISCOVERY!" header
-            var headerText = CreateModalText(cardObj.transform, "DISCOVERY!",
-                42, new Color(0.4f, 1f, 0.6f), new Vector2(0, 160), new Vector2(560, 60));
-            headerText.fontStyle = FontStyle.Bold;
+            // Scene render, full card width, flush with the top edge.
+            UIKit.ImageSlot(paper.transform, "RENDER: DER FUND",
+                new Vector2(0f, top - DISC_IMAGE_H * 0.5f), new Vector2(innerW, DISC_IMAGE_H));
+            top -= DISC_IMAGE_H + DISC_PAD_Y;
 
-            // Discovery name
-            CreateModalText(cardObj.transform, evt.DiscoveryName,
-                32, Color.white, new Vector2(0, 100), new Vector2(560, 50));
+            UIKit.Heading(paper.transform, UITheme.Track("NEUE ENTDECKUNG", UITheme.Tracking.Loose),
+                22, UITheme.Accent, new Vector2(0f, top - 17f), new Vector2(contentW, 34f));
+            top -= 34f + 12f;
 
-            // Description
-            if (!string.IsNullOrEmpty(evt.Description))
+            UIKit.Heading(paper.transform, UIStrings.Discovery(evt.DiscoveryName), 64, UITheme.Ink,
+                new Vector2(0f, top - 40f), new Vector2(contentW, 80f));
+            top -= 80f + 16f;
+
+            UIKit.Rule(paper.transform, new Vector2(0f, top - 1f), 180f, UITheme.Rule);
+            top -= 2f + 24f;
+
+            // Description and occasion pulled into one sentence.
+            string moment = UIStrings.DiscoveryMoment(evt.DiscoveryName, evt.Reason, evt.Description);
+            var body = UIKit.Body(paper.transform, moment, 26, UITheme.InkSoft,
+                new Vector2(0f, top - 45f), new Vector2(contentW, 90f), TextAnchor.UpperCenter);
+            body.lineSpacing = 1.1f;
+            top -= 90f + 26f;
+
+            BuildUnlockChips(paper.transform, evt.Unlocks, top - 26f, contentW);
+            top -= 52f + 26f;
+
+            UIKit.PrimaryButton(paper.transform, "Weiter",
+                new Vector2(0f, top - UITheme.ButtonHeight * 0.5f),
+                new Vector2(contentW, UITheme.ButtonHeight), 30, DismissDiscoveryModal);
+        }
+
+        /// <summary>
+        /// Turn the comma-separated unlock list into a centred row of chips.
+        /// </summary>
+        private void BuildUnlockChips(Transform parent, string unlocks, float centerY,
+            float contentW)
+        {
+            if (string.IsNullOrEmpty(unlocks)) return;
+
+            string[] items = unlocks.Split(',');
+            const int fontSize = 22;
+            const float gap = 14f;
+            const float height = 52f;
+
+            // Measure first so the row can be centred.
+            var widths = new float[items.Length];
+            float total = 0f;
+            for (int i = 0; i < items.Length; i++)
             {
-                var descText = CreateModalText(cardObj.transform, evt.Description,
-                    20, new Color(0.85f, 0.85f, 0.85f), new Vector2(0, 40), new Vector2(540, 60));
-                descText.horizontalOverflow = HorizontalWrapMode.Wrap;
-                descText.verticalOverflow = VerticalWrapMode.Overflow;
+                widths[i] = UIKit.EstimateTextWidth(items[i].Trim(), fontSize) + 44f;
+                total += widths[i];
             }
+            total += gap * (items.Length - 1);
 
-            // Reason (who discovered it and why)
-            if (!string.IsNullOrEmpty(evt.Reason))
+            float x = -total * 0.5f;
+            for (int i = 0; i < items.Length; i++)
             {
-                var reasonText = CreateModalText(cardObj.transform, evt.Reason,
-                    18, new Color(0.7f, 0.9f, 0.7f), new Vector2(0, -20), new Vector2(540, 40));
-                reasonText.fontStyle = FontStyle.Italic;
-                reasonText.horizontalOverflow = HorizontalWrapMode.Wrap;
+                string label = items[i].Trim();
+                if (label.Length == 0) continue;
+
+                UIKit.Chip(parent, label, new Vector2(x + widths[i] * 0.5f, centerY), height,
+                    UITheme.PaperDeep, UITheme.Accent, UITheme.Ink, fontSize);
+                x += widths[i] + gap;
             }
-
-            // Unlocks section
-            if (!string.IsNullOrEmpty(evt.Unlocks))
-            {
-                CreateModalText(cardObj.transform, "Unlocks:",
-                    18, new Color(1f, 0.85f, 0.3f), new Vector2(0, -60), new Vector2(540, 30));
-
-                var unlocksText = CreateModalText(cardObj.transform, evt.Unlocks,
-                    18, new Color(1f, 0.95f, 0.7f), new Vector2(0, -90), new Vector2(540, 50));
-                unlocksText.horizontalOverflow = HorizontalWrapMode.Wrap;
-                unlocksText.verticalOverflow = VerticalWrapMode.Overflow;
-            }
-
-            // OK button
-            CreateModalButton(cardObj.transform, "OK",
-                new Vector2(0, -160), new Vector2(160, 50),
-                new Color(0.25f, 0.55f, 0.3f, 0.95f), 26, DismissDiscoveryModal);
         }
 
         private void DismissDiscoveryModal()
@@ -551,229 +943,42 @@ namespace Terranova.UI
             }
         }
 
-        // ─── Modal UI Helpers ────────────────────────────────────
-
-        private Text CreateModalText(Transform parent, string content, int fontSize,
-            Color color, Vector2 position, Vector2 size)
-        {
-            string goName = string.IsNullOrEmpty(content) ? "ModalText"
-                : content.Length > 20 ? content.Substring(0, 20) : content;
-            var go = new GameObject(goName);
-            go.transform.SetParent(parent, false);
-            var rect = go.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = position;
-            rect.sizeDelta = size;
-            var text = go.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = fontSize;
-            text.color = color;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.text = content ?? "";
-            return text;
-        }
-
-        private void CreateModalButton(Transform parent, string label, Vector2 pos,
-            Vector2 size, Color bgColor, int fontSize, UnityEngine.Events.UnityAction onClick)
-        {
-            var btnObj = new GameObject($"Btn_{label}");
-            btnObj.transform.SetParent(parent, false);
-            var btnRect = btnObj.AddComponent<RectTransform>();
-            btnRect.anchorMin = new Vector2(0.5f, 0.5f);
-            btnRect.anchorMax = new Vector2(0.5f, 0.5f);
-            btnRect.pivot = new Vector2(0.5f, 0.5f);
-            btnRect.anchoredPosition = pos;
-            btnRect.sizeDelta = size;
-
-            var img = btnObj.AddComponent<Image>();
-            img.color = bgColor;
-
-            var btn = btnObj.AddComponent<Button>();
-            btn.targetGraphic = img;
-            btn.onClick.AddListener(onClick);
-
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(btnObj.transform, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            var text = labelObj.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = fontSize;
-            text.color = Color.white;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.fontStyle = FontStyle.Bold;
-            text.text = label;
-        }
-
-        // ─── v0.5.9 P10: Auto Tribe Respawn ─────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  T R I B E   R E S P A W N   ( v 0 . 5 . 9   P 1 0 )
+        // ═══════════════════════════════════════════════════════════
 
         private bool _respawnInProgress;
 
         /// <summary>
-        /// v0.5.9 P10: When all settlers die, wait 5 seconds, show message,
-        /// then automatically spawn a new tribe. No game-over screen.
+        /// When all settlers die: hold a parchment card for a few seconds, then
+        /// spawn a new tribe. No game-over screen.
         /// </summary>
         private IEnumerator AutoRespawnTribe()
         {
             if (_respawnInProgress) yield break;
             _respawnInProgress = true;
 
-            // Show "tribe lost" message overlay
-            var messagePanel = new GameObject("TribeDeathMessage");
-            messagePanel.transform.SetParent(transform, false);
-            messagePanel.transform.SetAsLastSibling();
-            var bgImage = messagePanel.AddComponent<Image>();
-            bgImage.color = new Color(0f, 0f, 0f, 0.6f);
-            var bgRect = messagePanel.GetComponent<RectTransform>();
-            bgRect.anchorMin = Vector2.zero;
-            bgRect.anchorMax = Vector2.one;
-            bgRect.offsetMin = Vector2.zero;
-            bgRect.offsetMax = Vector2.zero;
-
-            var textObj = new GameObject("Message");
-            textObj.transform.SetParent(messagePanel.transform, false);
-            var textRect = textObj.AddComponent<RectTransform>();
-            textRect.anchorMin = new Vector2(0.1f, 0.35f);
-            textRect.anchorMax = new Vector2(0.9f, 0.65f);
-            textRect.offsetMin = Vector2.zero;
-            textRect.offsetMax = Vector2.zero;
-            var msgText = textObj.AddComponent<Text>();
-            msgText.font = UIHelpers.GetFont();
-            msgText.fontSize = 36;
-            msgText.color = new Color(0.9f, 0.85f, 0.7f);
-            msgText.alignment = TextAnchor.MiddleCenter;
-            msgText.fontStyle = FontStyle.Italic;
+            var scrim = UIKit.Scrim(transform, "TribeDeathMessage", UITheme.ScrimPause, null);
+            var paper = UIKit.Card(scrim.transform, "DeathCard", Vector2.zero,
+                new Vector2(900f, 300f));
 
             var dnc = DayNightCycle.Instance;
             int dayCount = dnc != null ? dnc.DayCount : GameState.DayCount;
-            msgText.text = $"All settlers perished on Day {dayCount}...";
 
-            // Wait 3 seconds with death message
+            var message = UIKit.Quote(paper.transform,
+                $"Der Stamm erlosch am {dayCount}. Tag …", 34, UITheme.Ink,
+                Vector2.zero, new Vector2(760f, 160f));
+
             yield return new WaitForSecondsRealtime(3f);
 
-            msgText.text = "A new tribe arrives at the abandoned camp.";
+            message.text = "Ein neuer Stamm erreicht das verlassene Lager.";
 
-            // Wait 2 more seconds
             yield return new WaitForSecondsRealtime(2f);
 
-            // Spawn new tribe (reuses existing SpawnNewTribe logic)
             SpawnNewTribe();
 
-            // Clean up message
-            if (messagePanel != null)
-                Destroy(messagePanel);
-
+            if (scrim != null) Destroy(scrim);
             _respawnInProgress = false;
-        }
-
-        // ─── Game Over (legacy, kept for Restart button) ─────────
-
-        private void ShowGameOver()
-        {
-            if (_gameOverPanel != null) return;
-
-            Time.timeScale = 0f;
-
-            _gameOverPanel = new GameObject("GameOverPanel");
-            _gameOverPanel.transform.SetParent(transform, false);
-            _gameOverPanel.transform.SetAsLastSibling();
-            var panelImage = _gameOverPanel.AddComponent<Image>();
-            panelImage.color = new Color(0f, 0f, 0f, 0.75f);
-            var panelRect = _gameOverPanel.GetComponent<RectTransform>();
-            panelRect.anchorMin = Vector2.zero;
-            panelRect.anchorMax = Vector2.one;
-            panelRect.offsetMin = Vector2.zero;
-            panelRect.offsetMax = Vector2.zero;
-
-            // "Game Over" title
-            var titleObj = new GameObject("GameOverTitle");
-            titleObj.transform.SetParent(_gameOverPanel.transform, false);
-            var titleRect = titleObj.AddComponent<RectTransform>();
-            titleRect.anchorMin = new Vector2(0.5f, 0.5f);
-            titleRect.anchorMax = new Vector2(0.5f, 0.5f);
-            titleRect.pivot = new Vector2(0.5f, 0.5f);
-            titleRect.anchoredPosition = new Vector2(0, 60);
-            titleRect.sizeDelta = new Vector2(700, 100);
-            var titleText = titleObj.AddComponent<Text>();
-            titleText.font = UIHelpers.GetFont();
-            titleText.fontSize = 72;
-            titleText.color = new Color(0.9f, 0.3f, 0.3f);
-            titleText.alignment = TextAnchor.MiddleCenter;
-            titleText.fontStyle = FontStyle.Bold;
-            titleText.text = "GAME OVER";
-
-            // Subtitle with day count
-            var dnc = DayNightCycle.Instance;
-            int dayCount = dnc != null ? dnc.DayCount : GameState.DayCount;
-            var subtitleObj = new GameObject("GameOverSubtitle");
-            subtitleObj.transform.SetParent(_gameOverPanel.transform, false);
-            var subRect = subtitleObj.AddComponent<RectTransform>();
-            subRect.anchorMin = new Vector2(0.5f, 0.5f);
-            subRect.anchorMax = new Vector2(0.5f, 0.5f);
-            subRect.pivot = new Vector2(0.5f, 0.5f);
-            subRect.anchoredPosition = new Vector2(0, 10);
-            subRect.sizeDelta = new Vector2(700, 50);
-            var subText = subtitleObj.AddComponent<Text>();
-            subText.font = UIHelpers.GetFont();
-            subText.fontSize = 32;
-            subText.color = new Color(0.8f, 0.8f, 0.8f);
-            subText.alignment = TextAnchor.MiddleCenter;
-            subText.text = $"All settlers perished on Day {dayCount}";
-
-            float btnSize = _minTouchTarget * 2.5f;
-
-            // v0.5.2: "New Tribe" button — fog resets, terrain persists
-            var newTribeObj = new GameObject("NewTribeButton");
-            newTribeObj.transform.SetParent(_gameOverPanel.transform, false);
-            var ntRect = newTribeObj.AddComponent<RectTransform>();
-            ntRect.anchorMin = new Vector2(0.5f, 0.5f);
-            ntRect.anchorMax = new Vector2(0.5f, 0.5f);
-            ntRect.pivot = new Vector2(0.5f, 0.5f);
-            ntRect.anchoredPosition = new Vector2(0, -50);
-            ntRect.sizeDelta = new Vector2(btnSize, _minTouchTarget);
-            var ntImage = newTribeObj.AddComponent<Image>();
-            ntImage.color = new Color(0.5f, 0.35f, 0.15f, 0.95f);
-            var ntButton = newTribeObj.AddComponent<Button>();
-            ntButton.targetGraphic = ntImage;
-            ntButton.onClick.AddListener(SpawnNewTribe);
-            CreateButtonLabel(newTribeObj.transform, "NEW TRIBE");
-
-            // Restart button (full reset)
-            var btnObj = new GameObject("RestartButton");
-            btnObj.transform.SetParent(_gameOverPanel.transform, false);
-            var btnRect2 = btnObj.AddComponent<RectTransform>();
-            btnRect2.anchorMin = new Vector2(0.5f, 0.5f);
-            btnRect2.anchorMax = new Vector2(0.5f, 0.5f);
-            btnRect2.pivot = new Vector2(0.5f, 0.5f);
-            btnRect2.anchoredPosition = new Vector2(0, -110);
-            btnRect2.sizeDelta = new Vector2(btnSize, _minTouchTarget);
-            var btnImage = btnObj.AddComponent<Image>();
-            btnImage.color = new Color(0.2f, 0.5f, 0.3f, 0.9f);
-            var button = btnObj.AddComponent<Button>();
-            button.targetGraphic = btnImage;
-            button.onClick.AddListener(RestartGame);
-            CreateButtonLabel(btnObj.transform, "RESTART");
-        }
-
-        private void CreateButtonLabel(Transform parent, string text)
-        {
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(parent, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            var label = labelObj.AddComponent<Text>();
-            label.font = UIHelpers.GetFont();
-            label.fontSize = 28;
-            label.color = Color.white;
-            label.alignment = TextAnchor.MiddleCenter;
-            label.fontStyle = FontStyle.Bold;
-            label.text = text;
         }
 
         /// <summary>
@@ -824,532 +1029,7 @@ namespace Terranova.UI
             var spawner = Object.FindFirstObjectByType<SettlerSpawner>();
             if (spawner != null) spawner.RespawnSettlers();
 
-            // Remove game over panel
-            if (_gameOverPanel != null)
-            {
-                Destroy(_gameOverPanel);
-                _gameOverPanel = null;
-            }
-
             Debug.Log($"[ResourceDisplay] New tribe spawned! Generation {GameState.TribeGeneration}");
-        }
-
-        private void RestartGame()
-        {
-            EventBus.Clear();
-            Time.timeScale = 1f;
-            // Return to main menu so player can pick seed/biome
-            GameState.GameStarted = false;
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
-        }
-
-        // ─── UI Construction ──────────────────────────────────────
-
-        private void CreateUI()
-        {
-            // Ensure we have a Canvas
-            Canvas canvas = GetComponent<Canvas>();
-            if (canvas == null)
-            {
-                canvas = gameObject.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                canvas.sortingOrder = 100;
-            }
-
-            // Canvas Scaler for consistent sizing
-            if (GetComponent<CanvasScaler>() == null)
-            {
-                var scaler = gameObject.AddComponent<CanvasScaler>();
-                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-                scaler.referenceResolution = new Vector2(1920, 1080);
-            }
-
-            // GraphicRaycaster required for button clicks and IsPointerOverGameObject()
-            if (GetComponent<GraphicRaycaster>() == null)
-                gameObject.AddComponent<GraphicRaycaster>();
-
-            // Resource text (top-left) — taller to support expanded category detail
-            _resourceText = CreateText("ResourceText",
-                new Vector2(20, -20),
-                new Vector2(800, 200),
-                TextAnchor.UpperLeft);
-            _resourceText.verticalOverflow = VerticalWrapMode.Overflow;
-
-            // Event notification (top-center)
-            _eventText = CreateText("EventText",
-                new Vector2(0, -20),
-                new Vector2(500, 40),
-                TextAnchor.UpperCenter);
-            _eventText.color = Color.yellow;
-
-            // Day counter (top-right) — includes season (v0.5.6)
-            _dayCounterText = CreateText("DayCounterText",
-                new Vector2(-20, -20),
-                new Vector2(380, 40),
-                TextAnchor.UpperRight);
-            _dayCounterText.text = "Spring - Day 1  |  Day 1";
-
-            // Warning text (below resource text)
-            _warningText = CreateText("WarningText",
-                new Vector2(20, -230),
-                new Vector2(400, 30),
-                TextAnchor.UpperLeft);
-            _warningText.color = new Color(1f, 0.3f, 0.3f);
-            _warningText.fontSize = _fontSize - 2;
-            _warningText.text = "";
-
-            // Category toggle buttons (below resource text area)
-            CreateCategoryButtons();
-
-            // Speed widget (top-right, below day counter)
-            CreateSpeedWidget();
-
-            // Menu button (top-right, below speed widget)
-            CreateMenuButton();
-
-            // Feature 7: Orders + Klappbuch buttons (bottom-left)
-            CreateOrderButtons();
-
-            // Version label (bottom-right) with dark background
-            var versionGo = new GameObject("VersionLabel");
-            versionGo.transform.SetParent(transform, false);
-            var versionBg = versionGo.AddComponent<Image>();
-            versionBg.color = new Color(0f, 0f, 0f, 0.7f);
-            var versionBgRt = versionGo.GetComponent<RectTransform>();
-            versionBgRt.anchorMin = new Vector2(1, 0);
-            versionBgRt.anchorMax = new Vector2(1, 0);
-            versionBgRt.pivot = new Vector2(1, 0);
-            versionBgRt.anchoredPosition = new Vector2(-8, 8);
-            versionBgRt.sizeDelta = new Vector2(160, 32);
-
-            var versionText = CreateText("VersionText",
-                Vector2.zero, new Vector2(160, 32), TextAnchor.MiddleCenter);
-            versionText.transform.SetParent(versionGo.transform, false);
-            var vrt = versionText.GetComponent<RectTransform>();
-            vrt.anchorMin = Vector2.zero;
-            vrt.anchorMax = Vector2.one;
-            vrt.offsetMin = Vector2.zero;
-            vrt.offsetMax = Vector2.zero;
-            versionText.fontSize = 18;
-            versionText.fontStyle = FontStyle.Bold;
-            versionText.color = Color.white;
-            versionText.text = "v0.5.10";
-        }
-
-        /// <summary>
-        /// Create small category toggle buttons next to the resource text.
-        /// Tap to expand/collapse category detail.
-        /// Feature 2.4: Categorized resource panel with expand/collapse.
-        /// </summary>
-        private void CreateCategoryButtons()
-        {
-            float btnW = 60f;
-            float btnH = 28f;
-            float spacing = 4f;
-            float startX = 20f;
-            float startY = -50f;
-
-            var categories = new[]
-            {
-                ("Wood",   COLOR_WOOD),
-                ("Stone",  COLOR_STONE),
-                ("Plant",  COLOR_PLANT),
-                ("Animal", COLOR_ANIMAL),
-                ("Other",  COLOR_OTHER)
-            };
-
-            Button[] buttons = new Button[categories.Length];
-
-            for (int i = 0; i < categories.Length; i++)
-            {
-                int idx = i;
-                string label = categories[i].Item1;
-                Color color = categories[i].Item2;
-
-                var btnObj = new GameObject($"CategoryBtn_{label}");
-                btnObj.transform.SetParent(transform, false);
-
-                var btnRect = btnObj.AddComponent<RectTransform>();
-                btnRect.anchorMin = new Vector2(0, 1);
-                btnRect.anchorMax = new Vector2(0, 1);
-                btnRect.pivot = new Vector2(0, 1);
-                btnRect.anchoredPosition = new Vector2(startX + i * (btnW + spacing), startY);
-                btnRect.sizeDelta = new Vector2(btnW, btnH);
-
-                // Colored square icon
-                var colorIcon = new GameObject("ColorIcon");
-                colorIcon.transform.SetParent(btnObj.transform, false);
-                var iconRect = colorIcon.AddComponent<RectTransform>();
-                iconRect.anchorMin = new Vector2(0, 0.5f);
-                iconRect.anchorMax = new Vector2(0, 0.5f);
-                iconRect.pivot = new Vector2(0, 0.5f);
-                iconRect.anchoredPosition = new Vector2(3, 0);
-                iconRect.sizeDelta = new Vector2(10, 10);
-                var iconImage = colorIcon.AddComponent<Image>();
-                iconImage.color = color;
-
-                // Button background
-                var bgImage = btnObj.AddComponent<Image>();
-                bgImage.color = new Color(0.15f, 0.15f, 0.15f, 0.8f);
-
-                var button = btnObj.AddComponent<Button>();
-                button.targetGraphic = bgImage;
-                buttons[i] = button;
-
-                // Label
-                var labelObj = new GameObject("Label");
-                labelObj.transform.SetParent(btnObj.transform, false);
-                var labelRect = labelObj.AddComponent<RectTransform>();
-                labelRect.anchorMin = Vector2.zero;
-                labelRect.anchorMax = Vector2.one;
-                labelRect.offsetMin = new Vector2(15, 0);
-                labelRect.offsetMax = Vector2.zero;
-                var labelText = labelObj.AddComponent<Text>();
-                labelText.font = UIHelpers.GetFont();
-                labelText.fontSize = 14;
-                labelText.color = Color.white;
-                labelText.alignment = TextAnchor.MiddleLeft;
-                labelText.text = label;
-            }
-
-            buttons[0].onClick.AddListener(ToggleWood);
-            buttons[1].onClick.AddListener(ToggleStone);
-            buttons[2].onClick.AddListener(TogglePlant);
-            buttons[3].onClick.AddListener(ToggleAnimal);
-            buttons[4].onClick.AddListener(ToggleOther);
-
-            _woodButton = buttons[0];
-            _stoneButton = buttons[1];
-            _plantButton = buttons[2];
-            _animalButton = buttons[3];
-            _otherButton = buttons[4];
-        }
-
-        // ─── Speed Widget ─────────────────────────────────────────
-
-        private void CreateSpeedWidget()
-        {
-            float buttonSize = _minTouchTarget;
-            float spacing = 4f;
-            float totalWidth = SPEED_LABELS.Length * buttonSize + (SPEED_LABELS.Length - 1) * spacing;
-
-            var container = new GameObject("SpeedWidget");
-            container.transform.SetParent(transform, false);
-            var containerRect = container.AddComponent<RectTransform>();
-            containerRect.anchorMin = new Vector2(1, 1);
-            containerRect.anchorMax = new Vector2(1, 1);
-            containerRect.pivot = new Vector2(1, 1);
-            containerRect.anchoredPosition = new Vector2(-20, -60);
-            containerRect.sizeDelta = new Vector2(totalWidth, buttonSize);
-
-            _speedButtons = new Button[SPEED_LABELS.Length];
-            _speedButtonTexts = new Text[SPEED_LABELS.Length];
-
-            for (int i = 0; i < SPEED_LABELS.Length; i++)
-            {
-                int speedIndex = i;
-
-                var btnObj = new GameObject($"SpeedBtn_{SPEED_LABELS[i]}");
-                btnObj.transform.SetParent(container.transform, false);
-
-                var btnRect = btnObj.AddComponent<RectTransform>();
-                btnRect.anchorMin = new Vector2(0, 0.5f);
-                btnRect.anchorMax = new Vector2(0, 0.5f);
-                btnRect.pivot = new Vector2(0, 0.5f);
-                btnRect.anchoredPosition = new Vector2(i * (buttonSize + spacing), 0);
-                btnRect.sizeDelta = new Vector2(buttonSize, buttonSize);
-
-                var image = btnObj.AddComponent<Image>();
-                image.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
-
-                var button = btnObj.AddComponent<Button>();
-                button.targetGraphic = image;
-                button.onClick.AddListener(() => SetSpeed(speedIndex));
-                _speedButtons[i] = button;
-
-                var labelObj = new GameObject("Label");
-                labelObj.transform.SetParent(btnObj.transform, false);
-                var labelRect = labelObj.AddComponent<RectTransform>();
-                labelRect.anchorMin = Vector2.zero;
-                labelRect.anchorMax = Vector2.one;
-                labelRect.sizeDelta = Vector2.zero;
-
-                var label = labelObj.AddComponent<Text>();
-                label.font = UIHelpers.GetFont();
-                label.fontSize = _fontSize - 4;
-                label.color = Color.white;
-                label.alignment = TextAnchor.MiddleCenter;
-                label.text = SPEED_LABELS[i];
-                _speedButtonTexts[i] = label;
-            }
-
-            UpdateSpeedButtons();
-        }
-
-        // ─── Menu Button ──────────────────────────────────────────
-
-        /// <summary>
-        /// Create a "Menu" button below the speed widget.
-        /// Tapping it opens the pause menu overlay.
-        /// </summary>
-        private void CreateMenuButton()
-        {
-            float buttonWidth = 80f;
-            float buttonHeight = _minTouchTarget;
-
-            var btnObj = new GameObject("MenuButton");
-            btnObj.transform.SetParent(transform, false);
-
-            var btnRect = btnObj.AddComponent<RectTransform>();
-            btnRect.anchorMin = new Vector2(1, 1);
-            btnRect.anchorMax = new Vector2(1, 1);
-            btnRect.pivot = new Vector2(1, 1);
-            btnRect.anchoredPosition = new Vector2(-20, -112);
-            btnRect.sizeDelta = new Vector2(buttonWidth, buttonHeight);
-
-            var image = btnObj.AddComponent<Image>();
-            image.color = new Color(0.3f, 0.3f, 0.35f, 0.8f);
-
-            var button = btnObj.AddComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(ShowPauseMenu);
-
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(btnObj.transform, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            var label = labelObj.AddComponent<Text>();
-            label.font = UIHelpers.GetFont();
-            label.fontSize = _fontSize - 4;
-            label.color = Color.white;
-            label.alignment = TextAnchor.MiddleCenter;
-            label.fontStyle = FontStyle.Bold;
-            label.text = "Menu";
-        }
-
-        // ─── Bottom-Left Buttons (Feature 7 + 8.6) ─────────────────
-
-        /// <summary>
-        /// "Orders" button (bottom-left) opens the Klappbuch UI.
-        /// "Discoveries" button (next to Orders) opens the Discovery Log.
-        /// </summary>
-        private void CreateOrderButtons()
-        {
-            float btnW = 110f;
-            float btnH = _minTouchTarget;
-            float spacing = 8f;
-
-            // Orders button
-            var ordersObj = new GameObject("OrdersButton");
-            ordersObj.transform.SetParent(transform, false);
-            var ordersRect = ordersObj.AddComponent<RectTransform>();
-            ordersRect.anchorMin = new Vector2(0, 0);
-            ordersRect.anchorMax = new Vector2(0, 0);
-            ordersRect.pivot = new Vector2(0, 0);
-            ordersRect.anchoredPosition = new Vector2(20, 20);
-            ordersRect.sizeDelta = new Vector2(btnW, btnH);
-
-            var ordersImg = ordersObj.AddComponent<Image>();
-            ordersImg.color = new Color(0.2f, 0.45f, 0.25f, 0.9f);
-            var ordersBtn = ordersObj.AddComponent<Button>();
-            ordersBtn.targetGraphic = ordersImg;
-            ordersBtn.onClick.AddListener(() =>
-            {
-                EventBus.Publish(new OpenKlappbuchEvent());
-            });
-
-            var ordersLabel = new GameObject("Label");
-            ordersLabel.transform.SetParent(ordersObj.transform, false);
-            var olRect = ordersLabel.AddComponent<RectTransform>();
-            olRect.anchorMin = Vector2.zero;
-            olRect.anchorMax = Vector2.one;
-            olRect.sizeDelta = Vector2.zero;
-            var olText = ordersLabel.AddComponent<Text>();
-            olText.font = UIHelpers.GetFont();
-            olText.fontSize = 16;
-            olText.color = Color.white;
-            olText.alignment = TextAnchor.MiddleCenter;
-            olText.fontStyle = FontStyle.Bold;
-            olText.text = "Orders";
-
-            // Discoveries button (Feature 8.6) — right of Orders
-            float discoveriesX = 20 + btnW + spacing;
-            var discObj = new GameObject("DiscoveriesButton");
-            discObj.transform.SetParent(transform, false);
-            var discRect = discObj.AddComponent<RectTransform>();
-            discRect.anchorMin = new Vector2(0, 0);
-            discRect.anchorMax = new Vector2(0, 0);
-            discRect.pivot = new Vector2(0, 0);
-            discRect.anchoredPosition = new Vector2(discoveriesX, 20);
-            discRect.sizeDelta = new Vector2(btnW + 10, btnH);
-
-            var discImg = discObj.AddComponent<Image>();
-            discImg.color = new Color(0.45f, 0.35f, 0.15f, 0.9f);
-            var discBtn = discObj.AddComponent<Button>();
-            discBtn.targetGraphic = discImg;
-            discBtn.onClick.AddListener(() =>
-            {
-                var logUI = DiscoveryLogUI.Instance;
-                if (logUI != null) logUI.Toggle();
-            });
-
-            var discLabel = new GameObject("Label");
-            discLabel.transform.SetParent(discObj.transform, false);
-            var dlRect = discLabel.AddComponent<RectTransform>();
-            dlRect.anchorMin = Vector2.zero;
-            dlRect.anchorMax = Vector2.one;
-            dlRect.sizeDelta = Vector2.zero;
-            var dlText = discLabel.AddComponent<Text>();
-            dlText.font = UIHelpers.GetFont();
-            dlText.fontSize = 15;
-            dlText.color = Color.white;
-            dlText.alignment = TextAnchor.MiddleCenter;
-            dlText.fontStyle = FontStyle.Bold;
-            dlText.text = "Discoveries";
-
-            // v0.5.10: Chronicle button — right of Discoveries
-            float chronicleX = discoveriesX + btnW + 10 + spacing;
-            var chronObj = new GameObject("ChronicleButton");
-            chronObj.transform.SetParent(transform, false);
-            var chronRect = chronObj.AddComponent<RectTransform>();
-            chronRect.anchorMin = new Vector2(0, 0);
-            chronRect.anchorMax = new Vector2(0, 0);
-            chronRect.pivot = new Vector2(0, 0);
-            chronRect.anchoredPosition = new Vector2(chronicleX, 20);
-            chronRect.sizeDelta = new Vector2(btnW + 10, btnH);
-
-            var chronImg = chronObj.AddComponent<Image>();
-            chronImg.color = new Color(0.35f, 0.25f, 0.12f, 0.9f); // Parchment brown
-            var chronBtn = chronObj.AddComponent<Button>();
-            chronBtn.targetGraphic = chronImg;
-            chronBtn.onClick.AddListener(() =>
-            {
-                var chronicleUI = ChronicleUI.Instance;
-                if (chronicleUI != null) chronicleUI.Toggle();
-            });
-
-            var chronLabel = new GameObject("Label");
-            chronLabel.transform.SetParent(chronObj.transform, false);
-            var clRect = chronLabel.AddComponent<RectTransform>();
-            clRect.anchorMin = Vector2.zero;
-            clRect.anchorMax = Vector2.one;
-            clRect.sizeDelta = Vector2.zero;
-            var clText = chronLabel.AddComponent<Text>();
-            clText.font = UIHelpers.GetFont();
-            clText.fontSize = 15;
-            clText.color = new Color(0.90f, 0.85f, 0.70f);
-            clText.alignment = TextAnchor.MiddleCenter;
-            clText.fontStyle = FontStyle.Bold;
-            clText.text = "Chronicle";
-        }
-
-        private void SetSpeed(int speedIndex)
-        {
-            if (speedIndex < 0 || speedIndex >= SPEED_VALUES.Length) return;
-            if (_gameOverPanel != null) return;
-            if (_pauseMenuPanel != null) return;
-            if (_discoveryModalPanel != null) return;
-
-            _currentSpeedIndex = speedIndex;
-            Time.timeScale = SPEED_VALUES[speedIndex];
-            UpdateSpeedButtons();
-        }
-
-        private void UpdateSpeedButtons()
-        {
-            for (int i = 0; i < _speedButtons.Length; i++)
-            {
-                bool active = i == _currentSpeedIndex;
-                var image = _speedButtons[i].GetComponent<Image>();
-                image.color = active
-                    ? new Color(0.3f, 0.6f, 0.9f, 0.9f)
-                    : new Color(0.2f, 0.2f, 0.2f, 0.7f);
-                _speedButtonTexts[i].color = active ? Color.white : new Color(0.7f, 0.7f, 0.7f);
-            }
-        }
-
-        // ─── Text Helper ──────────────────────────────────────────
-
-        private Text CreateText(string name, Vector2 offset, Vector2 size, TextAnchor alignment)
-        {
-            var textObj = new GameObject(name);
-            textObj.transform.SetParent(transform, false);
-
-            var rectTransform = textObj.AddComponent<RectTransform>();
-
-            if (alignment == TextAnchor.UpperLeft)
-            {
-                rectTransform.anchorMin = new Vector2(0, 1);
-                rectTransform.anchorMax = new Vector2(0, 1);
-                rectTransform.pivot = new Vector2(0, 1);
-            }
-            else if (alignment == TextAnchor.UpperRight)
-            {
-                rectTransform.anchorMin = new Vector2(1, 1);
-                rectTransform.anchorMax = new Vector2(1, 1);
-                rectTransform.pivot = new Vector2(1, 1);
-            }
-            else
-            {
-                rectTransform.anchorMin = new Vector2(0.5f, 1);
-                rectTransform.anchorMax = new Vector2(0.5f, 1);
-                rectTransform.pivot = new Vector2(0.5f, 1);
-            }
-
-            rectTransform.anchoredPosition = offset;
-            rectTransform.sizeDelta = size;
-
-            var text = textObj.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = _fontSize;
-            text.color = Color.white;
-            text.alignment = alignment;
-
-            var shadow = textObj.AddComponent<Shadow>();
-            shadow.effectColor = new Color(0, 0, 0, 0.8f);
-            shadow.effectDistance = new Vector2(1, -1);
-
-            return text;
-        }
-
-        // ─── Cleanup ──────────────────────────────────────────────
-
-        private void OnDestroy()
-        {
-            // Legacy events
-            EventBus.Unsubscribe<BuildingPlacedEvent>(OnBuildingPlaced);
-            EventBus.Unsubscribe<BuildingCompletedEvent>(OnBuildingCompleted);
-            EventBus.Unsubscribe<PopulationChangedEvent>(OnPopulationChanged);
-            EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
-            EventBus.Unsubscribe<SettlerDiedEvent>(OnSettlerDied);
-            EventBus.Unsubscribe<FoodWarningEvent>(OnFoodWarning);
-            EventBus.Unsubscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
-
-            // MS4 events
-            EventBus.Unsubscribe<DayChangedEvent>(OnDayChanged);
-            EventBus.Unsubscribe<ToolBrokeEvent>(OnToolBroke);
-            EventBus.Unsubscribe<NeedsCriticalEvent>(OnNeedsCritical);
-            EventBus.Unsubscribe<SettlerPoisonedEvent>(OnSettlerPoisoned);
-            EventBus.Unsubscribe<SeasonNotificationEvent>(OnSeasonNotification);
-
-            if (_speedButtons != null)
-            {
-                foreach (var btn in _speedButtons)
-                {
-                    if (btn != null)
-                        btn.onClick.RemoveAllListeners();
-                }
-            }
-
-            if (_woodButton != null) _woodButton.onClick.RemoveAllListeners();
-            if (_stoneButton != null) _stoneButton.onClick.RemoveAllListeners();
-            if (_plantButton != null) _plantButton.onClick.RemoveAllListeners();
-            if (_animalButton != null) _animalButton.onClick.RemoveAllListeners();
-            if (_otherButton != null) _otherButton.onClick.RemoveAllListeners();
-
-            Time.timeScale = 1f;
         }
     }
 }

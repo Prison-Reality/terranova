@@ -10,84 +10,90 @@ using Terranova.Population;
 namespace Terranova.UI
 {
     /// <summary>
-    /// Feature 7.3 (v0.4.15): Klappbuch UI — iOS-style scroll-picker.
-    /// v0.5.9: Reworked with iOS UIPickerView-style cylindrical perspective effect.
+    /// Screen 4 of the "Kodex" design — the Klappbuch, where an order is scrolled
+    /// together as a sentence: WER · TUT · WAS·WO.
     ///
-    /// Three columns (WHO / DOES / WHAT-WHERE) where the user scrolls each
-    /// column and the center item is the current selection (like UIPickerView).
+    /// Three parchment columns sit in a leather tray. Each column is a picker whose
+    /// centre row is the selection, marked by an accent band. Row height went from
+    /// 44 px to 88 px and the selected row is set in the display face, so the
+    /// sentence being built is readable at arm's length on a tablet.
     ///
-    /// iOS-style features:
-    ///   - Cylindrical 3D perspective: items scale down and fade from center
-    ///   - Two thin horizontal indicator lines marking selected row
-    ///   - Smooth deceleration with elastic bounce at edges
-    ///   - Snap-to-center with spring animation
-    ///
-    /// Layout: 80 % of screen width, columns WHO 25 % / DOES 35 % / WHAT 40 %.
-    /// Pauses game and disables camera input while open.
+    /// The scroll physics (snap threshold, spring settle, manual velocity decay) are
+    /// carried over unchanged — they worked. Only the metrics and the styling moved.
     /// </summary>
     public class KlappbuchUI : MonoBehaviour
     {
         public static KlappbuchUI Instance { get; private set; }
 
-        // ─── Fixed Layout Constants ─────────────────────────────
-        private const float ROW_HEIGHT = 44f;
-        private const float ROW_HEIGHT_LOCKED = 56f;
+        // ═══════════════════════════════════════════════════════════
+        //  L A Y O U T
+        // ═══════════════════════════════════════════════════════════
+
+        private const float TRAY_W = 1400f;
+        private const float TRAY_H = 960f;
+        private const float PAD = UITheme.TrayPad;   // 16
+        private const float GAP = 14f;
+        private const float HEADER_H = 70f;
+        private const float RESULT_H = 100f;
+        private const float COL_HEADER_H = 64f;
+        private const float COL_WHO_W = 340f;
+        private const float COL_DOES_W = 440f;
+        private const float FADE_H = 110f;
+
+        private const float ROW_HEIGHT = 88f;
+        private const float ROW_HEIGHT_LOCKED = 108f;
         private const float SPACING = 2f;
-        private const float COL_PAD = 5f;
-        private const float TITLE_H = 40f;
-        private const float RESULT_H = 56f;
-        private const float BTN_H = 50f;
-        private const float CLOSE_SIZE = 44f;
-        private const int FONT_MIN = 14;
+
+        private const float NEGATE_W = 130f;
+        private const float NEGATE_H = 68f;
+        private const float CONFIRM_W = 320f;
+        private const float CONFIRM_H = 76f;
+
+        // ─── Scroll physics (unchanged from v0.5.9) ──────────────
         private const float SNAP_THRESHOLD = 120f;   // Start snapping earlier (higher = snappier)
-        private const float SNAP_DURATION = 0.10f;    // Faster spring settle
-        private const float SNAP_DEAD_ZONE = 1.5f;    // Kill drift below this distance
+        private const float SNAP_DURATION = 0.10f;   // Faster spring settle
+        private const float SNAP_DEAD_ZONE = 1.5f;   // Kill drift below this distance
 
-        // v0.5.9: Cylindrical perspective constants
-        private const float PERSPECTIVE_SCALE_MIN = 0.70f;  // Min scale at edges
-        private const float PERSPECTIVE_ALPHA_MIN = 0.25f;   // Min alpha at edges
-        private const float PERSPECTIVE_RANGE = 3.5f;        // How many rows from center to min scale
+        // ─── Cylindrical perspective ─────────────────────────────
+        // Raised from 0.70/0.25: the design wants the neighbouring rows to stay
+        // readable rather than dissolve at the column edges.
+        private const float PERSPECTIVE_SCALE_MIN = 0.80f;
+        private const float PERSPECTIVE_ALPHA_MIN = 0.30f;
+        private const float PERSPECTIVE_RANGE = 3.5f;
 
-        // ─── Colors ─────────────────────────────────────────────
-        private static readonly Color BG = new(0.08f, 0.10f, 0.08f, 0.95f);
-        private static readonly Color COL_BG = new(0.10f, 0.12f, 0.10f, 0.92f);
-        private static readonly Color ROW_N = new(0f, 0f, 0f, 0f);        // v0.5.9: Transparent row bg (iOS style)
-        private static readonly Color ROW_LOCK = new(0.10f, 0.10f, 0.10f, 0.4f);
-        private static readonly Color ROW_BUSY = new(0.10f, 0.10f, 0.10f, 0.3f);
-        private static readonly Color TXT_N = Color.white;
-        private static readonly Color TXT_L = new(0.5f, 0.5f, 0.5f);
-        private static readonly Color TXT_B = new(0.6f, 0.6f, 0.6f);
-        private static readonly Color NEG_C = new(0.9f, 0.25f, 0.25f);
-        private static readonly Color VALID_C = new(0.3f, 0.9f, 0.4f);
-        private static readonly Color INVALID_C = new(1f, 0.6f, 0.2f);
-        private static readonly Color CONFIRM_ON = new(0.2f, 0.55f, 0.3f, 0.95f);
-        private static readonly Color CONFIRM_OFF = new(0.2f, 0.2f, 0.2f, 0.5f);
-        private static readonly Color SELECTION_BAND = new(0.25f, 0.50f, 0.30f, 0.40f);  // Selection rectangle
+        /// <summary>Selection band tint — accent at 22 % over the parchment.</summary>
+        private static readonly Color SELECTION_BAND = UITheme.WithAlpha(UITheme.AccentGold, 0.22f);
 
-        // ─── State ──────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  S T A T E
+        // ═══════════════════════════════════════════════════════════
+
         private GameObject _panel;
         private bool _isOpen;
         private float _savedTimeScale;
         private bool _isNegated;
         private Vector3? _tapPosition;
         private float _canvasW, _canvasH;
-        private int _initFrames;  // Frames remaining for forced initialization snap
+        private int _initFrames;   // Frames remaining for forced initialization snap
 
         // Computed layout
-        private float _panelW, _panelH, _whoColW, _doesColW, _whatColW, _colH;
+        private float _trayW, _trayH, _whoColW, _doesColW, _whatColW, _colH;
 
         // Picker scroll rects and content rects
         private ScrollRect _whoScroll, _doesScroll, _whatScroll;
         private RectTransform _whoContentRect, _doesContentRect, _whatContentRect;
-        // v0.5.9: Viewport rects for cylindrical effect center calculation
         private RectTransform _whoViewportRect, _doesViewportRect, _whatViewportRect;
+
+        // Row currently nearest the centre of each column, so the display-face swap
+        // only happens when the selection actually moves.
+        private Transform _whoNearest, _doesNearest, _whatNearest;
 
         // Item data
         private readonly List<WhoItem> _whoItems = new();
         private readonly List<DoesItem> _doesItems = new();
         private readonly List<WhatItem> _whatItems = new();
 
-        // Selected center indices
+        // Selected centre indices
         private int _whoIdx, _doesIdx, _whatIdx;
         private int _prevDoesIdx = -1;
 
@@ -95,15 +101,17 @@ namespace Terranova.UI
         private Text _resultText;
         private Image _confirmBg;
         private Button _confirmBtn;
+        private Text _confirmLabel;
         private Image _negateImg;
+        private Text _negateLabel;
         private Text _activeOrdersText;
 
         // ─── Data structs ───────────────────────────────────────
+
         private struct WhoItem
         {
             public OrderSubject Subject;
             public string SettlerName;
-            public bool IsBusy;
             public string DisplayLabel;
             public string Subtitle;
         }
@@ -120,7 +128,9 @@ namespace Terranova.UI
             public OrderObject Object;
         }
 
-        // ─── Lifecycle ──────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  L I F E C Y C L E
+        // ═══════════════════════════════════════════════════════════
 
         private void Awake()
         {
@@ -173,11 +183,9 @@ namespace Terranova.UI
             }
 
             // Snap each picker column to nearest valid item
-            SnapColumn(_whoScroll, _whoContentRect, _whoItems.Count, ROW_HEIGHT,
-                ref _whoIdx, null);
+            SnapColumn(_whoScroll, _whoContentRect, _whoItems.Count, ref _whoIdx);
             SnapDoesColumn();
-            SnapColumn(_whatScroll, _whatContentRect, _whatItems.Count, ROW_HEIGHT,
-                ref _whatIdx, null);
+            SnapColumn(_whatScroll, _whatContentRect, _whatItems.Count, ref _whatIdx);
 
             // Check if DOES selection changed → rebuild WHAT
             if (_doesIdx != _prevDoesIdx)
@@ -186,10 +194,9 @@ namespace Terranova.UI
                 RebuildWhatColumn();
             }
 
-            // v0.5.9: Apply cylindrical perspective effect to all columns
-            ApplyCylindricalEffect(_whoScroll, _whoContentRect, _whoViewportRect);
-            ApplyCylindricalEffect(_doesScroll, _doesContentRect, _doesViewportRect);
-            ApplyCylindricalEffect(_whatScroll, _whatContentRect, _whatViewportRect);
+            ApplyCylindricalEffect(_whoScroll, _whoContentRect, _whoViewportRect, ref _whoNearest);
+            ApplyCylindricalEffect(_doesScroll, _doesContentRect, _doesViewportRect, ref _doesNearest);
+            ApplyCylindricalEffect(_whatScroll, _whatContentRect, _whatViewportRect, ref _whatNearest);
 
             UpdateResultLine();
         }
@@ -207,7 +214,9 @@ namespace Terranova.UI
             scroll.velocity *= decay;
         }
 
-        // ─── Open / Close ───────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  O P E N   /   C L O S E
+        // ═══════════════════════════════════════════════════════════
 
         private void OnOpenRequest(OpenKlappbuchEvent evt) => Open(evt);
 
@@ -215,19 +224,21 @@ namespace Terranova.UI
         {
             if (_isOpen) Close();
 
-            // Pause game and disable camera
-            // Use tiny timeScale (not 0) so ScrollRect inertia/snap works
+            // Pause game and disable camera.
+            // Use tiny timeScale (not 0) so ScrollRect inertia/snap works.
             _savedTimeScale = Time.timeScale;
             Time.timeScale = 0.0001f;
             Terranova.Camera.RTSCameraController.InputDisabled = true;
 
-            // Reset state
             _isNegated = false;
             _tapPosition = context.TapPosition;
             _whoIdx = 0;
             _doesIdx = 0;
             _whatIdx = 0;
             _prevDoesIdx = -1;
+            _whoNearest = null;
+            _doesNearest = null;
+            _whatNearest = null;
 
             BuildPanel(context);
             _isOpen = true;
@@ -236,7 +247,6 @@ namespace Terranova.UI
             // ContentSizeFitter IMMEDIATELY so scroll positions are valid.
             Canvas.ForceUpdateCanvases();
 
-            // Set initial scroll positions: item 0 centered in each column
             ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
             ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
             ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
@@ -244,19 +254,29 @@ namespace Terranova.UI
             // Also force-snap for the next few frames in case layout shifts
             _initFrames = 3;
 
-            // Next-frame backup: re-apply after Unity has fully resolved layout
             StartCoroutine(ReinitializeScrollNextFrame());
         }
 
-        /// <summary>
-        /// Force a column's scroll to center on the given item index.
-        /// </summary>
+        public void Close()
+        {
+            Time.timeScale = _savedTimeScale;
+            Terranova.Camera.RTSCameraController.InputDisabled = false;
+
+            if (_panel != null) Destroy(_panel);
+            _panel = null;
+            _isOpen = false;
+            _whoItems.Clear();
+            _doesItems.Clear();
+            _whatItems.Clear();
+        }
+
+        public bool IsOpen => _isOpen;
+
+        /// <summary>Force a column's scroll to centre on the given item index.</summary>
         private void ForceScrollToIndex(ScrollRect scroll, RectTransform content, int idx)
         {
             if (scroll == null || content == null) return;
-            float step = ROW_HEIGHT + SPACING;
-            float targetY = idx * step;
-            content.anchoredPosition = new Vector2(0, targetY);
+            content.anchoredPosition = new Vector2(0f, idx * (ROW_HEIGHT + SPACING));
             scroll.velocity = Vector2.zero;
         }
 
@@ -274,192 +294,136 @@ namespace Terranova.UI
             ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
         }
 
-        public void Close()
-        {
-            // Restore game state
-            Time.timeScale = _savedTimeScale;
-            Terranova.Camera.RTSCameraController.InputDisabled = false;
-
-            if (_panel != null) Destroy(_panel);
-            _panel = null;
-            _isOpen = false;
-            _whoItems.Clear();
-            _doesItems.Clear();
-            _whatItems.Clear();
-        }
-
-        public bool IsOpen => _isOpen;
-
-        // ─── Panel Construction ─────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  P A N E L   C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
 
         private void BuildPanel(OpenKlappbuchEvent context)
         {
-            // Get canvas-space dimensions (NOT Screen pixels — CanvasScaler changes the coordinate space)
+            // Canvas-space dimensions (NOT Screen pixels — CanvasScaler changes the
+            // coordinate space).
             var canvasRT = transform as RectTransform;
-            _canvasW = canvasRT != null ? canvasRT.rect.width : Screen.width;
-            _canvasH = canvasRT != null ? canvasRT.rect.height : Screen.height;
+            _canvasW = canvasRT != null ? canvasRT.rect.width : UITheme.ReferenceResolution.x;
+            _canvasH = canvasRT != null ? canvasRT.rect.height : UITheme.ReferenceResolution.y;
 
-            // Compute layout: exactly 80 % of canvas width, centered
-            _panelW = _canvasW * 0.8f;
-            _panelH = Mathf.Min(_canvasH * 0.85f, 600f);
-            float usableW = _panelW - COL_PAD * 4f;
-            _whoColW = usableW * 0.25f;
-            _doesColW = usableW * 0.35f;
-            _whatColW = usableW * 0.40f;
-            _colH = _panelH - TITLE_H - RESULT_H - BTN_H - 24f;
+            // The tray is a fixed size in the design; clamp it so it still fits on a
+            // canvas narrower or shorter than the 1536 x 1152 reference.
+            _trayW = Mathf.Min(TRAY_W, _canvasW - 48f);
+            _trayH = Mathf.Min(TRAY_H, _canvasH - 48f);
 
-            Debug.Log($"[Klappbuch] Canvas={_canvasW}x{_canvasH} Panel={_panelW}x{_panelH} (80% of {_canvasW})");
+            float usableW = _trayW - 2f * PAD - 2f * GAP;
+            _whoColW = Mathf.Min(COL_WHO_W, usableW * 0.25f);
+            _doesColW = Mathf.Min(COL_DOES_W, usableW * 0.33f);
+            _whatColW = usableW - _whoColW - _doesColW;
 
-            // Full-screen overlay (transparent — only catches taps to close; terrain visible on sides)
-            _panel = new GameObject("KlappbuchPanel");
-            _panel.transform.SetParent(transform, false);
-            _panel.transform.SetAsLastSibling();
-            var overlay = _panel.AddComponent<Image>();
-            overlay.color = new Color(0f, 0f, 0f, 0.01f);
-            var overlayRect = _panel.GetComponent<RectTransform>();
-            overlayRect.anchorMin = Vector2.zero;
-            overlayRect.anchorMax = Vector2.one;
-            overlayRect.offsetMin = Vector2.zero;
-            overlayRect.offsetMax = Vector2.zero;
+            float columnsH = _trayH - 2f * PAD - HEADER_H - GAP - RESULT_H - GAP;
+            _colH = columnsH - COL_HEADER_H;
 
-            // Click overlay to close
-            _panel.AddComponent<Button>().onClick.AddListener(Close);
+            // Transparent overlay: catches taps outside the tray to close, and lets
+            // the world stay visible at the sides.
+            _panel = UIKit.Scrim(transform, "KlappbuchPanel", UITheme.ScrimModal, Close);
 
-            // Main card
-            var card = MakeRect(_panel.transform, "Card", Vector2.zero,
-                new Vector2(_panelW, _panelH));
-            card.AddComponent<Image>().color = BG;
-            card.AddComponent<Button>().onClick.AddListener(() => { }); // block click-through
+            var tray = UIKit.Tray(_panel.transform, "Tray", Vector2.zero,
+                new Vector2(_trayW, _trayH));
+            UIKit.BlockTaps(tray);
 
-            // ── Title bar ──
-            var titleGo = MakeRect(card.transform, "Title",
-                new Vector2(0, _panelH / 2 - TITLE_H / 2),
-                new Vector2(_panelW - CLOSE_SIZE - 20, TITLE_H));
-            var titleText = titleGo.AddComponent<Text>();
-            titleText.font = GetFont();
-            titleText.fontSize = 20;
-            titleText.color = new Color(0.8f, 0.9f, 0.7f);
-            titleText.alignment = TextAnchor.MiddleCenter;
-            titleText.fontStyle = FontStyle.Bold;
-            titleText.text = "ORDERS";
+            float halfW = _trayW * 0.5f;
+            float halfH = _trayH * 0.5f;
 
-            // ── Close [X] button (44 × 44) ──
-            var closeGo = MakeRect(card.transform, "CloseX",
-                new Vector2(_panelW / 2 - CLOSE_SIZE / 2 - 4, _panelH / 2 - CLOSE_SIZE / 2 - 2),
-                new Vector2(CLOSE_SIZE, CLOSE_SIZE));
-            closeGo.AddComponent<Image>().color = new Color(0.5f, 0.2f, 0.2f, 0.8f);
-            var closeBtn = closeGo.AddComponent<Button>();
-            closeBtn.onClick.AddListener(Close);
-            var closeLabel = MakeRect(closeGo.transform, "X", Vector2.zero,
-                new Vector2(CLOSE_SIZE, CLOSE_SIZE));
-            var closeTxt = closeLabel.AddComponent<Text>();
-            closeTxt.font = GetFont();
-            closeTxt.fontSize = 22;
-            closeTxt.color = Color.white;
-            closeTxt.alignment = TextAnchor.MiddleCenter;
-            closeTxt.fontStyle = FontStyle.Bold;
-            closeTxt.text = "X";
-
-            // ── Active Orders button (top-left) ──
-            var listBtnGo = MakeRect(card.transform, "ActiveOrdersBtn",
-                new Vector2(-_panelW / 2 + 70, _panelH / 2 - TITLE_H / 2),
-                new Vector2(120, 32));
-            listBtnGo.AddComponent<Image>().color = new Color(0.25f, 0.30f, 0.45f, 0.8f);
-            listBtnGo.AddComponent<Button>().onClick.AddListener(() =>
-            {
-                if (OrderListUI.Instance != null) OrderListUI.Instance.Toggle();
-            });
-            var listTxt = MakeRect(listBtnGo.transform, "T", Vector2.zero, new Vector2(120, 32));
-            _activeOrdersText = listTxt.AddComponent<Text>();
-            _activeOrdersText.font = GetFont();
-            _activeOrdersText.fontSize = FONT_MIN;
-            _activeOrdersText.color = Color.white;
-            _activeOrdersText.alignment = TextAnchor.MiddleCenter;
-            UpdateActiveOrdersLabel();
+            BuildHeader(tray.transform, halfW, halfH);
 
             // ── Three picker columns ──
-            float columnsY = (_panelH / 2 - TITLE_H) - _colH / 2 - 4;
-            float col1X = -_panelW / 2 + COL_PAD + _whoColW / 2;
-            float col2X = col1X + _whoColW / 2 + COL_PAD + _doesColW / 2;
-            float col3X = col2X + _doesColW / 2 + COL_PAD + _whatColW / 2;
+            float columnsTop = halfH - PAD - HEADER_H - GAP;
+            float columnsCenterY = columnsTop - columnsH * 0.5f;
+            float col1X = -halfW + PAD + _whoColW * 0.5f;
+            float col2X = col1X + _whoColW * 0.5f + GAP + _doesColW * 0.5f;
+            float col3X = col2X + _doesColW * 0.5f + GAP + _whatColW * 0.5f;
 
             PopulateWhoItems(context);
             PopulateDoesItems(context);
             PopulateWhatItems();
 
-            _whoScroll = BuildPickerColumn(card.transform, "WHO", col1X, columnsY, _whoColW,
-                _whoItems.Count, BuildWhoRows, out _whoContentRect, out _whoViewportRect);
-            _doesScroll = BuildPickerColumn(card.transform, "DOES", col2X, columnsY, _doesColW,
-                _doesItems.Count, BuildDoesRows, out _doesContentRect, out _doesViewportRect);
-            _whatScroll = BuildPickerColumn(card.transform, "WHAT / WHERE", col3X, columnsY, _whatColW,
-                _whatItems.Count, BuildWhatRows, out _whatContentRect, out _whatViewportRect);
+            _whoScroll = BuildPickerColumn(tray.transform, "WER", col1X, columnsCenterY,
+                _whoColW, columnsH, BuildWhoRows, out _whoContentRect, out _whoViewportRect);
+            _doesScroll = BuildPickerColumn(tray.transform, "TUT", col2X, columnsCenterY,
+                _doesColW, columnsH, BuildDoesRows, out _doesContentRect, out _doesViewportRect);
+            _whatScroll = BuildPickerColumn(tray.transform, "WAS · WO", col3X, columnsCenterY,
+                _whatColW, columnsH, BuildWhatRows, out _whatContentRect, out _whatViewportRect);
 
-            // ── Result line ──
-            float resultY = -_panelH / 2 + BTN_H + RESULT_H / 2 + 8;
-            BuildResultLine(card.transform, resultY);
+            // ── Result bar ──
+            float resultCenterY = columnsTop - columnsH - GAP - RESULT_H * 0.5f;
+            BuildResultBar(tray.transform, resultCenterY);
 
-            // ── Confirm button ──
-            float btnY = -_panelH / 2 + BTN_H / 2 + 4;
-            BuildConfirmButton(card.transform, btnY);
-
-            // ── Scroll to context pre-fills ──
-            ApplyContextScroll(context);
+            ApplyContextScroll();
             _prevDoesIdx = _doesIdx;
 
             UpdateResultLine();
         }
 
+        /// <summary>Title, running-orders button and close button.</summary>
+        private void BuildHeader(Transform tray, float halfW, float halfH)
+        {
+            float y = halfH - PAD - HEADER_H * 0.5f;
+
+            UIKit.Heading(tray, UITheme.Track("Befehle", UITheme.Tracking.Tight), 34,
+                UITheme.Cream, new Vector2(-halfW + PAD + 140f, y), new Vector2(280f, HEADER_H),
+                TextAnchor.MiddleLeft);
+
+            var listBtn = UIKit.Centered(tray, "ActiveOrdersBtn",
+                new Vector2(-halfW + PAD + 300f + 130f, y), new Vector2(260f, 56f));
+            UIKit.Surface(listBtn, UITheme.LeatherLight, () =>
+            {
+                if (OrderListUI.Instance != null) OrderListUI.Instance.Toggle();
+            });
+            _activeOrdersText = UIKit.FillText(listBtn.transform, "Laufende Befehle",
+                UITheme.Body, 22, UITheme.Cream);
+            UpdateActiveOrdersLabel();
+
+            UIKit.CloseButton(tray, new Vector2(-PAD, -PAD - 3f), Close);
+        }
+
         // ─── Picker Column Builder ──────────────────────────────
 
         private ScrollRect BuildPickerColumn(Transform parent, string header,
-            float x, float y, float colWidth, int itemCount,
+            float x, float y, float colWidth, float totalH,
             System.Action<Transform> populateRows,
             out RectTransform contentRect, out RectTransform viewportRect)
         {
-            float totalH = _colH + 28; // header + column
-            var col = MakeRect(parent, $"Col_{header}", new Vector2(x, y),
+            var col = UIKit.Centered(parent, $"Col_{header}", new Vector2(x, y),
                 new Vector2(colWidth, totalH));
 
-            // Header
-            var hdrGo = MakeRect(col.transform, "Header",
-                new Vector2(0, totalH / 2 - 14), new Vector2(colWidth, 28));
-            var hdrTxt = hdrGo.AddComponent<Text>();
-            hdrTxt.font = GetFont();
-            hdrTxt.fontSize = 15;
-            hdrTxt.color = new Color(0.7f, 0.8f, 0.6f);
-            hdrTxt.alignment = TextAnchor.MiddleCenter;
-            hdrTxt.fontStyle = FontStyle.Bold;
-            hdrTxt.text = header;
+            // ── Header: small caps label on parchment with a rule underneath ──
+            var hdr = UIKit.Centered(col.transform, "Header",
+                new Vector2(0f, totalH * 0.5f - COL_HEADER_H * 0.5f),
+                new Vector2(colWidth, COL_HEADER_H));
+            UIKit.Fill(hdr, UITheme.Paper, blocksTaps: false);
+            UIKit.FillText(hdr.transform, UITheme.Track(header, UITheme.Tracking.Wide),
+                UITheme.Display, 24, UITheme.InkMuted);
+            var hdrRule = UIKit.New(hdr.transform, "Rule");
+            var hrr = (RectTransform)hdrRule.transform;
+            hrr.anchorMin = new Vector2(0f, 0f);
+            hrr.anchorMax = new Vector2(1f, 0f);
+            hrr.pivot = new Vector2(0.5f, 0f);
+            hrr.anchoredPosition = Vector2.zero;
+            hrr.sizeDelta = new Vector2(0f, UITheme.Border);
+            UIKit.Fill(hdrRule, UITheme.Rule, blocksTaps: false);
 
-            // Scroll viewport
-            var vpGo = MakeRect(col.transform, "Viewport",
-                new Vector2(0, -14), new Vector2(colWidth, _colH));
-            vpGo.AddComponent<Image>().color = COL_BG;
-            vpGo.AddComponent<RectMask2D>();
-            viewportRect = vpGo.GetComponent<RectTransform>();
+            // ── Scroll viewport ──
+            var vp = UIKit.Centered(col.transform, "Viewport",
+                new Vector2(0f, totalH * 0.5f - COL_HEADER_H - _colH * 0.5f),
+                new Vector2(colWidth, _colH));
+            UIKit.Fill(vp, UITheme.Paper);
+            vp.AddComponent<RectMask2D>();
+            viewportRect = (RectTransform)vp.transform;
 
-            // Selection rectangle: clear rectangular band showing which item is selected
-            var selBand = MakeRect(vpGo.transform, "SelectionBand",
-                Vector2.zero, new Vector2(colWidth - 4, ROW_HEIGHT + 6));
-            var selBandImg = selBand.AddComponent<Image>();
-            selBandImg.color = SELECTION_BAND;
-            selBandImg.raycastTarget = false;
+            // Selection band: the centre row, framed by accent rules top and bottom.
+            var band = UIKit.Centered(vp.transform, "SelectionBand", Vector2.zero,
+                new Vector2(colWidth, ROW_HEIGHT));
+            UIKit.Fill(band, SELECTION_BAND, blocksTaps: false);
+            BandEdge(band.transform, "BandTop", 1f);
+            BandEdge(band.transform, "BandBottom", 0f);
 
-            // v0.5.9: Subtle gradient overlays at top and bottom edges for depth
-            var topFade = MakeRect(vpGo.transform, "TopFade",
-                new Vector2(0, _colH / 2 - 20), new Vector2(colWidth, 40));
-            var topFadeImg = topFade.AddComponent<Image>();
-            topFadeImg.color = new Color(BG.r, BG.g, BG.b, 0.6f);
-            topFadeImg.raycastTarget = false;
-
-            var bottomFade = MakeRect(vpGo.transform, "BottomFade",
-                new Vector2(0, -_colH / 2 + 20), new Vector2(colWidth, 40));
-            var bottomFadeImg = bottomFade.AddComponent<Image>();
-            bottomFadeImg.color = new Color(BG.r, BG.g, BG.b, 0.6f);
-            bottomFadeImg.raycastTarget = false;
-
-            // ScrollRect with snappy physics — low deceleration so it stops quickly
-            var scroll = vpGo.AddComponent<ScrollRect>();
+            var scroll = vp.AddComponent<ScrollRect>();
             scroll.horizontal = false;
             scroll.vertical = true;
             scroll.movementType = ScrollRect.MovementType.Elastic;
@@ -468,99 +432,131 @@ namespace Terranova.UI
             scroll.decelerationRate = 0.04f;   // Stops faster → snaps sooner
             scroll.scrollSensitivity = 25f;
 
-            // Content container
-            var content = new GameObject("Content");
-            content.transform.SetParent(vpGo.transform, false);
-            contentRect = content.AddComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0, 1);
-            contentRect.anchorMax = new Vector2(1, 1);
-            contentRect.pivot = new Vector2(0.5f, 1);
+            // ── Content container ──
+            var content = UIKit.New(vp.transform, "Content");
+            contentRect = (RectTransform)content.transform;
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
             contentRect.anchoredPosition = Vector2.zero;
 
-            // Top/bottom padding so first/last items can scroll to center
-            float pad = Mathf.FloorToInt(_colH / 2f - ROW_HEIGHT / 2f);
-
-            var layout = content.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = SPACING;
-            layout.padding = new RectOffset(2, 2, (int)pad, (int)pad);
-            layout.childAlignment = TextAnchor.UpperCenter;
-            layout.childControlWidth = true;
-            layout.childControlHeight = false;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
-
+            // Top/bottom padding so the first and last items can reach the centre.
+            int pad = Mathf.FloorToInt(_colH / 2f - ROW_HEIGHT / 2f);
+            UIKit.Column(content, SPACING, new RectOffset(0, 0, pad, pad));
             content.AddComponent<ContentSizeFitter>().verticalFit =
                 ContentSizeFitter.FitMode.PreferredSize;
 
             scroll.content = contentRect;
-            scroll.viewport = viewportRect;  // Explicit viewport reference
+            scroll.viewport = viewportRect;
 
-            // Populate rows
             populateRows(content.transform);
+
+            // Fade the column edges towards the parchment so rows do not collide
+            // with the header and the result bar.
+            UIKit.GradientFade(vp.transform, FADE_H, UITheme.Paper, fromTop: true);
+            UIKit.GradientFade(vp.transform, FADE_H, UITheme.Paper, fromTop: false);
 
             return scroll;
         }
 
-        // ─── v0.5.9: Cylindrical Perspective Effect ─────────────
+        /// <summary>3 px accent rule at the top or bottom edge of the selection band.</summary>
+        private static void BandEdge(Transform band, string name, float edge)
+        {
+            var go = UIKit.New(band, name);
+            var r = (RectTransform)go.transform;
+            r.anchorMin = new Vector2(0f, edge);
+            r.anchorMax = new Vector2(1f, edge);
+            r.pivot = new Vector2(0.5f, edge);
+            r.anchoredPosition = Vector2.zero;
+            r.sizeDelta = new Vector2(0f, 3f);
+            UIKit.Fill(go, UITheme.Accent, blocksTaps: false);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  C Y L I N D R I C A L   P E R S P E C T I V E
+        // ═══════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Apply iOS UIPickerView-style cylindrical perspective to a column.
-        /// Items at the center are full-size and fully opaque.
-        /// Items further from center progressively scale down and fade out,
-        /// simulating a 3D rotating drum/cylinder.
+        /// iOS UIPickerView-style cylindrical perspective: the centre row is
+        /// full-size and opaque, rows further out scale down and fade.
+        ///
+        /// The row nearest the centre also switches to the display face, which is
+        /// what makes the current selection read as the chosen word.
         /// </summary>
         private void ApplyCylindricalEffect(ScrollRect scroll, RectTransform content,
-            RectTransform viewport)
+            RectTransform viewport, ref Transform nearest)
         {
             if (scroll == null || content == null || viewport == null) return;
 
-            // Center of the viewport in world space
-            Vector3[] vpCorners = new Vector3[4];
+            var vpCorners = new Vector3[4];
             viewport.GetWorldCorners(vpCorners);
             float vpCenterY = (vpCorners[0].y + vpCorners[2].y) * 0.5f;
             float vpHeight = vpCorners[2].y - vpCorners[0].y;
             if (vpHeight < 1f) return;
 
             float step = ROW_HEIGHT + SPACING;
+            Transform closest = null;
+            float closestDist = float.MaxValue;
 
+            var childCorners = new Vector3[4];
             for (int i = 0; i < content.childCount; i++)
             {
                 var child = content.GetChild(i);
-                var childRT = child as RectTransform;
-                if (childRT == null) continue;
+                if (child is not RectTransform childRT) continue;
 
-                // Get child center in world space
-                Vector3[] childCorners = new Vector3[4];
                 childRT.GetWorldCorners(childCorners);
                 float childCenterY = (childCorners[0].y + childCorners[2].y) * 0.5f;
 
-                // Distance from viewport center (normalized: 0 = center, 1 = one row away)
-                float distFromCenter = Mathf.Abs(childCenterY - vpCenterY) / (step * viewport.lossyScale.y);
-                float normalizedDist = distFromCenter / PERSPECTIVE_RANGE;
-                normalizedDist = Mathf.Clamp01(normalizedDist);
+                // Distance from viewport centre, in rows.
+                float distInRows = Mathf.Abs(childCenterY - vpCenterY)
+                                   / (step * viewport.lossyScale.y);
+                if (distInRows < closestDist)
+                {
+                    closestDist = distInRows;
+                    closest = child;
+                }
 
-                // Cosine falloff for natural cylindrical look
-                float curve = Mathf.Cos(normalizedDist * Mathf.PI * 0.5f);
+                // Cosine falloff for a natural cylindrical look.
+                float curve = Mathf.Cos(Mathf.Clamp01(distInRows / PERSPECTIVE_RANGE)
+                                        * Mathf.PI * 0.5f);
 
-                // Scale: 1.0 at center → PERSPECTIVE_SCALE_MIN at edges
                 float scale = Mathf.Lerp(PERSPECTIVE_SCALE_MIN, 1f, curve);
                 childRT.localScale = new Vector3(scale, scale, 1f);
 
-                // Alpha: 1.0 at center → PERSPECTIVE_ALPHA_MIN at edges
-                float alpha = Mathf.Lerp(PERSPECTIVE_ALPHA_MIN, 1f, curve);
-
-                // Apply alpha to all Text and Image components on this row
-                ApplyRowAlpha(child, alpha);
+                ApplyRowAlpha(child, Mathf.Lerp(PERSPECTIVE_ALPHA_MIN, 1f, curve));
             }
+
+            if (closest == nearest) return;
+
+            // Selection moved: plain face for the row that lost it, display face for
+            // the row that gained it. Only on change, because reassigning a font
+            // rebuilds the text mesh.
+            SetRowSelected(nearest, false);
+            SetRowSelected(closest, true);
+            nearest = closest;
+        }
+
+        /// <summary>Swap a row's main label between the body and display faces.</summary>
+        private static void SetRowSelected(Transform row, bool selected)
+        {
+            if (row == null) return;
+
+            var labelTransform = row.Find("Label");
+            if (labelTransform == null) return;
+
+            var label = labelTransform.GetComponent<Text>();
+            if (label == null) return;
+
+            label.font = selected ? UITheme.Display : UITheme.Body;
+            label.fontSize = selected ? 34 : 26;
         }
 
         /// <summary>
         /// Set alpha on all Text and Image components of a row.
-        /// Preserves the base RGB values, only modifies alpha channel.
+        /// Preserves the base RGB values, only modifies the alpha channel.
         /// </summary>
         private static void ApplyRowAlpha(Transform row, float alpha)
         {
-            // Row background image (if any)
             var img = row.GetComponent<Image>();
             if (img != null)
             {
@@ -568,37 +564,29 @@ namespace Terranova.UI
                 img.color = new Color(c.r, c.g, c.b, c.a > 0.01f ? Mathf.Min(c.a, alpha) : 0f);
             }
 
-            // All child text/image components
             for (int i = 0; i < row.childCount; i++)
             {
                 var child = row.GetChild(i);
+
                 var txt = child.GetComponent<Text>();
                 if (txt != null)
                 {
                     var c = txt.color;
                     txt.color = new Color(c.r, c.g, c.b, alpha);
                 }
+
                 var childImg = child.GetComponent<Image>();
                 if (childImg != null)
                 {
                     var c = childImg.color;
                     childImg.color = new Color(c.r, c.g, c.b, alpha);
                 }
-                // Recurse one level for subtitle labels
-                for (int j = 0; j < child.childCount; j++)
-                {
-                    var sub = child.GetChild(j);
-                    var subTxt = sub.GetComponent<Text>();
-                    if (subTxt != null)
-                    {
-                        var sc = subTxt.color;
-                        subTxt.color = new Color(sc.r, sc.g, sc.b, alpha);
-                    }
-                }
             }
         }
 
-        // ─── WHO Items ──────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  W E R   ( W H O )
+        // ═══════════════════════════════════════════════════════════
 
         private void PopulateWhoItems(OpenKlappbuchEvent context)
         {
@@ -606,13 +594,13 @@ namespace Terranova.UI
             _whoItems.Add(new WhoItem
             {
                 Subject = OrderSubject.All,
-                DisplayLabel = "All Settlers",
+                DisplayLabel = UIStrings.Subject(OrderSubject.All, null),
                 Subtitle = ""
             });
             _whoItems.Add(new WhoItem
             {
                 Subject = OrderSubject.NextFree,
-                DisplayLabel = "Next Free",
+                DisplayLabel = UIStrings.Subject(OrderSubject.NextFree, null),
                 Subtitle = ""
             });
 
@@ -626,9 +614,10 @@ namespace Terranova.UI
                 {
                     Subject = OrderSubject.Named,
                     SettlerName = s.name,
-                    IsBusy = busy,
                     DisplayLabel = s.name,
-                    Subtitle = busy ? s.StateName : $"[{s.Trait.ToString()[0]}]"
+                    Subtitle = busy
+                        ? UIStrings.StateActivity(s.StateName)
+                        : UIStrings.TraitShort(s.Trait)
                 });
 
                 if (!string.IsNullOrEmpty(context.SettlerName) && s.name == context.SettlerName)
@@ -641,14 +630,12 @@ namespace Terranova.UI
         private void BuildWhoRows(Transform content)
         {
             foreach (var item in _whoItems)
-            {
-                Color bg = item.IsBusy ? ROW_BUSY : ROW_N;
-                CreatePickerRow(content, item.DisplayLabel, item.Subtitle,
-                    false, ROW_HEIGHT, bg, Color.white);
-            }
+                CreatePickerRow(content, item.DisplayLabel, item.Subtitle, ROW_HEIGHT);
         }
 
-        // ─── DOES Items ─────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  T U T   ( D O E S )
+        // ═══════════════════════════════════════════════════════════
 
         private void PopulateDoesItems(OpenKlappbuchEvent context)
         {
@@ -680,42 +667,39 @@ namespace Terranova.UI
             bool pastDivider = false;
             foreach (var item in _doesItems)
             {
-                // Divider before first locked item
                 if (!pastDivider && item.IsLocked)
                 {
                     pastDivider = true;
-
-                    // Label
-                    var divLabel = new GameObject("DividerLabel");
-                    divLabel.transform.SetParent(content, false);
-                    divLabel.AddComponent<LayoutElement>().preferredHeight = 18;
-                    var dlTxt = divLabel.AddComponent<Text>();
-                    dlTxt.font = GetFont();
-                    dlTxt.fontSize = 11;
-                    dlTxt.color = new Color(0.5f, 0.5f, 0.5f, 0.7f);
-                    dlTxt.alignment = TextAnchor.MiddleCenter;
-                    dlTxt.text = "-- locked --";
-
-                    // Line
-                    var divLine = new GameObject("DividerLine");
-                    divLine.transform.SetParent(content, false);
-                    divLine.AddComponent<LayoutElement>().preferredHeight = 2;
-                    divLine.AddComponent<Image>().color = new Color(0.4f, 0.5f, 0.4f, 0.6f);
+                    CreateLockedDivider(content);
                 }
 
-                string subtitle = item.IsLocked
-                    ? $"Requires: {item.RequiredDiscovery ?? "???"}"
-                    : "";
-                float h = (item.IsLocked && !string.IsNullOrEmpty(subtitle))
-                    ? ROW_HEIGHT_LOCKED : ROW_HEIGHT;
-                Color bg = item.IsLocked ? ROW_LOCK : ROW_N;
-
-                CreatePickerRow(content, item.Predicate.ToString(), subtitle,
-                    item.IsLocked, h, bg, Color.white);
+                if (item.IsLocked)
+                {
+                    string condition = "verlangt: " +
+                        UIStrings.Discovery(item.RequiredDiscovery ?? "?");
+                    CreateLockedRow(content, UIStrings.Predicate(item.Predicate), condition);
+                }
+                else
+                {
+                    CreatePickerRow(content, UIStrings.Predicate(item.Predicate), "", ROW_HEIGHT);
+                }
             }
         }
 
-        // ─── WHAT Items ─────────────────────────────────────────
+        /// <summary>Rule · "NOCH VERBORGEN" · rule, separating the locked verbs.</summary>
+        private void CreateLockedDivider(Transform content)
+        {
+            var row = UIKit.New(content, "LockedDivider");
+            UIKit.Size(row, 0f, 40f);
+
+            var label = UIKit.Stretch(row.transform, "Label");
+            UIKit.Label(label, UITheme.Track("NOCH VERBORGEN", UITheme.Tracking.Loose),
+                UITheme.Display, UITheme.FontMin, UITheme.InkMuted, TextAnchor.MiddleCenter);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  W A S · W O   ( W H A T )
+        // ═══════════════════════════════════════════════════════════
 
         private void PopulateWhatItems()
         {
@@ -723,13 +707,11 @@ namespace Terranova.UI
             var vocab = OrderVocabulary.Instance;
             if (vocab == null) return;
 
-            // Get predicate from current DOES selection
             OrderPredicate pred = OrderPredicate.Gather;
             if (_doesIdx >= 0 && _doesIdx < _doesItems.Count)
                 pred = _doesItems[_doesIdx].Predicate;
 
-            var objects = vocab.GetObjectsForPredicate(pred);
-            foreach (var obj in objects)
+            foreach (var obj in vocab.GetObjectsForPredicate(pred))
                 _whatItems.Add(new WhatItem { Object = obj });
         }
 
@@ -737,22 +719,18 @@ namespace Terranova.UI
         {
             if (_whatItems.Count == 0)
             {
-                var emptyGo = new GameObject("Empty");
-                emptyGo.transform.SetParent(content, false);
-                emptyGo.AddComponent<LayoutElement>().preferredHeight = ROW_HEIGHT;
-                var et = emptyGo.AddComponent<Text>();
-                et.font = GetFont();
-                et.fontSize = FONT_MIN;
-                et.color = TXT_L;
-                et.alignment = TextAnchor.MiddleCenter;
-                et.text = "(none)";
+                var empty = UIKit.New(content, "Empty");
+                UIKit.Size(empty, 0f, ROW_HEIGHT);
+                var label = UIKit.Stretch(empty.transform, "Label");
+                UIKit.Label(label, "(nichts)", UITheme.Body, 26, UITheme.InkMuted,
+                    TextAnchor.MiddleCenter);
                 return;
             }
 
             foreach (var item in _whatItems)
             {
-                CreatePickerRow(content, item.Object.DisplayName, "",
-                    false, ROW_HEIGHT, ROW_N, TXT_N);
+                string label = UIStrings.OrderObjectName(item.Object.Id, item.Object.DisplayName);
+                CreatePickerRow(content, label, "", ROW_HEIGHT, ObjectColor(item.Object));
             }
         }
 
@@ -760,80 +738,151 @@ namespace Terranova.UI
         {
             if (_whatContentRect == null) return;
 
-            // Destroy old rows
             for (int i = _whatContentRect.childCount - 1; i >= 0; i--)
                 Destroy(_whatContentRect.GetChild(i).gameObject);
+
+            _whatNearest = null;
 
             PopulateWhatItems();
             BuildWhatRows(_whatContentRect);
 
-            // Reset scroll to top (index 0)
+            // Reset scroll to the first item.
             _whatIdx = 0;
-            if (_whatContentRect != null)
-                _whatContentRect.anchoredPosition = Vector2.zero;
-        }
-
-        // ─── Snap-to-Center Logic ───────────────────────────────
-
-        private void SnapColumn(ScrollRect scroll, RectTransform content,
-            int itemCount, float rowH, ref int selectedIdx,
-            System.Action<int> onChange)
-        {
-            if (scroll == null || content == null || itemCount == 0) return;
-
-            float step = rowH + SPACING;
-            float y = content.anchoredPosition.y;
-
-            // Calculate nearest item index
-            int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
-            float targetY = nearest * step;
-            float dist = Mathf.Abs(y - targetY);
-
-            // Snap aggressively: start correcting as soon as velocity drops
-            if (Mathf.Abs(scroll.velocity.y) < SNAP_THRESHOLD)
-            {
-                // Kill residual drift immediately when very close
-                if (dist < SNAP_DEAD_ZONE)
-                {
-                    content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
-                    scroll.velocity = Vector2.zero;
-                }
-                else
-                {
-                    float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
-                    float newY = Mathf.Lerp(y, targetY, lerpT);
-                    content.anchoredPosition = new Vector2(content.anchoredPosition.x, newY);
-
-                    if (Mathf.Abs(newY - targetY) < 0.5f)
-                    {
-                        content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
-                        scroll.velocity = Vector2.zero;
-                    }
-                }
-            }
-
-            if (nearest != selectedIdx)
-            {
-                selectedIdx = nearest;
-                onChange?.Invoke(nearest);
-            }
+            _whatContentRect.anchoredPosition = Vector2.zero;
         }
 
         /// <summary>
-        /// Snap DOES column with special logic: skip locked items.
+        /// Material colour of an order object, shown as a square before its name.
+        /// Returns a fully transparent colour for anything that is not a material.
+        /// </summary>
+        private static Color ObjectColor(OrderObject obj)
+        {
+            if (obj == null || obj.Category != OrderObjectCategory.Resource)
+                return new Color(0f, 0f, 0f, 0f);
+
+            return obj.Id switch
+            {
+                "wood" => UITheme.MatWood,
+                "stone" or "flint" or "sandstone" or "granite" => UITheme.MatStone,
+                "food" or "berries" => UITheme.MatFood,
+                "water" => UITheme.BarThirst,
+                _ => UITheme.InkMuted
+            };
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  R O W   B U I L D E R S
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// A picker row: main label, optional subtitle, optional material square.
+        /// Rows start in the body face; the centre row is switched to the display
+        /// face by <see cref="SetRowSelected"/>.
+        /// </summary>
+        private void CreatePickerRow(Transform parent, string label, string subtitle,
+            float height, Color materialColor = default)
+        {
+            bool hasSub = !string.IsNullOrEmpty(subtitle);
+            bool hasDot = materialColor.a > 0f;
+
+            var row = UIKit.New(parent, $"Row_{label}");
+            UIKit.Size(row, 0f, height);
+
+            var labelGo = UIKit.New(row.transform, "Label");
+            var lr = (RectTransform)labelGo.transform;
+            lr.anchorMin = new Vector2(0f, hasSub ? 0.38f : 0f);
+            lr.anchorMax = Vector2.one;
+            lr.offsetMin = new Vector2(hasDot ? 40f : 12f, 0f);
+            lr.offsetMax = new Vector2(-12f, 0f);
+            var text = UIKit.Label(labelGo, label, UITheme.Body, 26, UITheme.Ink,
+                TextAnchor.MiddleCenter);
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+
+            if (hasDot)
+            {
+                var dot = UIKit.New(row.transform, "Dot");
+                var dr = (RectTransform)dot.transform;
+                dr.anchorMin = new Vector2(0.5f, 0.5f);
+                dr.anchorMax = new Vector2(0.5f, 0.5f);
+                dr.pivot = new Vector2(0.5f, 0.5f);
+                dr.anchoredPosition = new Vector2(-UIKit.EstimateTextWidth(label, 34) * 0.5f - 22f, 0f);
+                dr.sizeDelta = new Vector2(22f, 22f);
+                UIKit.Fill(dot, materialColor, blocksTaps: false);
+            }
+
+            if (!hasSub) return;
+
+            var subGo = UIKit.New(row.transform, "Sub");
+            var sr = (RectTransform)subGo.transform;
+            sr.anchorMin = Vector2.zero;
+            sr.anchorMax = new Vector2(1f, 0.38f);
+            sr.offsetMin = new Vector2(12f, 4f);
+            sr.offsetMax = new Vector2(-12f, 0f);
+            UIKit.Label(subGo, subtitle, UITheme.Body, UITheme.FontMin, UITheme.InkMuted,
+                TextAnchor.MiddleCenter);
+        }
+
+        /// <summary>
+        /// A locked verb: dimmed, taller, with the missing discovery in terracotta.
+        /// </summary>
+        private void CreateLockedRow(Transform parent, string label, string condition)
+        {
+            var row = UIKit.New(parent, $"Row_{label}");
+            UIKit.Size(row, 0f, ROW_HEIGHT_LOCKED);
+
+            var group = row.AddComponent<CanvasGroup>();
+            group.alpha = 0.40f;
+
+            var labelGo = UIKit.New(row.transform, "Label");
+            var lr = (RectTransform)labelGo.transform;
+            lr.anchorMin = new Vector2(0f, 0.40f);
+            lr.anchorMax = Vector2.one;
+            lr.offsetMin = new Vector2(12f, 0f);
+            lr.offsetMax = new Vector2(-12f, 0f);
+            UIKit.Label(labelGo, label, UITheme.Body, 26, UITheme.Ink, TextAnchor.MiddleCenter);
+
+            var condGo = UIKit.New(row.transform, "Condition");
+            var cr = (RectTransform)condGo.transform;
+            cr.anchorMin = Vector2.zero;
+            cr.anchorMax = new Vector2(1f, 0.40f);
+            cr.offsetMin = new Vector2(12f, 4f);
+            cr.offsetMax = new Vector2(-12f, 0f);
+            UIKit.Label(condGo, condition, UITheme.Body, UITheme.FontMin, UITheme.Danger,
+                TextAnchor.MiddleCenter);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  S N A P - T O - C E N T R E
+        // ═══════════════════════════════════════════════════════════
+
+        private void SnapColumn(ScrollRect scroll, RectTransform content, int itemCount,
+            ref int selectedIdx)
+        {
+            if (scroll == null || content == null || itemCount == 0) return;
+
+            float step = ROW_HEIGHT + SPACING;
+            float y = content.anchoredPosition.y;
+
+            int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, itemCount - 1);
+            SettleTo(scroll, content, nearest * step, y);
+            selectedIdx = nearest;
+        }
+
+        /// <summary>
+        /// Snap the TUT column, skipping locked verbs — the player can scroll past
+        /// them to read the condition but cannot select one.
         /// </summary>
         private void SnapDoesColumn()
         {
             if (_doesScroll == null || _doesContentRect == null || _doesItems.Count == 0) return;
 
-            // DOES column has mixed row heights (locked vs unlocked) and divider elements.
-            // Use uniform step based on ROW_HEIGHT for snapping since most items are unlocked.
+            // The column has mixed row heights and a divider element; snapping uses a
+            // uniform step based on ROW_HEIGHT since most items are unlocked.
             float step = ROW_HEIGHT + SPACING;
             float y = _doesContentRect.anchoredPosition.y;
             int nearest = Mathf.Clamp(Mathf.RoundToInt(y / step), 0, _doesItems.Count - 1);
 
-            // If nearest is locked, find closest unlocked
-            if (nearest < _doesItems.Count && _doesItems[nearest].IsLocked)
+            if (_doesItems[nearest].IsLocked)
             {
                 int below = nearest - 1;
                 int above = nearest + 1;
@@ -846,107 +895,100 @@ namespace Terranova.UI
                 }
             }
 
-            if (Mathf.Abs(_doesScroll.velocity.y) < SNAP_THRESHOLD)
-            {
-                float targetY = nearest * step;
-                float dist = Mathf.Abs(y - targetY);
-
-                // Kill residual drift immediately when very close
-                if (dist < SNAP_DEAD_ZONE)
-                {
-                    _doesContentRect.anchoredPosition =
-                        new Vector2(_doesContentRect.anchoredPosition.x, targetY);
-                    _doesScroll.velocity = Vector2.zero;
-                }
-                else
-                {
-                    float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
-                    float newY = Mathf.Lerp(y, targetY, lerpT);
-                    _doesContentRect.anchoredPosition =
-                        new Vector2(_doesContentRect.anchoredPosition.x, newY);
-
-                    if (Mathf.Abs(newY - targetY) < 0.5f)
-                    {
-                        _doesContentRect.anchoredPosition =
-                            new Vector2(_doesContentRect.anchoredPosition.x, targetY);
-                        _doesScroll.velocity = Vector2.zero;
-                    }
-                }
-            }
-
+            SettleTo(_doesScroll, _doesContentRect, nearest * step, y);
             _doesIdx = nearest;
         }
 
-        // ─── Context Pre-Scroll ─────────────────────────────────
-
-        private void ApplyContextScroll(OpenKlappbuchEvent context)
+        /// <summary>
+        /// Spring the content towards a target offset once the flick has slowed
+        /// below the snap threshold. Physics unchanged from v0.5.9.
+        /// </summary>
+        private static void SettleTo(ScrollRect scroll, RectTransform content, float targetY,
+            float currentY)
         {
-            // Always set positions — including index 0 (which needs y=0 to center
-            // the first item). Previously this skipped index 0, leaving the
-            // content at whatever position Unity's layout gave it.
+            if (Mathf.Abs(scroll.velocity.y) >= SNAP_THRESHOLD) return;
+
+            float dist = Mathf.Abs(currentY - targetY);
+            if (dist < SNAP_DEAD_ZONE)
+            {
+                content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
+                scroll.velocity = Vector2.zero;
+                return;
+            }
+
+            float lerpT = 1f - Mathf.Pow(0.001f, Time.unscaledDeltaTime / SNAP_DURATION);
+            float newY = Mathf.Lerp(currentY, targetY, lerpT);
+            content.anchoredPosition = new Vector2(content.anchoredPosition.x, newY);
+
+            if (Mathf.Abs(newY - targetY) < 0.5f)
+            {
+                content.anchoredPosition = new Vector2(content.anchoredPosition.x, targetY);
+                scroll.velocity = Vector2.zero;
+            }
+        }
+
+        /// <summary>
+        /// Apply the pre-fills from the open request. Always sets positions —
+        /// including index 0, which needs y = 0 to centre the first item.
+        /// </summary>
+        private void ApplyContextScroll()
+        {
             ForceScrollToIndex(_whoScroll, _whoContentRect, _whoIdx);
             ForceScrollToIndex(_doesScroll, _doesContentRect, _doesIdx);
             ForceScrollToIndex(_whatScroll, _whatContentRect, _whatIdx);
         }
 
-        // ─── Result Line ────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  R E S U L T   B A R
+        // ═══════════════════════════════════════════════════════════
 
-        private void BuildResultLine(Transform parent, float y)
+        private void BuildResultBar(Transform tray, float centerY)
         {
-            var bg = MakeRect(parent, "ResultLine",
-                new Vector2(0, y), new Vector2(_panelW - 40, RESULT_H));
-            bg.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.06f, 0.9f);
+            float barW = _trayW - 2f * PAD;
+            var bar = UIKit.Centered(tray, "ResultBar", new Vector2(0f, centerY),
+                new Vector2(barW, RESULT_H));
+            UIKit.Fill(bar, UITheme.PaperDeep);
 
-            // Result text
-            var txt = MakeRect(bg.transform, "Text",
-                new Vector2(30, 0), new Vector2(_panelW - 140, RESULT_H - 8));
-            _resultText = txt.AddComponent<Text>();
-            _resultText.font = GetFont();
-            _resultText.fontSize = 18;
-            _resultText.color = INVALID_C;
-            _resultText.alignment = TextAnchor.MiddleCenter;
-            _resultText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _resultText.verticalOverflow = VerticalWrapMode.Overflow;
+            float halfBar = barW * 0.5f;
 
-            // NICHT toggle (left)
-            var negGo = MakeRect(parent, "NegateBtn",
-                new Vector2(-_panelW / 2 + 50, y), new Vector2(70, CLOSE_SIZE));
-            _negateImg = negGo.AddComponent<Image>();
-            _negateImg.color = _isNegated ? NEG_C : new Color(0.3f, 0.3f, 0.3f, 0.7f);
-            negGo.AddComponent<Button>().onClick.AddListener(() =>
-            {
-                _isNegated = !_isNegated;
-                _negateImg.color = _isNegated ? NEG_C : new Color(0.3f, 0.3f, 0.3f, 0.7f);
-                UpdateResultLine();
-            });
-            var negLabel = MakeRect(negGo.transform, "L", Vector2.zero, new Vector2(70, CLOSE_SIZE));
-            var nt = negLabel.AddComponent<Text>();
-            nt.font = GetFont();
-            nt.fontSize = FONT_MIN;
-            nt.color = Color.white;
-            nt.alignment = TextAnchor.MiddleCenter;
-            nt.fontStyle = FontStyle.Bold;
-            nt.text = "NICHT";
+            // ── "NICHT" toggle ──
+            var negate = UIKit.Centered(bar.transform, "NegateBtn",
+                new Vector2(-halfBar + 20f + NEGATE_W * 0.5f, 0f),
+                new Vector2(NEGATE_W, NEGATE_H));
+            var negateBtn = UIKit.Surface(negate, UITheme.PaperDeep, ToggleNegate);
+            _negateImg = negateBtn.targetGraphic as Image;
+            _negateLabel = UIKit.FillText(negate.transform,
+                UITheme.Track("NICHT", UITheme.Tracking.Tight),
+                UITheme.Display, 24, UITheme.Danger);
+            UIKit.Border(negate.transform, UITheme.Danger, 3f);
+
+            // ── "Befehl geben" ──
+            var confirm = UIKit.Centered(bar.transform, "ConfirmBtn",
+                new Vector2(halfBar - 20f - CONFIRM_W * 0.5f, 0f),
+                new Vector2(CONFIRM_W, CONFIRM_H));
+            _confirmBtn = UIKit.Surface(confirm, UITheme.Confirm, ConfirmOrder);
+            _confirmBg = _confirmBtn.targetGraphic as Image;
+            _confirmLabel = UIKit.FillText(confirm.transform, "Befehl geben",
+                UITheme.Display, 28, UITheme.CreamBright);
+
+            // ── Assembled sentence, centred in what is left ──
+            float sentenceLeft = -halfBar + 20f + NEGATE_W + 20f;
+            float sentenceRight = halfBar - 20f - CONFIRM_W - 20f;
+            var sentence = UIKit.Centered(bar.transform, "Sentence",
+                new Vector2((sentenceLeft + sentenceRight) * 0.5f, 0f),
+                new Vector2(sentenceRight - sentenceLeft, RESULT_H - 16f));
+            _resultText = UIKit.Label(sentence, "…", UITheme.Display, 36, UITheme.Ink,
+                TextAnchor.MiddleCenter);
         }
 
-        private void BuildConfirmButton(Transform parent, float y)
+        private void ToggleNegate()
         {
-            var btn = MakeRect(parent, "ConfirmBtn",
-                new Vector2(0, y), new Vector2(220, BTN_H));
-            _confirmBg = btn.AddComponent<Image>();
-            _confirmBg.color = CONFIRM_OFF;
-            _confirmBtn = btn.AddComponent<Button>();
-            _confirmBtn.targetGraphic = _confirmBg;
-            _confirmBtn.onClick.AddListener(ConfirmOrder);
+            _isNegated = !_isNegated;
 
-            var label = MakeRect(btn.transform, "L", Vector2.zero, new Vector2(220, BTN_H));
-            var lt = label.AddComponent<Text>();
-            lt.font = GetFont();
-            lt.fontSize = 20;
-            lt.color = Color.white;
-            lt.alignment = TextAnchor.MiddleCenter;
-            lt.fontStyle = FontStyle.Bold;
-            lt.text = "Give Order";
+            // Active: filled terracotta with bright text. Inactive: outline only.
+            _negateImg.color = _isNegated ? UITheme.Danger : UITheme.PaperDeep;
+            _negateLabel.color = _isNegated ? UITheme.CreamBright : UITheme.Danger;
+            UpdateResultLine();
         }
 
         private void UpdateResultLine()
@@ -956,24 +998,25 @@ namespace Terranova.UI
             var order = BuildCurrentOrder();
             if (order == null)
             {
-                _resultText.text = "...";
-                _resultText.color = INVALID_C;
-                _confirmBg.color = CONFIRM_OFF;
-                _confirmBtn.interactable = false;
+                _resultText.text = "…";
+                _resultText.color = UITheme.InkMuted;
+                SetConfirmEnabled(false);
                 return;
             }
 
-            string sentence = order.BuildSentence();
-            bool valid = order.IsValid();
-
-            _resultText.text = sentence;
-            _resultText.color = valid ? VALID_C : INVALID_C;
-            _resultText.fontStyle = _isNegated ? FontStyle.Italic : FontStyle.Normal;
-
-            _confirmBg.color = valid ? CONFIRM_ON : CONFIRM_OFF;
-            _confirmBtn.interactable = valid;
+            _resultText.text = UIStrings.Sentence(order);
+            _resultText.color = UITheme.Ink;
+            SetConfirmEnabled(order.IsValid());
 
             UpdateActiveOrdersLabel();
+        }
+
+        /// <summary>An unbuildable order leaves the confirm button visibly inert.</summary>
+        private void SetConfirmEnabled(bool enabled)
+        {
+            _confirmBtn.interactable = enabled;
+            _confirmBg.color = enabled ? UITheme.Confirm : UITheme.PaperDeep;
+            _confirmLabel.color = enabled ? UITheme.CreamBright : UITheme.InkMuted;
         }
 
         private void UpdateActiveOrdersLabel()
@@ -982,23 +1025,22 @@ namespace Terranova.UI
             int count = OrderManager.Instance != null
                 ? OrderManager.Instance.ActiveOrders.Count : 0;
             _activeOrdersText.text = count > 0
-                ? $"Active Orders ({count})" : "Active Orders";
+                ? $"Laufende Befehle ({count})" : "Laufende Befehle";
         }
 
-        // ─── Order Construction ─────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  O R D E R   C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
 
         private OrderDefinition BuildCurrentOrder()
         {
-            // Use the tracked snap indices directly — these are always in sync
-            // with the visual snap target. Previously this method independently
-            // read scroll positions which could disagree with the snap logic
-            // (especially for the DOES column with divider elements).
-            int whoIdx = _whoIdx;
-            int doesIdx = _doesIdx;
-            int whatIdx = _whatIdx;
+            // Use the tracked snap indices directly — these are always in sync with
+            // the visual snap target. Reading scroll positions independently could
+            // disagree with the snap logic (especially for the TUT column with its
+            // divider element).
+            if (_doesIdx < 0 || _doesIdx >= _doesItems.Count) return null;
 
-            if (doesIdx < 0 || doesIdx >= _doesItems.Count) return null;
-            var doesItem = _doesItems[doesIdx];
+            var doesItem = _doesItems[_doesIdx];
             if (doesItem.IsLocked) return null;
 
             var order = new OrderDefinition
@@ -1007,21 +1049,19 @@ namespace Terranova.UI
                 Negated = _isNegated
             };
 
-            // WHO
-            if (whoIdx >= 0 && whoIdx < _whoItems.Count)
+            if (_whoIdx >= 0 && _whoIdx < _whoItems.Count)
             {
-                var who = _whoItems[whoIdx];
+                var who = _whoItems[_whoIdx];
                 order.Subject = who.Subject;
                 order.SettlerName = who.SettlerName;
             }
 
-            // WHAT (single selection from picker)
-            if (whatIdx >= 0 && whatIdx < _whatItems.Count)
+            if (_whatIdx >= 0 && _whatIdx < _whatItems.Count)
             {
-                var whatObj = _whatItems[whatIdx].Object;
+                var whatObj = _whatItems[_whatIdx].Object;
                 order.Objects.Add(whatObj);
 
-                // "Here" stores the tap world position so settlers pathfind there
+                // "Hier" stores the tap world position so settlers pathfind there.
                 if (whatObj.Id == "here" && _tapPosition.HasValue)
                     order.TargetPosition = _tapPosition;
             }
@@ -1034,164 +1074,42 @@ namespace Terranova.UI
             var order = BuildCurrentOrder();
             if (order == null || !order.IsValid()) return;
 
-            string sentence = order.BuildSentence();
-            Debug.Log($"[Klappbuch] ORDER: {sentence} | WHO={order.Subject} DOES={order.Predicate} WHAT={string.Join(",", order.Objects.ConvertAll(o => o.DisplayName))} NEG={order.Negated} pos={order.TargetPosition}");
+            string sentence = UIStrings.Sentence(order);
+            Debug.Log($"[Klappbuch] ORDER: {order.BuildSentence()} | WHO={order.Subject} " +
+                      $"DOES={order.Predicate} NEG={order.Negated} pos={order.TargetPosition}");
             OrderManager.Instance?.CreateOrder(order);
-
-            // Brief green flash on confirm button
-            if (_confirmBg != null)
-                _confirmBg.color = new Color(0.2f, 0.8f, 0.3f, 1f);
 
             Close();
 
-            // Show floating notification for 2 seconds
             StartCoroutine(ShowOrderNotification(sentence));
         }
 
+        /// <summary>Confirmation band that fades out after a couple of seconds.</summary>
         private IEnumerator ShowOrderNotification(string sentence)
         {
-            var go = new GameObject("OrderNotification");
-            go.transform.SetParent(transform, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0.5f, 0f);
-            rt.anchorMax = new Vector2(0.5f, 0f);
-            rt.pivot = new Vector2(0.5f, 0f);
-            rt.anchoredPosition = new Vector2(0, 60);
-            float notifW = _canvasW > 0 ? _canvasW * 0.7f : 500f;
-            rt.sizeDelta = new Vector2(notifW, 48);
+            float width = Mathf.Min(_canvasW > 0f ? _canvasW * 0.6f : 900f, 900f);
+            var band = UIKit.Anchored(transform, "OrderNotification", new Vector2(0.5f, 0f),
+                new Vector2(0f, 240f), new Vector2(width, 72f));
+            var bg = UIKit.Fill(band, UITheme.Confirm, blocksTaps: false);
+            var text = UIKit.FillText(band.transform, sentence, UITheme.Display, 26,
+                UITheme.CreamBright);
 
-            var bg = go.AddComponent<Image>();
-            bg.color = new Color(0.12f, 0.35f, 0.18f, 0.92f);
+            yield return new WaitForSecondsRealtime(2f);
 
-            var txtGo = new GameObject("Text");
-            txtGo.transform.SetParent(go.transform, false);
-            var tr = txtGo.AddComponent<RectTransform>();
-            tr.anchorMin = Vector2.zero;
-            tr.anchorMax = Vector2.one;
-            tr.offsetMin = new Vector2(8, 0);
-            tr.offsetMax = new Vector2(-8, 0);
-            var txt = txtGo.AddComponent<Text>();
-            txt.font = GetFont();
-            txt.fontSize = 16;
-            txt.color = VALID_C;
-            txt.alignment = TextAnchor.MiddleCenter;
-            txt.text = $"\u2713  Order given: {sentence}";
-
-            yield return new WaitForSeconds(2f);
-
-            // Fade out over 0.3s
-            float fade = 0.3f;
+            const float fade = 0.3f;
             float t = 0f;
-            Color bgC = bg.color;
-            Color txtC = txt.color;
+            Color bgColor = bg.color;
+            Color textColor = text.color;
             while (t < fade)
             {
-                t += Time.deltaTime;
-                float a = 1f - (t / fade);
-                bg.color = new Color(bgC.r, bgC.g, bgC.b, bgC.a * a);
-                txt.color = new Color(txtC.r, txtC.g, txtC.b, txtC.a * a);
+                t += Time.unscaledDeltaTime;
+                float a = 1f - t / fade;
+                bg.color = UITheme.WithAlpha(bgColor, a);
+                text.color = UITheme.WithAlpha(textColor, a);
                 yield return null;
             }
 
-            Destroy(go);
-        }
-
-        // ─── Row Builder ────────────────────────────────────────
-
-        private void CreatePickerRow(Transform parent, string label, string subtitle,
-            bool isLocked, float height, Color bgColor, Color textColor)
-        {
-            bool hasSub = !string.IsNullOrEmpty(subtitle);
-            var row = new GameObject($"Row_{label}");
-            row.transform.SetParent(parent, false);
-
-            row.AddComponent<LayoutElement>().preferredHeight = height;
-            row.AddComponent<Image>().color = bgColor;
-
-            // Main label
-            var labelGo = new GameObject("Label");
-            labelGo.transform.SetParent(row.transform, false);
-            var lr = labelGo.AddComponent<RectTransform>();
-            lr.anchorMin = new Vector2(0, hasSub ? 0.42f : 0);
-            lr.anchorMax = Vector2.one;
-            lr.offsetMin = new Vector2(4, 0);
-            lr.offsetMax = new Vector2(-4, -2);
-            var lt = labelGo.AddComponent<Text>();
-            lt.font = GetFont();
-            lt.fontSize = FONT_MIN;
-            lt.color = textColor;
-            lt.alignment = TextAnchor.MiddleCenter;
-            lt.horizontalOverflow = HorizontalWrapMode.Wrap;
-            lt.verticalOverflow = VerticalWrapMode.Truncate;
-            lt.text = label;
-
-            // Lock icon
-            if (isLocked)
-            {
-                var lockGo = new GameObject("Lock");
-                lockGo.transform.SetParent(row.transform, false);
-                var lkr = lockGo.AddComponent<RectTransform>();
-                lkr.anchorMin = new Vector2(1, 0.5f);
-                lkr.anchorMax = new Vector2(1, 0.5f);
-                lkr.pivot = new Vector2(1, 0.5f);
-                lkr.anchoredPosition = new Vector2(-4, 0);
-                lkr.sizeDelta = new Vector2(20, 20);
-                lockGo.AddComponent<Image>().color = new Color(0.6f, 0.4f, 0.2f, 0.8f);
-            }
-
-            // Subtitle
-            if (hasSub)
-            {
-                var subGo = new GameObject("Sub");
-                subGo.transform.SetParent(row.transform, false);
-                var sr = subGo.AddComponent<RectTransform>();
-                sr.anchorMin = Vector2.zero;
-                sr.anchorMax = new Vector2(1, 0.42f);
-                sr.offsetMin = new Vector2(4, 2);
-                sr.offsetMax = new Vector2(-4, 0);
-                var st = subGo.AddComponent<Text>();
-                st.font = GetFont();
-                st.fontSize = FONT_MIN - 1;
-                st.color = isLocked ? new Color(1f, 0.6f, 0.15f) : Color.white;
-                st.alignment = TextAnchor.MiddleCenter;
-                st.horizontalOverflow = HorizontalWrapMode.Wrap;
-                st.text = subtitle;
-            }
-        }
-
-        // ─── Helpers ────────────────────────────────────────────
-
-        private static bool PredicateUsesLocations(OrderPredicate pred)
-        {
-            return pred switch
-            {
-                OrderPredicate.Gather => true,
-                OrderPredicate.Explore => true,
-                OrderPredicate.Avoid => true,
-                OrderPredicate.Hunt => true,
-                OrderPredicate.Fell => true,
-                OrderPredicate.Dig => true,
-                _ => false
-            };
-        }
-
-        private static Font GetFont()
-        {
-            return UIHelpers.GetFont();
-        }
-
-        private static GameObject MakeRect(Transform parent, string name,
-            Vector2 pos, Vector2 size)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            var r = go.AddComponent<RectTransform>();
-            r.anchorMin = new Vector2(0.5f, 0.5f);
-            r.anchorMax = new Vector2(0.5f, 0.5f);
-            r.pivot = new Vector2(0.5f, 0.5f);
-            r.anchoredPosition = pos;
-            r.sizeDelta = size;
-            return go;
+            Destroy(band);
         }
     }
 }

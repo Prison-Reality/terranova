@@ -1,43 +1,44 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Discovery;
 
 namespace Terranova.UI
 {
     /// <summary>
-    /// "Discoveries" panel accessible from a HUD button (bottom-left, next to Orders).
+    /// Screen 7 of the "Kodex" design — the discovery log.
     ///
-    /// Feature 8.6: Discovery Log.
+    /// One parchment page in a leather tray, split into three sections:
+    ///   GEFUNDEN   — two-column cards with a numbered seal
+    ///   AHNUNGEN   — dashed cards with a progress bar for what the tribe is
+    ///                currently working out
+    ///   VERBORGEN  — a grid of "?" tiles with a biome hint
     ///
-    /// - Scrollable list of completed discoveries with tier icon, name, day, discoverer
-    /// - Hints section for in-progress discoveries (Phase A > 50%)
-    /// - Locked entries shown as "???" with biome hint
-    ///
-    /// Toggle: Tab key or tap the Discoveries button on HUD.
-    /// Uses Unity UI (consistent with OrderListUI).
+    /// Toggle: Tab key or the "Entdeckungen" tab on the HUD.
     /// </summary>
     public class DiscoveryLogUI : MonoBehaviour
     {
         public static DiscoveryLogUI Instance { get; private set; }
 
-        private const float PANEL_WIDTH = 480f;
-        private const float PANEL_HEIGHT = 520f;
+        private const float TRAY_W = 1340f;
+        private const float TRAY_H = 920f;
+        private const float PAGE_PAD_X = 40f;
+        private const float PAGE_PAD_Y = 34f;
+        private const float SECTION_GAP = 28f;
 
-        private static readonly Color BG_COLOR = new(0.06f, 0.07f, 0.06f, 0.95f);
-        private static readonly Color SCROLL_BG = new(0.04f, 0.05f, 0.04f, 0.6f);
-        private static readonly Color SECTION_BG = new(0.10f, 0.12f, 0.10f, 0.8f);
-        private static readonly Color COMPLETED_COLOR = new(0.7f, 1f, 0.7f);
-        private static readonly Color MAJOR_COLOR = new(1f, 0.7f, 0.3f);
-        private static readonly Color HINT_COLOR = new(1f, 0.9f, 0.6f);
-        private static readonly Color LOCKED_COLOR = new(0.5f, 0.5f, 0.5f);
-        private static readonly Color META_COLOR = new(0.6f, 0.6f, 0.6f);
-        private static readonly Color DESC_COLOR = new(0.8f, 0.8f, 0.8f);
-        private static readonly Color TITLE_COLOR = new(0.9f, 0.8f, 0.4f);
+        private const float CARD_GAP = 22f;
+        private const float CARD_H = 160f;
+        private const float SEAL_SIZE = 72f;
+        private const float CARD_EDGE = 8f;
+
+        private const int LOCKED_COLUMNS = 4;
+        private const float LOCKED_GAP = 18f;
+        private const float LOCKED_H = 110f;
+
+        /// <summary>A hint only appears once the tribe is halfway to the discovery.</summary>
+        private const float HINT_THRESHOLD = 0.5f;
 
         private GameObject _panel;
-        private Transform _listContent;
         private bool _isOpen;
 
         private void Awake()
@@ -55,6 +56,7 @@ namespace Terranova.UI
         {
             var kb = Keyboard.current;
             if (kb == null) return;
+
             if (kb.tabKey.wasPressedThisFrame)
                 Toggle();
             if (_isOpen && kb.escapeKey.wasPressedThisFrame)
@@ -85,245 +87,292 @@ namespace Terranova.UI
 
         public bool IsOpen => _isOpen;
 
-        // ─── Panel Construction ──────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  P A N E L
+        // ═══════════════════════════════════════════════════════════
 
         private void BuildPanel()
         {
             if (_panel != null) Destroy(_panel);
 
-            var (overlay, card) = UIHelpers.CreateModalPanel(
-                transform, "DiscoveryLogPanel",
-                PANEL_WIDTH, PANEL_HEIGHT, BG_COLOR, Close);
+            var (found, total) = CountDiscoveries();
+
+            var (overlay, body) = UIHelpers.CreateBookOverlay(transform, "DiscoveryLogPanel",
+                new Vector2(TRAY_W, TRAY_H), "Entdeckungen", $"{found} von {total}", Close);
             _panel = overlay;
 
-            UIHelpers.AddTitleBar(card.transform, "DISCOVERIES",
-                PANEL_WIDTH, PANEL_HEIGHT, TITLE_COLOR, Close);
+            float bodyW = TRAY_W - 2f * UITheme.TrayPad;
+            float bodyH = TRAY_H - 2f * UITheme.TrayPad - UIHelpers.HeaderHeight;
 
-            var (_, content) = UIHelpers.CreateScrollArea(
-                card.transform, PANEL_WIDTH, PANEL_HEIGHT, SCROLL_BG);
-            _listContent = content;
+            var (content, innerW) = UIHelpers.CreatePage(body.transform, Vector2.zero,
+                new Vector2(bodyW, bodyH), PAGE_PAD_X, PAGE_PAD_Y);
 
-            PopulateContent();
+            float y = -PAGE_PAD_Y;
+            y = BuildFoundSection(content, y, innerW);
+            y = BuildHintSection(content, y, innerW);
+            y = BuildLockedSection(content, y, innerW);
+
+            UIHelpers.FinishPage(content, y, PAGE_PAD_Y);
         }
 
-        // ─── Content Population ──────────────────────────────
-
-        private void PopulateContent()
-        {
-            if (_listContent == null) return;
-
-            float y = -8f;
-
-            y = DrawCompletedSection(y);
-            y -= 8f;
-            y = DrawHintsSection(y);
-            y -= 8f;
-            y = DrawLockedSection(y);
-            y -= 8f;
-
-            var contentRect = _listContent.GetComponent<RectTransform>();
-            contentRect.sizeDelta = new Vector2(0, Mathf.Abs(y));
-        }
-
-        // ─── Completed Discoveries ───────────────────────────
-
-        private float DrawCompletedSection(float y)
+        /// <summary>How many discoveries are complete, out of how many exist.</summary>
+        private static (int found, int total) CountDiscoveries()
         {
             var stateManager = DiscoveryStateManager.Instance;
             var phaseManager = DiscoveryPhaseManager.Instance;
-            if (stateManager == null) return y;
+
+            int found = stateManager != null ? stateManager.CompletedDiscoveries.Count : 0;
+            int total = phaseManager != null ? phaseManager.AllProgress.Count : found;
+            return (found, Mathf.Max(total, found));
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  G E F U N D E N
+        // ═══════════════════════════════════════════════════════════
+
+        private float BuildFoundSection(Transform content, float y, float innerW)
+        {
+            var section = UIHelpers.AddRow(content, ref y, "SectionFound", 40f, 18f);
+            UIKit.SectionRule(section.transform, "GEFUNDEN", Vector2.zero, innerW);
+
+            var stateManager = DiscoveryStateManager.Instance;
+            var phaseManager = DiscoveryPhaseManager.Instance;
+
+            if (stateManager == null)
+                return y;
+
+            float cardW = (innerW - CARD_GAP) * 0.5f;
+            int column = 0;
+            int ordinal = 0;
+            GameObject rowObject = null;
+
+            foreach (string name in stateManager.CompletedDiscoveries)
+            {
+                ordinal++;
+
+                if (column == 0)
+                    rowObject = UIHelpers.AddRow(content, ref y, "FoundRow", CARD_H, CARD_GAP);
+
+                float x = column == 0
+                    ? -innerW * 0.5f + cardW * 0.5f
+                    : innerW * 0.5f - cardW * 0.5f;
+
+                BuildFoundCard(rowObject.transform, x, cardW,
+                    name, phaseManager?.GetProgress(name), ordinal);
+
+                column = (column + 1) % 2;
+            }
+
+            if (ordinal == 0)
+            {
+                y = UIHelpers.AddTextBlock(content, y,
+                    "Noch nichts entdeckt. Die Siedler lernen erst.",
+                    UITheme.BodyItalic, 22, UITheme.InkMuted, innerW, TextAnchor.UpperLeft);
+            }
+
+            return y - SECTION_GAP;
+        }
+
+        /// <summary>Seal, name, description and who found it when.</summary>
+        private void BuildFoundCard(Transform row, float x, float width, string name,
+            DiscoveryProgress progress, int ordinal)
+        {
+            bool isMajor = progress?.Definition != null
+                           && progress.Definition.Tier == DiscoveryTier.Major;
+
+            var card = UIKit.Centered(row, $"Found_{name}", new Vector2(x, 0f),
+                new Vector2(width, CARD_H));
+            UIKit.Fill(card, UITheme.PaperDeep, blocksTaps: false);
+            UIKit.LeftEdge(card.transform, isMajor ? UITheme.Accent : UITheme.InkMuted, CARD_EDGE);
+
+            // ── Seal: the only circle in the whole design ──
+            var seal = UIKit.Disc(card.transform, "Seal",
+                new Vector2(-width * 0.5f + CARD_EDGE + 26f + SEAL_SIZE * 0.5f, 0f),
+                SEAL_SIZE, isMajor ? UITheme.Accent : UITheme.Rule);
+            UIKit.FillText(seal.transform, UIStrings.Roman(ordinal), UITheme.Display, 28,
+                UITheme.Ink);
+
+            float textLeft = CARD_EDGE + 26f + SEAL_SIZE + 20f;
+            float textW = width - textLeft - 26f;
+            float textX = -width * 0.5f + textLeft + textW * 0.5f;
+
+            UIKit.Heading(card.transform, UIStrings.Discovery(name), 30, UITheme.Ink,
+                new Vector2(textX, 44f), new Vector2(textW, 38f), TextAnchor.MiddleLeft);
+
+            string description = progress?.Definition != null
+                ? UIStrings.DiscoveryDescription(name, progress.Definition.Description)
+                : "";
+            var descText = UIKit.Body(card.transform, description, 22, UITheme.InkSoft,
+                new Vector2(textX, 0f), new Vector2(textW, 62f), TextAnchor.UpperLeft);
+            descText.lineSpacing = 1.05f;
+
+            string meta = BuildMeta(progress);
+            if (!string.IsNullOrEmpty(meta))
+            {
+                UIKit.Quote(card.transform, meta, 20, UITheme.InkMuted,
+                    new Vector2(textX, -50f), new Vector2(textW, 28f), TextAnchor.MiddleLeft);
+            }
+        }
+
+        /// <summary>"Mira · Tag 13" under a found discovery.</summary>
+        private static string BuildMeta(DiscoveryProgress progress)
+        {
+            if (progress == null) return "";
+
+            bool hasName = !string.IsNullOrEmpty(progress.DiscovererName)
+                           && progress.DiscovererName != "Unknown";
+            bool hasDay = progress.DayDiscovered > 0;
+
+            if (hasName && hasDay) return $"{progress.DiscovererName} · Tag {progress.DayDiscovered}";
+            if (hasName) return progress.DiscovererName;
+            if (hasDay) return $"Tag {progress.DayDiscovered}";
+            return "";
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  A H N U N G E N
+        // ═══════════════════════════════════════════════════════════
+
+        private float BuildHintSection(Transform content, float y, float innerW)
+        {
+            var phaseManager = DiscoveryPhaseManager.Instance;
+            var stateManager = DiscoveryStateManager.Instance;
+            if (phaseManager == null || stateManager == null) return y;
+
+            var section = UIHelpers.AddRow(content, ref y, "SectionHints", 40f, 18f);
+            UIKit.SectionRule(section.transform, "AHNUNGEN", Vector2.zero, innerW);
 
             bool any = false;
-            foreach (var name in stateManager.CompletedDiscoveries)
+            foreach (var kvp in phaseManager.AllProgress)
             {
-                if (!any)
-                {
-                    y = AddSectionHeader(y, "Completed", COMPLETED_COLOR);
-                    any = true;
-                }
+                var progress = kvp.Value;
+                if (progress.Phase == DiscoveryPhase.Complete
+                    || progress.Phase == DiscoveryPhase.Inactive) continue;
+                if (stateManager.IsDiscovered(progress.Definition.DisplayName)) continue;
 
-                var prog = phaseManager?.GetProgress(name);
-                bool isMajor = prog?.Definition?.Tier == DiscoveryTier.Major;
-                string tierIcon = GetTierIcon(prog);
-                Color nameColor = isMajor ? MAJOR_COLOR : COMPLETED_COLOR;
+                float fraction = progress.Definition.ObservationThreshold > 0
+                    ? progress.ObservationCount / progress.Definition.ObservationThreshold
+                    : 0f;
+                if (fraction < HINT_THRESHOLD) continue;
 
-                y = UIHelpers.AddTextRow(_listContent, y,
-                    $"{tierIcon} {name}", 16, nameColor, FontStyle.Bold, PANEL_WIDTH);
-
-                string discoverer = prog?.DiscovererName ?? "Unknown";
-                string day = prog != null && prog.DayDiscovered > 0 ? $"Day {prog.DayDiscovered}" : "";
-                string meta = "";
-                if (!string.IsNullOrEmpty(discoverer) && discoverer != "Unknown")
-                    meta += $"Discovered by {discoverer}";
-                if (!string.IsNullOrEmpty(day))
-                    meta += meta.Length > 0 ? $" | {day}" : day;
-                if (meta.Length > 0)
-                    y = UIHelpers.AddTextRow(_listContent, y,
-                        $"    {meta}", 13, META_COLOR, FontStyle.Italic, PANEL_WIDTH);
-
-                if (prog?.Definition != null)
-                    y = UIHelpers.AddTextRow(_listContent, y,
-                        $"    {prog.Definition.Description}", 13, DESC_COLOR, FontStyle.Normal, PANEL_WIDTH);
-
-                y -= 6f;
+                BuildHintCard(content, ref y, progress, fraction, innerW);
+                any = true;
             }
 
             if (!any)
             {
-                y = AddSectionHeader(y, "Completed", COMPLETED_COLOR);
-                y = UIHelpers.AddTextRow(_listContent, y,
-                    "No discoveries yet. Your settlers are still learning...",
-                    14, LOCKED_COLOR, FontStyle.Italic, PANEL_WIDTH);
+                y = UIHelpers.AddTextBlock(content, y,
+                    "Noch keine Ahnung. Wiederholte Arbeit weckt sie.",
+                    UITheme.BodyItalic, 22, UITheme.InkMuted, innerW, TextAnchor.UpperLeft);
             }
 
-            return y;
+            return y - SECTION_GAP;
         }
 
-        // ─── Hints (in-progress > 50%) ───────────────────────
+        /// <summary>Dashed card with the hint sentence and a progress bar.</summary>
+        private void BuildHintCard(Transform content, ref float y, DiscoveryProgress progress,
+            float fraction, float innerW)
+        {
+            var card = UIHelpers.AddRow(content, ref y, "Hint", 130f, 16f);
+            UIKit.Fill(card, UITheme.PaperDeep, blocksTaps: false);
+            UIKit.Border(card.transform, UITheme.Rule, UITheme.Border);
 
-        private float DrawHintsSection(float y)
+            var textGo = UIKit.Anchored(card.transform, "Text", new Vector2(0f, 1f),
+                new Vector2(28f, -16f), new Vector2(innerW - 56f, 36f));
+            UIKit.Label(textGo, ObservationHint(progress), UITheme.Body, 24, UITheme.InkSoft,
+                TextAnchor.MiddleLeft);
+
+            // ── Progress bar plus its caption ──
+            string caption = progress.Phase == DiscoveryPhase.Experimentation
+                ? $"sie probieren, {progress.ExperimentProgress * 100f:F0} %"
+                : $"sie beobachten, {fraction * 100f:F0} %";
+            float captionW = UIKit.EstimateTextWidth(caption, 21) + 30f;
+            float barW = innerW - 56f - captionW - 20f;
+
+            var fill = UIKit.Bar(card.transform,
+                new Vector2(-innerW * 0.5f + 28f + barW * 0.5f, -30f),
+                new Vector2(barW, 16f), UITheme.Accent, UITheme.Paper, UITheme.Rule);
+            UIKit.SetBar(fill, progress.Phase == DiscoveryPhase.Experimentation
+                ? progress.ExperimentProgress
+                : fraction);
+
+            var captionGo = UIKit.Centered(card.transform, "Caption",
+                new Vector2(innerW * 0.5f - 28f - captionW * 0.5f, -30f),
+                new Vector2(captionW, 28f));
+            UIKit.Label(captionGo, caption, UITheme.Body, 21, UITheme.InkMuted,
+                TextAnchor.MiddleRight);
+
+            if (progress.FailureCount <= 0) return;
+
+            var failGo = UIKit.Anchored(card.transform, "Failures", new Vector2(0f, 0f),
+                new Vector2(28f, 12f), new Vector2(innerW - 56f, 28f));
+            UIKit.Label(failGo, $"{progress.FailureCount}× misslungen — sie lernen daraus",
+                UITheme.BodyItalic, UITheme.FontMin, UITheme.InkMuted, TextAnchor.MiddleLeft);
+        }
+
+        /// <summary>"Deine Siedler bekommen ein Gefühl für Steine …"</summary>
+        private static string ObservationHint(DiscoveryProgress progress)
+        {
+            string subject = progress.Definition.RequiredActivity switch
+            {
+                SettlerTaskType.GatherStone => "Steine",
+                SettlerTaskType.GatherWood => "Holz und Pflanzen",
+                SettlerTaskType.DrinkWater => "Wasser",
+                SettlerTaskType.Hunt => "die Jagd",
+                SettlerTaskType.CraftTool => "das Fertigen",
+                _ => "ihre Umgebung"
+            };
+            return $"Deine Siedler bekommen ein Gefühl für {subject} …";
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  V E R B O R G E N
+        // ═══════════════════════════════════════════════════════════
+
+        private float BuildLockedSection(Transform content, float y, float innerW)
         {
             var phaseManager = DiscoveryPhaseManager.Instance;
             var stateManager = DiscoveryStateManager.Instance;
             if (phaseManager == null || stateManager == null) return y;
 
-            bool any = false;
+            var section = UIHelpers.AddRow(content, ref y, "SectionLocked", 40f, 18f);
+            UIKit.SectionRule(section.transform, "VERBORGEN", Vector2.zero, innerW);
+
+            float tileW = (innerW - (LOCKED_COLUMNS - 1) * LOCKED_GAP) / LOCKED_COLUMNS;
+            int column = 0;
+            GameObject rowObject = null;
+
             foreach (var kvp in phaseManager.AllProgress)
             {
-                var prog = kvp.Value;
-                if (prog.Phase == DiscoveryPhase.Complete || prog.Phase == DiscoveryPhase.Inactive) continue;
-                if (stateManager.IsDiscovered(prog.Definition.DisplayName)) continue;
+                var progress = kvp.Value;
+                if (progress.Phase != DiscoveryPhase.Inactive) continue;
+                if (stateManager.IsDiscovered(progress.Definition.DisplayName)) continue;
 
-                float percent = prog.Definition.ObservationThreshold > 0
-                    ? prog.ObservationCount / prog.Definition.ObservationThreshold
-                    : 0f;
-                if (percent < 0.5f) continue;
+                if (column == 0)
+                    rowObject = UIHelpers.AddRow(content, ref y, "LockedRow", LOCKED_H, LOCKED_GAP);
 
-                if (!any)
-                {
-                    y = AddSectionHeader(y, "Hints", HINT_COLOR);
-                    any = true;
-                }
+                float x = -innerW * 0.5f + tileW * 0.5f + column * (tileW + LOCKED_GAP);
+                BuildLockedTile(rowObject.transform, x, tileW, progress.Definition.BonusBiome);
 
-                string hint = GetObservationHint(prog);
-                y = UIHelpers.AddTextRow(_listContent, y,
-                    $"  {hint}", 14, HINT_COLOR, FontStyle.Normal, PANEL_WIDTH);
-
-                if (prog.Phase == DiscoveryPhase.Experimentation)
-                {
-                    string expText = $"    [experimenting ({prog.ExperimentProgress * 100:F0}%)]";
-                    y = UIHelpers.AddTextRow(_listContent, y,
-                        expText, 13, new Color(0.6f, 0.8f, 1f), FontStyle.Normal, PANEL_WIDTH);
-                }
-
-                if (prog.FailureCount > 0)
-                {
-                    y = UIHelpers.AddTextRow(_listContent, y,
-                        $"    (Failed {prog.FailureCount}x — learning from mistakes)",
-                        13, new Color(0.8f, 0.6f, 0.5f), FontStyle.Italic, PANEL_WIDTH);
-                }
-
-                y -= 4f;
+                column = (column + 1) % LOCKED_COLUMNS;
             }
 
             return y;
         }
 
-        // ─── Locked Entries ──────────────────────────────────
-
-        private float DrawLockedSection(float y)
+        /// <summary>Dim "?" tile with a hint about where to look.</summary>
+        private void BuildLockedTile(Transform row, float x, float width, BiomeType biome)
         {
-            var phaseManager = DiscoveryPhaseManager.Instance;
-            var stateManager = DiscoveryStateManager.Instance;
-            if (phaseManager == null || stateManager == null) return y;
+            var tile = UIKit.Centered(row, "Locked", new Vector2(x, 0f),
+                new Vector2(width, LOCKED_H));
+            UIKit.Fill(tile, UITheme.PaperDeep, blocksTaps: false);
+            tile.AddComponent<CanvasGroup>().alpha = 0.6f;
 
-            bool any = false;
-            foreach (var kvp in phaseManager.AllProgress)
-            {
-                var prog = kvp.Value;
-                if (prog.Phase != DiscoveryPhase.Inactive) continue;
-                if (stateManager.IsDiscovered(prog.Definition.DisplayName)) continue;
-
-                if (!any)
-                {
-                    y = AddSectionHeader(y, "Locked", LOCKED_COLOR);
-                    any = true;
-                }
-
-                string biomeHint = prog.Definition.BonusBiome switch
-                {
-                    BiomeType.Forest => "(Forest may help)",
-                    BiomeType.Mountains => "(Mountains may help)",
-                    BiomeType.Coast => "(Coast may help)",
-                    _ => ""
-                };
-                y = UIHelpers.AddTextRow(_listContent, y,
-                    $"  ??? {biomeHint}", 14, LOCKED_COLOR, FontStyle.Normal, PANEL_WIDTH);
-                y -= 2f;
-            }
-
-            return y;
-        }
-
-        // ─── Section Header ──────────────────────────────────
-
-        private float AddSectionHeader(float y, string title, Color color)
-        {
-            float height = 28f;
-            var obj = new GameObject($"Section_{title}");
-            obj.transform.SetParent(_listContent, false);
-            var rect = obj.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0, 1);
-            rect.anchorMax = new Vector2(1, 1);
-            rect.pivot = new Vector2(0.5f, 1);
-            rect.anchoredPosition = new Vector2(0, y);
-            rect.sizeDelta = new Vector2(-16, height);
-
-            obj.AddComponent<Image>().color = SECTION_BG;
-
-            var textObj = new GameObject("Text");
-            textObj.transform.SetParent(obj.transform, false);
-            var textRect = textObj.AddComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(12, 0);
-            textRect.offsetMax = Vector2.zero;
-            var text = textObj.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = 15;
-            text.color = color;
-            text.alignment = TextAnchor.MiddleLeft;
-            text.fontStyle = FontStyle.Bold;
-            text.text = $"\u2500\u2500 {title} \u2500\u2500";
-
-            return y - height - 4f;
-        }
-
-        // ─── Helpers ─────────────────────────────────────────
-
-        private static string GetTierIcon(DiscoveryProgress prog)
-        {
-            if (prog?.Definition == null) return "[*]";
-            return prog.Definition.Tier switch
-            {
-                DiscoveryTier.Major => "[!!]",
-                DiscoveryTier.Standard => "[!]",
-                _ => "[*]"
-            };
-        }
-
-        private static string GetObservationHint(DiscoveryProgress prog)
-        {
-            string activity = prog.Definition.RequiredActivity switch
-            {
-                SettlerTaskType.GatherStone => "stones",
-                SettlerTaskType.GatherWood => "plants and wood",
-                SettlerTaskType.DrinkWater => "water",
-                SettlerTaskType.Hunt => "hunting",
-                SettlerTaskType.CraftTool => "crafting",
-                _ => "their surroundings"
-            };
-            return $"Your settlers are getting experienced with {activity}...";
+            UIKit.Heading(tile.transform, "?", 34, UITheme.InkMuted,
+                new Vector2(0f, 16f), new Vector2(width, 44f));
+            UIKit.Body(tile.transform, UIStrings.BiomeHint(biome), UITheme.FontMin,
+                UITheme.InkMuted, new Vector2(0f, -26f), new Vector2(width - 16f, 28f),
+                TextAnchor.MiddleCenter);
         }
     }
 }

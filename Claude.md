@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-02-23 | Current version: v0.5.8 | Milestone: MS4
+> Last updated: 2026-08-09 | Current version: v0.6.0 | Milestone: MS4
 
 ---
 
@@ -127,7 +127,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.5.8
+**Current version:** v0.6.0
 
 #### Implemented Features (MS4)
 
@@ -144,7 +144,41 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 | F9: Wildlife & Events | ⏳ Planned | Animals, random events |
 | F10: Seasons | ✅ Done (v0.5.7) | Sun arc 52°N, seasonal day length, ground/tree/bush tinting, snow/leaves particles, gameplay modifiers |
 | F11: Organic Terraforming | ⏳ Planned | Part of terrain refactoring |
-| F12: Tribal Chronicle | ⏳ Planned | Narrative system |
+| F12: Tribal Chronicle | ✅ Done (v0.5.10) | Narrative system, shown as a book spread since v0.6.0 |
+
+#### UI: the "Kodex" design system (v0.6.0)
+
+All menus and overlays were redesigned from grey boxes to a diegetic parchment /
+leather look for tablet touch, in German, at a 1536 x 1152 reference resolution
+(iPad landscape). The UI is still built entirely in code with legacy
+`UnityEngine.UI` — no prefabs, no UI Toolkit.
+
+Four files carry the design; everything else consumes them:
+
+| File | Role |
+|------|------|
+| `UI/UITheme.cs` | Colours, fonts, metrics, letter-spacing helper. Change a colour here, not in a screen. |
+| `UI/UIKit.cs` | Widget factory: cards, trays, buttons, bars, chips, section rules. |
+| `UI/UIStrings.cs` | German display strings, keyed off the model's English identities. |
+| `UI/UIHelpers.cs` | Book-overlay scaffolding (leather tray + scrollable parchment pages). |
+
+Rules when touching the UI:
+
+- **Minimum font size is 19 px** (`UITheme.FontMin`); minimum tap target 64 px.
+  The old UI's 11-14 px text is exactly what this redesign replaced.
+- **No colour literals in screen files.** Use `UITheme.*`.
+- **Do not rename `DisplayName` on definitions to German.** Those strings are
+  identity keys (BuildingPlacer picks visuals from `DisplayName.ToLower()`,
+  DiscoveryStateManager keys completed discoveries by name, OrderVocabulary maps
+  unlocks by discovery name). German names live in `UIStrings`.
+- Fonts are Marcellus SC (display) and Spectral (body), in
+  `Assets/Terranova/Resources/Fonts/`. They load via `Resources.Load` — that is
+  correct here because they are inside a `Resources` folder, unlike the Explorer
+  asset pack.
+
+Still open: the 9-slice parchment/leather sprites and the render placeholders
+(key art, biome images, building images, settler portrait, discovery scene) are
+flat colour fills with captions until the art exists.
 
 #### Active Work: Visual Overhaul with Asset Pack
 
