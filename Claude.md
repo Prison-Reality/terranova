@@ -2,7 +2,7 @@
 
 > This file is the primary context for Claude Code working on Terranova.
 > **Read this file completely at the start of every session.**
-> Last updated: 2026-08-09 | Current version: v0.6.0 | Milestone: MS4
+> Last updated: 2026-08-16 | Current version: v0.6.1 | Milestone: MS4
 
 ---
 
@@ -127,7 +127,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 
 **Goal:** A visually appealing, playable version of Epoch I.1 with professional assets, order system, and terrain variety.
 
-**Current version:** v0.6.0
+**Current version:** v0.6.1
 
 #### Implemented Features (MS4)
 
@@ -141,7 +141,7 @@ See `docs/asset-mapping-explorer-stoneage.md` for full mapping of prefabs to gam
 | F6: Settler traits, names, XP system | ✅ Working | 5 traits, 26 names, XP categories |
 | F7: Order Grammar & Klappbuch UI | ⚡ In Progress | 3-column picker works, orders execute, bugs parked |
 | F8: Extended Discovery System | ⏳ Planned | Phases A-D, failure-driven discovery |
-| F9: Wildlife & Events | ⏳ Planned | Animals, random events |
+| F9: Wildlife & Events | ⏳ Planned | Asset-Pipeline für 6 Tiere steht (v0.6.1); Verhalten und Events fehlen noch |
 | F10: Seasons | ✅ Done (v0.5.7) | Sun arc 52°N, seasonal day length, ground/tree/bush tinting, snow/leaves particles, gameplay modifiers |
 | F11: Organic Terraforming | ⏳ Planned | Part of terrain refactoring |
 | F12: Tribal Chronicle | ✅ Done (v0.5.10) | Narrative system, shown as a book spread since v0.6.0 |
@@ -179,6 +179,41 @@ Rules when touching the UI:
 Still open: the 9-slice parchment/leather sprites and the render placeholders
 (key art, biome images, building images, settler portrait, discovery scene) are
 flat colour fills with captions until the art exists.
+
+#### Tiere: Asset-Pipeline (v0.6.1)
+
+Sechs Tiere aus dem Design-Übergabepaket („Tier-Bausatz"): Mammut, Rentier,
+Wildschwein, Wolf, Höhlenbär, Säbelzahntiger — je ein Rig mit 19-23 Gelenken und
+sieben Clips (idle, trab, galopp, angriff, fressen, alarm, treffer).
+
+**Es ist nur die Pipeline.** Prefabs, Materialien und Clips entstehen; Verhalten,
+Spawner, Herden und Jagd-Interaktion (F9) gibt es noch nicht.
+
+Bauen: Unity-Menü **Terranova → Tiere → Prefabs und Clips bauen**.
+Ausgabe nach `Assets/Terranova/Art/Animals/Generated/<Art>/`.
+
+| Ort | Inhalt |
+|-----|--------|
+| `Art/Animals/Source~/` | Übergabe: OBJ, MTL, Bewegungstabellen. Endet auf `~`, damit Unity den Ordner ignoriert — der Importer liest die Dateien selbst. |
+| `Art/Animals/animals-motion.json` | Gelenkreferenz und fertige Kurven, erzeugt von `Tools/animals/generate_motion.py`. |
+| `Scripts/Editor/AnimalObjReader.cs` | Zerlegt das OBJ in die Einzelteile zurück. |
+| `Scripts/Editor/AnimalRigBuilder.cs` | Baut die Gelenkhierarchie nach den Regeln der Übergabe. |
+| `Scripts/Editor/AnimalPipeline.cs` | Menüpunkt: Prefab, Meshes, Materialien, Clips, Profil. |
+| `Scripts/Animals/AnimalProfile.cs` | Gangdaten je Art (ScriptableObject) für späteres Gameplay. |
+
+Regeln beim Anfassen:
+
+- **Die Tiere sind starre Teilehierarchien, kein Skinning.** So arbeitet der
+  Design-Prototyp, es passt zur Flat-Shading-Optik und ist auf dem iPad billiger
+  als ~90 geskinnte Teile.
+- **Normalen nicht neu berechnen.** Die Facetten sind im OBJ gebacken; ein
+  Auto-Smooth zerstört den Stil.
+- **Ein Ton pro Material, nicht pro Bauteil.** Kopf, Schnauze und Rumpf einer Art
+  liegen auf derselben Rampenstufe; ein Tonwechsel bedeutet Materialwechsel.
+- **`root.y` kommt aus der gebackenen Kurve**, nicht aus einer Laufzeit-Fußkorrektur.
+  Negative Werte sind gewollt. Gilt nur für flachen Boden — sobald das Gelände
+  uneben wird, braucht es dort Foot-IK.
+- Details und die Prüfprotokolle stehen in `Tools/animals/README.md`.
 
 #### Active Work: Visual Overhaul with Asset Pack
 

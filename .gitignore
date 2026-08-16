@@ -46,3 +46,7 @@ iOS Builds/
 # Plastic SCM
 *.ignore
 *.plastic
+
+# Python-Zwischenstände der Tier-Pipeline
+__pycache__/
+*.pyc

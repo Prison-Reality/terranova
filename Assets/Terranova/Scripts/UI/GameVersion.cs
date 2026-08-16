@@ -10,6 +10,6 @@ namespace Terranova.UI
     public static class GameVersion
     {
         /// <summary>Current version, e.g. "v0.6.0".</summary>
-        public const string Label = "v0.6.0";
+        public const string Label = "v0.6.1";
     }
 }
