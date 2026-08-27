@@ -1,34 +1,35 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 
 namespace Terranova.UI
 {
     /// <summary>
-    /// v0.5.10 Feature 12.4: Chronicle UI Panel.
+    /// Screen 6 of the "Kodex" design — the tribal chronicle as an open book.
     ///
-    /// Scrollable vertical list showing the tribe's narrative history.
-    /// Newest entries at top. Dark parchment-style background.
-    /// Warm cream/beige text. Chapter dividers separate tribe generations.
+    /// Two parchment pages sit side by side in a leather tray. Entries run newest
+    /// first, filling the left page and continuing on the right. A chapter heading
+    /// appears wherever the tribe generation changes.
     ///
-    /// Toggle: C key or tap the Chronicle button on HUD.
+    /// Both pages scroll on drag: the chronicle holds up to 100 entries, so the
+    /// spread is the look, not a limit on what is reachable.
+    ///
+    /// Toggle: C key, the "Chronik" tab, or "Chronik lesen" in the pause menu.
     /// </summary>
     public class ChronicleUI : MonoBehaviour
     {
         public static ChronicleUI Instance { get; private set; }
 
-        private const float PANEL_WIDTH = 520f;
-        private const float PANEL_HEIGHT = 560f;
+        private const float TRAY_W = 1340f;
+        private const float TRAY_H = 920f;
+        private const float PAGE_GAP = 14f;
+        private const float PAGE_PAD_X = 44f;
+        private const float PAGE_PAD_Y = 36f;
+        private const float DATE_COLUMN_W = 110f;
+        private const float ENTRY_INDENT = 22f;
+        private const float EDGE_WIDTH = 3f;
+        private const float ENTRY_GAP = 26f;
 
-        // Parchment-style colors
-        private static readonly Color BG_COLOR = new(0.12f, 0.09f, 0.06f, 0.95f);
-        private static readonly Color SCROLL_BG = new(0.10f, 0.07f, 0.04f, 0.7f);
-        private static readonly Color TITLE_COLOR = new(0.85f, 0.75f, 0.55f);
-        private static readonly Color TEXT_COLOR = new(0.90f, 0.85f, 0.70f);
-        private static readonly Color TIMESTAMP_COLOR = new(0.65f, 0.58f, 0.45f);
-        private static readonly Color CHAPTER_COLOR = new(0.80f, 0.65f, 0.35f);
         private GameObject _panel;
-        private Transform _listContent;
         private bool _isOpen;
 
         private void Awake()
@@ -46,6 +47,7 @@ namespace Terranova.UI
         {
             var kb = Keyboard.current;
             if (kb == null) return;
+
             if (kb.cKey.wasPressedThisFrame && !kb.ctrlKey.isPressed)
                 Toggle();
             if (_isOpen && kb.escapeKey.wasPressedThisFrame)
@@ -76,125 +78,181 @@ namespace Terranova.UI
 
         public bool IsOpen => _isOpen;
 
-        // ─── Panel Construction ──────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        //  P A N E L
+        // ═══════════════════════════════════════════════════════════
 
         private void BuildPanel()
         {
             if (_panel != null) Destroy(_panel);
 
-            var (overlay, card) = UIHelpers.CreateModalPanel(
-                transform, "ChroniclePanel",
-                PANEL_WIDTH, PANEL_HEIGHT, BG_COLOR, Close);
+            var (overlay, body) = UIHelpers.CreateBookOverlay(transform, "ChroniclePanel",
+                new Vector2(TRAY_W, TRAY_H), "Chronik des Stammes", null, Close);
             _panel = overlay;
 
-            UIHelpers.AddTitleBar(card.transform, "TRIBAL CHRONICLE",
-                PANEL_WIDTH, PANEL_HEIGHT, TITLE_COLOR, Close);
+            float bodyW = TRAY_W - 2f * UITheme.TrayPad;
+            float bodyH = TRAY_H - 2f * UITheme.TrayPad - UIHelpers.HeaderHeight;
+            float pageW = (bodyW - PAGE_GAP) * 0.5f;
 
-            var (_, content) = UIHelpers.CreateScrollArea(
-                card.transform, PANEL_WIDTH, PANEL_HEIGHT, SCROLL_BG);
-            _listContent = content;
+            var (leftContent, innerW) = UIHelpers.CreatePage(body.transform,
+                new Vector2(-(pageW + PAGE_GAP) * 0.5f, 0f), new Vector2(pageW, bodyH),
+                PAGE_PAD_X, PAGE_PAD_Y);
+            var (rightContent, _) = UIHelpers.CreatePage(body.transform,
+                new Vector2((pageW + PAGE_GAP) * 0.5f, 0f), new Vector2(pageW, bodyH),
+                PAGE_PAD_X, PAGE_PAD_Y);
 
-            PopulateContent();
+            FillPages(leftContent, rightContent, innerW, bodyH);
         }
 
-        // ─── Content Population ──────────────────────────────
-
-        private void PopulateContent()
+        /// <summary>
+        /// Lay the entries out across both pages: everything that fits goes on the
+        /// left, the rest continues on the right.
+        /// </summary>
+        private void FillPages(Transform left, Transform right, float innerW, float pageH)
         {
-            if (_listContent == null) return;
             var chronicle = ChronicleManager.Instance;
-            if (chronicle == null) return;
+            float usableH = pageH - 2f * PAGE_PAD_Y;
 
-            float y = -8f;
-
-            if (chronicle.Entries.Count == 0)
+            if (chronicle == null || chronicle.Entries.Count == 0)
             {
-                y = UIHelpers.AddTextRow(_listContent, y,
-                    "The story has not yet begun...",
-                    14, TIMESTAMP_COLOR, FontStyle.Italic, PANEL_WIDTH, 18f);
+                float empty = -PAGE_PAD_Y;
+                UIHelpers.AddTextBlock(left, empty, "Die Geschichte hat gerade erst begonnen.",
+                    UITheme.BodyItalic, 22, UITheme.InkMuted, innerW, TextAnchor.UpperCenter);
+                UIHelpers.FinishPage(left, empty - 40f);
+                UIHelpers.FinishPage(right, 0f);
+                return;
             }
-            else
+
+            Transform page = left;
+            float y = -PAGE_PAD_Y;
+            bool switched = false;
+            int lastChapter = -1;
+
+            foreach (var entry in chronicle.Entries)
             {
-                foreach (var entry in chronicle.Entries)
+                // A chapter heading precedes the first entry of each generation.
+                if (entry.Chapter != lastChapter)
                 {
-                    if (entry.Category == ChronicleManager.EntryCategory.Chapter)
+                    lastChapter = entry.Chapter;
+
+                    float headingHeight = 110f;
+                    if (!switched && -y + headingHeight > usableH)
                     {
-                        y -= 6f;
-                        y = AddChapterDivider(y, entry.Text);
-                        y -= 6f;
+                        UIHelpers.FinishPage(page, y);
+                        page = right;
+                        y = -PAGE_PAD_Y;
+                        switched = true;
                     }
-                    else
-                    {
-                        y = AddChronicleEntry(y, entry);
-                    }
+                    y = AddChapterHeading(page, y, entry.Chapter, innerW);
                 }
+
+                float height = MeasureEntry(entry, innerW);
+                if (!switched && -y + height > usableH)
+                {
+                    UIHelpers.FinishPage(page, y);
+                    page = right;
+                    y = -PAGE_PAD_Y;
+                    switched = true;
+                }
+
+                y = AddEntry(page, y, entry, innerW, height);
             }
 
-            y -= 8f;
-            var contentRect = _listContent.GetComponent<RectTransform>();
-            contentRect.sizeDelta = new Vector2(0, Mathf.Abs(y));
+            UIHelpers.FinishPage(page, y);
+            if (!switched) UIHelpers.FinishPage(right, 0f);
         }
 
-        private float AddChronicleEntry(float y, ChronicleManager.ChronicleEntry entry)
+        /// <summary>"Zweites Kapitel" plus its subtitle and rule.</summary>
+        private float AddChapterHeading(Transform page, float y, int chapter, float innerW)
         {
-            string icon = GetCategoryIcon(entry.Category);
+            y -= 10f;
 
-            y = UIHelpers.AddTextRow(_listContent, y,
-                $"  {icon}  {entry.Timestamp}",
-                12, TIMESTAMP_COLOR, FontStyle.Normal, PANEL_WIDTH, 18f);
+            var heading = UIHelpers.AddRow(page, ref y, "Chapter", 44f);
+            UIKit.FillText(heading.transform,
+                UITheme.Track(UIStrings.ChapterHeading(chapter), UITheme.Tracking.Tight),
+                UITheme.Display, 30, UITheme.Accent);
 
-            y = UIHelpers.AddTextRow(_listContent, y,
-                $"      {entry.Text}",
-                14, TEXT_COLOR, FontStyle.Normal, PANEL_WIDTH, 18f);
+            var subtitle = UIHelpers.AddRow(page, ref y, "ChapterSub", 32f);
+            UIKit.FillText(subtitle.transform, UIStrings.ChapterSubtitle(chapter),
+                UITheme.BodyItalic, 22, UITheme.InkMuted);
 
-            y -= 6f;
+            var ruleRow = UIHelpers.AddRow(page, ref y, "ChapterRule", 20f, gapBelow: 14f);
+            UIKit.Rule(ruleRow.transform, Vector2.zero, 160f, UITheme.Rule);
+
             return y;
         }
 
-        private float AddChapterDivider(float y, string text)
+        /// <summary>Height an entry will need, so pages can be filled without a layout pass.</summary>
+        private static float MeasureEntry(ChronicleManager.ChronicleEntry entry, float innerW)
         {
-            float height = 32f;
-            var obj = new GameObject("ChapterDivider");
-            obj.transform.SetParent(_listContent, false);
-            var rect = obj.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0, 1);
-            rect.anchorMax = new Vector2(1, 1);
-            rect.pivot = new Vector2(0.5f, 1);
-            rect.anchoredPosition = new Vector2(0, y);
-            rect.sizeDelta = new Vector2(-16, height);
+            float textWidth = innerW - DATE_COLUMN_W - ENTRY_INDENT - EDGE_WIDTH;
+            float height = UIKit.EstimateWrappedHeight(entry.Text, 23, textWidth);
+            if (!string.IsNullOrEmpty(entry.Title)) height += 34f;
 
-            obj.AddComponent<Image>().color = new Color(0.18f, 0.14f, 0.08f, 0.9f);
-
-            var textObj = new GameObject("Text");
-            textObj.transform.SetParent(obj.transform, false);
-            var textRect = textObj.AddComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(12, 0);
-            textRect.offsetMax = Vector2.zero;
-            var t = textObj.AddComponent<Text>();
-            t.font = UIHelpers.GetFont();
-            t.fontSize = 16;
-            t.color = CHAPTER_COLOR;
-            t.alignment = TextAnchor.MiddleCenter;
-            t.fontStyle = FontStyle.Bold;
-            t.text = text;
-
-            return y - height - 4f;
+            // Never shorter than the two-line date column beside it.
+            return Mathf.Max(height, 56f);
         }
 
-        // ─── Category Helpers ────────────────────────────────
-
-        private static string GetCategoryIcon(ChronicleManager.EntryCategory cat)
+        /// <summary>
+        /// One entry: right-aligned day and season on the left, a coloured edge, then
+        /// the optional title and the prose.
+        /// </summary>
+        private float AddEntry(Transform page, float y, ChronicleManager.ChronicleEntry entry,
+            float innerW, float height)
         {
-            return cat switch
+            var row = UIHelpers.AddRow(page, ref y, "Entry", height, ENTRY_GAP);
+
+            // ── Date column ──
+            var dateGo = UIKit.Anchored(row.transform, "Date", new Vector2(0f, 1f),
+                Vector2.zero, new Vector2(DATE_COLUMN_W, 30f));
+            UIKit.Label(dateGo, $"Tag {entry.Day}", UITheme.Body, 21, UITheme.InkMuted,
+                TextAnchor.MiddleRight);
+
+            var seasonGo = UIKit.Anchored(row.transform, "Season", new Vector2(0f, 1f),
+                new Vector2(0f, -28f), new Vector2(DATE_COLUMN_W, 30f));
+            UIKit.Label(seasonGo, UIStrings.Season(entry.Season), UITheme.Body, 21,
+                UITheme.InkMuted, TextAnchor.MiddleRight);
+
+            // ── Coloured edge marking the kind of event ──
+            var edge = UIKit.Anchored(row.transform, "Edge", new Vector2(0f, 1f),
+                new Vector2(DATE_COLUMN_W + 14f, 0f), new Vector2(EDGE_WIDTH, height));
+            UIKit.Fill(edge, EdgeColor(entry.Category), blocksTaps: false);
+
+            // ── Title and prose ──
+            float textLeft = DATE_COLUMN_W + 14f + EDGE_WIDTH + ENTRY_INDENT;
+            float textW = innerW - textLeft;
+            float textTop = 0f;
+
+            if (!string.IsNullOrEmpty(entry.Title))
             {
-                ChronicleManager.EntryCategory.Tribe => "\u25CF",
-                ChronicleManager.EntryCategory.Discovery => "\u2605",
-                ChronicleManager.EntryCategory.Season => "\u25C6",
-                ChronicleManager.EntryCategory.Milestone => "\u25B2",
-                ChronicleManager.EntryCategory.Order => "\u25BA",
-                _ => "\u25CB"
+                var titleGo = UIKit.Anchored(row.transform, "Title", new Vector2(0f, 1f),
+                    new Vector2(textLeft, 0f), new Vector2(textW, 34f));
+                UIKit.Label(titleGo, entry.Title, UITheme.Display, 26, UITheme.Ink,
+                    TextAnchor.MiddleLeft);
+                textTop = -34f;
+            }
+
+            var textGo = UIKit.Anchored(row.transform, "Text", new Vector2(0f, 1f),
+                new Vector2(textLeft, textTop), new Vector2(textW, height + textTop));
+            var text = UIKit.Label(textGo, entry.Text, UITheme.Body, 23, UITheme.InkSoft,
+                TextAnchor.UpperLeft);
+            text.lineSpacing = 1.05f;
+
+            return y;
+        }
+
+        /// <summary>
+        /// Edge colour by category: gold for what the tribe learned, terracotta for
+        /// what it lost, a plain rule for everything else.
+        /// </summary>
+        private static Color EdgeColor(ChronicleManager.EntryCategory category)
+        {
+            return category switch
+            {
+                ChronicleManager.EntryCategory.Discovery => UITheme.Accent,
+                ChronicleManager.EntryCategory.Milestone => UITheme.Accent,
+                ChronicleManager.EntryCategory.Tribe => UITheme.Danger,
+                _ => UITheme.Rule
             };
         }
     }

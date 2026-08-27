@@ -5,169 +5,257 @@ using Terranova.Core;
 namespace Terranova.UI
 {
     /// <summary>
-    /// Main Menu scene UI. Displayed before the game starts.
-    /// MS4 Feature 1.1: Main Menu.
-    /// - New Game button with seed field and biome selector
-    /// - Continue button (placeholder)
+    /// Screen 1 of the "Kodex" design — the main menu.
+    ///
+    /// Key art fills the screen, a parchment card sits on top of it carrying the
+    /// world seed, the three biome cards, and the two actions. Nothing about
+    /// starting a game changed; only how it looks.
+    ///
+    /// Layout coordinates are the design's 1536 x 1152 reference space.
     /// </summary>
     public class MainMenuUI : MonoBehaviour
     {
+        // ─── Layout (1536 x 1152 reference) ──────────────────────
+        private const float CARD_WIDTH = 1140f;
+        private const float CARD_HEIGHT = 728f;
+        private const float CARD_TOP = 396f;      // distance from the top edge
+        private const float PAD_X = 52f;
+        private const float PAD_Y = 38f;
+        private const float ROW_SEED_H = 72f;
+        private const float ROW_SECTION_H = 44f;
+        private const float ROW_BIOME_H = 340f;
+        private const float ROW_ACTION_H = 96f;
+        private const float BIOME_GAP = 22f;
+        private const float DICE_WIDTH = 200f;
+        private const float SEED_LABEL_WIDTH = 250f;
+        private const float CONTINUE_WIDTH = 380f;
+
+        private static readonly BiomeType[] BIOMES =
+        {
+            BiomeType.Forest, BiomeType.Mountains, BiomeType.Coast
+        };
+
+        // ─── State ───────────────────────────────────────────────
         private InputField _seedInput;
         private BiomeType _selectedBiome = BiomeType.Forest;
-        private Button[] _biomeButtons;
-        private Text _titleText;
-        private Text _versionText;
+
+        /// <summary>Per-biome card visuals, so selection can be re-styled in place.</summary>
+        private GameObject[] _biomeCards;
+        private Text[] _biomeChosenLabels;
 
         private void Start()
         {
             CreateUI();
-            // Generate a random seed
+
             int randomSeed = Random.Range(10000, 99999);
             _seedInput.text = randomSeed.ToString();
             GameState.Seed = randomSeed;
         }
 
+        // ═══════════════════════════════════════════════════════════
+        //  C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
+
         private void CreateUI()
         {
-            // Canvas setup
             var canvas = gameObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 200;
 
-            var scaler = gameObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920, 1080);
-
+            UITheme.ConfigureScaler(gameObject.AddComponent<CanvasScaler>());
             gameObject.AddComponent<GraphicRaycaster>();
 
-            // Background
-            var bgObj = new GameObject("Background");
-            bgObj.transform.SetParent(transform, false);
-            var bgImage = bgObj.AddComponent<Image>();
-            bgImage.color = new Color(0.12f, 0.15f, 0.10f, 1f);
-            var bgRect = bgObj.GetComponent<RectTransform>();
-            bgRect.anchorMin = Vector2.zero;
-            bgRect.anchorMax = Vector2.one;
-            bgRect.offsetMin = Vector2.zero;
-            bgRect.offsetMax = Vector2.zero;
+            BuildKeyArt();
+            BuildTitleBlock();
+            BuildCard();
+            BuildVersionLabel();
 
-            // Title
-            _titleText = CreateText("TERRANOVA", 64, Color.white, new Vector2(0, 200), transform);
-            _titleText.fontStyle = FontStyle.Bold;
+            UpdateBiomeCards();
+        }
 
-            // Subtitle
-            CreateText("Deep Epoch I.1", 28, new Color(0.7f, 0.8f, 0.6f), new Vector2(0, 140), transform);
+        /// <summary>
+        /// Full-screen key art. The render does not exist yet, so this is the flat
+        /// placeholder tone plus the darkening gradient the design puts over it, so
+        /// the cream title and the parchment card already sit on the right value.
+        /// </summary>
+        private void BuildKeyArt()
+        {
+            var art = UIKit.Stretch(transform, "KeyArt");
+            UIKit.Fill(art, UITheme.Hex(0x2A2118));
 
-            // Seed label + input
-            CreateText("World Seed:", 22, Color.white, new Vector2(-100, 60), transform);
+            var caption = UIKit.Anchored(art.transform, "Caption", new Vector2(0.5f, 1f),
+                new Vector2(0f, -110f), new Vector2(1200f, 40f));
+            UIKit.Label(caption,
+                UITheme.Track("KEY-ART: LAGERFEUER-SZENE", UITheme.Tracking.Loose),
+                UITheme.Body, UITheme.FontMin, UITheme.WithAlpha(UITheme.Cream, 0.25f),
+                TextAnchor.MiddleCenter);
 
-            var seedInputGo = new GameObject("SeedInput");
-            seedInputGo.transform.SetParent(transform, false);
-            var seedRect = seedInputGo.AddComponent<RectTransform>();
-            seedRect.anchorMin = new Vector2(0.5f, 0.5f);
-            seedRect.anchorMax = new Vector2(0.5f, 0.5f);
-            seedRect.pivot = new Vector2(0.5f, 0.5f);
-            seedRect.anchoredPosition = new Vector2(80, 60);
-            seedRect.sizeDelta = new Vector2(200, 40);
+            // Darken towards the bottom so the card and the version label stay legible.
+            UIKit.GradientFade(art.transform, UITheme.ReferenceResolution.y * 0.62f,
+                UITheme.Hex(0x201810), fromTop: false, steps: 8);
+        }
 
-            var seedBg = seedInputGo.AddComponent<Image>();
-            seedBg.color = new Color(0.2f, 0.25f, 0.18f, 1f);
+        /// <summary>Game title, accent rule and epoch line.</summary>
+        private void BuildTitleBlock()
+        {
+            float half = UITheme.ReferenceResolution.y * 0.5f;
 
-            _seedInput = seedInputGo.AddComponent<InputField>();
+            var title = UIKit.Heading(transform,
+                UITheme.Track("TERRANOVA", UITheme.Tracking.Wide),
+                96, UITheme.Cream, new Vector2(0f, half - 210f), new Vector2(1400f, 130f));
+            var shadow = title.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.45f);
+            shadow.effectDistance = new Vector2(0f, -3f);
+
+            float subY = half - 360f;
+            UIKit.Rule(transform, new Vector2(-260f, subY), 120f, UITheme.Accent);
+            UIKit.Heading(transform, UITheme.Track("DEEP EPOCH I.1", UITheme.Tracking.Loose),
+                26, UITheme.Accent, new Vector2(0f, subY), new Vector2(360f, 40f));
+            UIKit.Rule(transform, new Vector2(260f, subY), 120f, UITheme.Accent);
+        }
+
+        /// <summary>The parchment card holding seed, biomes and actions.</summary>
+        private void BuildCard()
+        {
+            float half = UITheme.ReferenceResolution.y * 0.5f;
+            float cardY = half - CARD_TOP - CARD_HEIGHT * 0.5f;
+
+            var paper = UIKit.Card(transform, "MenuCard", new Vector2(0f, cardY),
+                new Vector2(CARD_WIDTH, CARD_HEIGHT));
+
+            float innerH = CARD_HEIGHT - 2f * UITheme.FrameWide;
+            float contentW = CARD_WIDTH - 2f * UITheme.FrameWide - 2f * PAD_X;
+
+            // Stack downwards from the top of the padded content area.
+            float top = innerH * 0.5f - PAD_Y;
+
+            BuildSeedRow(paper.transform, top - ROW_SEED_H * 0.5f, contentW);
+            top -= ROW_SEED_H + 26f;
+
+            UIKit.Heading(paper.transform, "Wo beginnt euer Stamm?", 30, UITheme.Ink,
+                new Vector2(0f, top - ROW_SECTION_H * 0.5f),
+                new Vector2(contentW, ROW_SECTION_H), TextAnchor.MiddleLeft);
+            top -= ROW_SECTION_H + 20f;
+
+            BuildBiomeRow(paper.transform, top - ROW_BIOME_H * 0.5f, contentW);
+            top -= ROW_BIOME_H + 26f;
+
+            BuildActionRow(paper.transform, top - ROW_ACTION_H * 0.5f, contentW);
+        }
+
+        /// <summary>"Saat der Welt" label, value field and the dice button.</summary>
+        private void BuildSeedRow(Transform parent, float centerY, float contentW)
+        {
+            float halfW = contentW * 0.5f;
+
+            var label = UIKit.Centered(parent, "SeedLabel",
+                new Vector2(-halfW + SEED_LABEL_WIDTH * 0.5f, centerY),
+                new Vector2(SEED_LABEL_WIDTH, ROW_SEED_H));
+            UIKit.Label(label, "Saat der Welt", UITheme.Display, 30, UITheme.Ink,
+                TextAnchor.MiddleLeft);
+
+            // Field spans whatever is left between the label and the dice button.
+            float fieldLeft = -halfW + SEED_LABEL_WIDTH + 18f;
+            float fieldRight = halfW - DICE_WIDTH - 18f;
+            float fieldW = fieldRight - fieldLeft;
+
+            var field = UIKit.Recess(parent, "SeedField",
+                new Vector2(fieldLeft + fieldW * 0.5f, centerY), new Vector2(fieldW, ROW_SEED_H));
+
+            _seedInput = field.AddComponent<InputField>();
             _seedInput.contentType = InputField.ContentType.IntegerNumber;
+            _seedInput.targetGraphic = field.GetComponent<Image>();
 
-            var seedTextGo = new GameObject("Text");
-            seedTextGo.transform.SetParent(seedInputGo.transform, false);
-            var seedTextRect = seedTextGo.AddComponent<RectTransform>();
-            seedTextRect.anchorMin = Vector2.zero;
-            seedTextRect.anchorMax = Vector2.one;
-            seedTextRect.offsetMin = new Vector2(8, 0);
-            seedTextRect.offsetMax = new Vector2(-8, 0);
-            var seedText = seedTextGo.AddComponent<Text>();
-            seedText.font = UIHelpers.GetFont();
-            seedText.fontSize = 24;
-            seedText.color = Color.white;
-            seedText.alignment = TextAnchor.MiddleLeft;
+            var textGo = UIKit.Stretch(field.transform, "Text");
+            var textRect = (RectTransform)textGo.transform;
+            textRect.offsetMin = new Vector2(22f, 0f);
+            textRect.offsetMax = new Vector2(-22f, 0f);
+            var seedText = UIKit.Label(textGo, "", UITheme.Body, 34, UITheme.Ink,
+                TextAnchor.MiddleLeft);
+            // InputField needs a single, unwrapped, plain-text line to edit.
+            seedText.raycastTarget = true;
+            seedText.supportRichText = false;
+            seedText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            seedText.verticalOverflow = VerticalWrapMode.Truncate;
             _seedInput.textComponent = seedText;
-
             _seedInput.onValueChanged.AddListener(OnSeedChanged);
 
-            // Biome selector label
-            CreateText("Biome:", 22, Color.white, new Vector2(0, 10), transform);
-
-            // Biome buttons
-            _biomeButtons = new Button[3];
-            string[] biomeNames = { "Forest", "Mountains", "Coast" };
-            Color[] biomeColors = {
-                new Color(0.2f, 0.5f, 0.2f, 0.8f),
-                new Color(0.4f, 0.4f, 0.45f, 0.8f),
-                new Color(0.2f, 0.4f, 0.6f, 0.8f)
-            };
-
-            for (int i = 0; i < 3; i++)
-            {
-                int biomeIdx = i;
-                var btnGo = new GameObject($"Biome_{biomeNames[i]}");
-                btnGo.transform.SetParent(transform, false);
-                var btnRect = btnGo.AddComponent<RectTransform>();
-                btnRect.anchorMin = new Vector2(0.5f, 0.5f);
-                btnRect.anchorMax = new Vector2(0.5f, 0.5f);
-                btnRect.pivot = new Vector2(0.5f, 0.5f);
-                btnRect.anchoredPosition = new Vector2(-150 + i * 150, -40);
-                btnRect.sizeDelta = new Vector2(130, 50);
-
-                var img = btnGo.AddComponent<Image>();
-                img.color = biomeColors[i];
-
-                var btn = btnGo.AddComponent<Button>();
-                btn.targetGraphic = img;
-                btn.onClick.AddListener(() => SelectBiome(biomeIdx));
-                _biomeButtons[i] = btn;
-
-                var labelGo = new GameObject("Label");
-                labelGo.transform.SetParent(btnGo.transform, false);
-                var labelRect = labelGo.AddComponent<RectTransform>();
-                labelRect.anchorMin = Vector2.zero;
-                labelRect.anchorMax = Vector2.one;
-                labelRect.sizeDelta = Vector2.zero;
-                var label = labelGo.AddComponent<Text>();
-                label.font = UIHelpers.GetFont();
-                label.fontSize = 22;
-                label.color = Color.white;
-                label.alignment = TextAnchor.MiddleCenter;
-                label.fontStyle = FontStyle.Bold;
-                label.text = biomeNames[i];
-            }
-
-            UpdateBiomeButtons();
-
-            // New Game button
-            CreateButton("New Game", new Vector2(0, -120), new Vector2(220, 60),
-                new Color(0.25f, 0.55f, 0.25f, 0.95f), 30, StartNewGame);
-
-            // Continue button (placeholder)
-            CreateButton("Continue", new Vector2(0, -200), new Vector2(220, 50),
-                new Color(0.3f, 0.3f, 0.35f, 0.7f), 24, ContinueGame);
-
-            // Version — bottom-right corner
-            var verGo = new GameObject("Version");
-            verGo.transform.SetParent(transform, false);
-            var verRect = verGo.AddComponent<RectTransform>();
-            verRect.anchorMin = new Vector2(1, 0);
-            verRect.anchorMax = new Vector2(1, 0);
-            verRect.pivot = new Vector2(1, 0);
-            verRect.anchoredPosition = new Vector2(-12, 8);
-            verRect.sizeDelta = new Vector2(200, 30);
-            _versionText = verGo.AddComponent<Text>();
-            _versionText.font = UIHelpers.GetFont();
-            _versionText.fontSize = 18;
-            _versionText.color = new Color(0.5f, 0.5f, 0.5f);
-            _versionText.alignment = TextAnchor.LowerRight;
-            _versionText.text = "v0.5.8";
-            var verShadow = verGo.AddComponent<Shadow>();
-            verShadow.effectColor = new Color(0, 0, 0, 0.6f);
-            verShadow.effectDistance = new Vector2(1, -1);
+            UIKit.LeatherButton(parent, "Würfeln",
+                new Vector2(halfW - DICE_WIDTH * 0.5f, centerY),
+                new Vector2(DICE_WIDTH, ROW_SEED_H), 24, RollSeed);
         }
+
+        /// <summary>Three biome cards in a row.</summary>
+        private void BuildBiomeRow(Transform parent, float centerY, float contentW)
+        {
+            float cardW = (contentW - 2f * BIOME_GAP) / 3f;
+            float startX = -contentW * 0.5f + cardW * 0.5f;
+
+            _biomeCards = new GameObject[BIOMES.Length];
+            _biomeChosenLabels = new Text[BIOMES.Length];
+
+            for (int i = 0; i < BIOMES.Length; i++)
+            {
+                int index = i;
+                var biome = BIOMES[i];
+                float x = startX + i * (cardW + BIOME_GAP);
+
+                var card = UIKit.Centered(parent, $"Biome_{biome}", new Vector2(x, centerY),
+                    new Vector2(cardW, ROW_BIOME_H));
+                UIKit.Surface(card, UITheme.PaperDeep, () => SelectBiome(index));
+
+                float innerW = cardW - 32f;
+                float top = ROW_BIOME_H * 0.5f - 16f;
+
+                UIKit.ImageSlot(card.transform, $"RENDER {UIStrings.Biome(biome).ToUpper()}",
+                    new Vector2(0f, top - 85f), new Vector2(innerW, 170f));
+                top -= 170f + 16f;
+
+                UIKit.Heading(card.transform, UIStrings.Biome(biome), 28, UITheme.Ink,
+                    new Vector2(-8f, top - 22f), new Vector2(innerW - 120f, 44f),
+                    TextAnchor.MiddleLeft);
+
+                var chosen = UIKit.Centered(card.transform, "Chosen",
+                    new Vector2(innerW * 0.5f - 60f, top - 22f), new Vector2(120f, 44f));
+                _biomeChosenLabels[i] = UIKit.Label(chosen, "gewählt", UITheme.Body, 20,
+                    UITheme.Confirm, TextAnchor.MiddleRight);
+                top -= 44f + 8f;
+
+                UIKit.Body(card.transform, UIStrings.BiomeDescription(biome), 20, UITheme.InkMuted,
+                    new Vector2(0f, top - 34f), new Vector2(innerW, 68f), TextAnchor.UpperLeft);
+
+                // Border is added last so it draws over the card's contents.
+                UIKit.Border(card.transform, UITheme.Rule, 3f);
+                _biomeCards[i] = card;
+            }
+        }
+
+        /// <summary>"Neues Spiel" and "Fortsetzen".</summary>
+        private void BuildActionRow(Transform parent, float centerY, float contentW)
+        {
+            float halfW = contentW * 0.5f;
+            float newGameW = contentW - CONTINUE_WIDTH - 24f;
+
+            UIKit.PrimaryButton(parent, UITheme.Track("Neues Spiel", UITheme.Tracking.Tight),
+                new Vector2(-halfW + newGameW * 0.5f, centerY),
+                new Vector2(newGameW, ROW_ACTION_H), 34, StartNewGame);
+
+            UIKit.SecondaryButton(parent, "Fortsetzen",
+                new Vector2(halfW - CONTINUE_WIDTH * 0.5f, centerY),
+                new Vector2(CONTINUE_WIDTH, ROW_ACTION_H), 28, ContinueGame);
+        }
+
+        private void BuildVersionLabel()
+        {
+            var go = UIKit.Anchored(transform, "Version", new Vector2(1f, 0f),
+                new Vector2(-24f, 20f), new Vector2(240f, 32f));
+            UIKit.Label(go, GameVersion.Label, UITheme.Body, 20,
+                UITheme.WithAlpha(UITheme.Paper, 0.45f), TextAnchor.LowerRight);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  I N T E R A C T I O N
+        // ═══════════════════════════════════════════════════════════
 
         private void OnSeedChanged(string value)
         {
@@ -175,35 +263,33 @@ namespace Terranova.UI
                 GameState.Seed = seed;
         }
 
-        private void SelectBiome(int index)
+        /// <summary>Roll a fresh random seed into the field.</summary>
+        private void RollSeed()
         {
-            _selectedBiome = (BiomeType)index;
-            GameState.SelectedBiome = _selectedBiome;
-            UpdateBiomeButtons();
+            int seed = Random.Range(10000, 99999);
+            _seedInput.text = seed.ToString();
+            GameState.Seed = seed;
         }
 
-        private void UpdateBiomeButtons()
+        private void SelectBiome(int index)
         {
-            for (int i = 0; i < _biomeButtons.Length; i++)
-            {
-                var img = _biomeButtons[i].GetComponent<Image>();
-                bool selected = i == (int)_selectedBiome;
-                Color c = img.color;
-                c.a = selected ? 1f : 0.4f;
-                img.color = c;
+            _selectedBiome = BIOMES[index];
+            GameState.SelectedBiome = _selectedBiome;
+            UpdateBiomeCards();
+        }
 
-                // Add border effect for selected
-                var outline = _biomeButtons[i].GetComponent<Outline>();
-                if (selected && outline == null)
-                {
-                    outline = _biomeButtons[i].gameObject.AddComponent<Outline>();
-                    outline.effectColor = Color.white;
-                    outline.effectDistance = new Vector2(2, -2);
-                }
-                else if (!selected && outline != null)
-                {
-                    Destroy(outline);
-                }
+        /// <summary>
+        /// Selected card: 3 px accent frame plus the "gewählt" note.
+        /// Unselected: 3 px rule frame, note hidden.
+        /// </summary>
+        private void UpdateBiomeCards()
+        {
+            for (int i = 0; i < _biomeCards.Length; i++)
+            {
+                bool selected = BIOMES[i] == _selectedBiome;
+                UIKit.SetBorder(_biomeCards[i].transform,
+                    selected ? UITheme.Accent : UITheme.Rule, 3f);
+                _biomeChosenLabels[i].text = selected ? "gewählt" : "";
             }
         }
 
@@ -223,7 +309,7 @@ namespace Terranova.UI
 
         private void ContinueGame()
         {
-            // Placeholder: just start a new game
+            // Placeholder until save/load exists: continues into a fresh world.
             GameState.IsNewGame = false;
             GameState.GameStarted = true;
 
@@ -239,61 +325,6 @@ namespace Terranova.UI
             // assembly reference between Terranova.UI and Terranova.Bootstrap).
             Destroy(gameObject);
             GameState.LaunchGameCallback?.Invoke();
-        }
-
-        private Text CreateText(string content, int fontSize, Color color, Vector2 position, Transform parent)
-        {
-            var go = new GameObject(content);
-            go.transform.SetParent(parent, false);
-            var rect = go.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = position;
-            rect.sizeDelta = new Vector2(600, fontSize + 20);
-            var text = go.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = fontSize;
-            text.color = color;
-            text.alignment = TextAnchor.MiddleCenter;
-            var shadow = go.AddComponent<Shadow>();
-            shadow.effectColor = new Color(0, 0, 0, 0.6f);
-            shadow.effectDistance = new Vector2(1, -1);
-            return text;
-        }
-
-        private void CreateButton(string label, Vector2 pos, Vector2 size, Color bgColor,
-            int fontSize, UnityEngine.Events.UnityAction onClick)
-        {
-            var btnGo = new GameObject($"Btn_{label}");
-            btnGo.transform.SetParent(transform, false);
-            var btnRect = btnGo.AddComponent<RectTransform>();
-            btnRect.anchorMin = new Vector2(0.5f, 0.5f);
-            btnRect.anchorMax = new Vector2(0.5f, 0.5f);
-            btnRect.pivot = new Vector2(0.5f, 0.5f);
-            btnRect.anchoredPosition = pos;
-            btnRect.sizeDelta = size;
-
-            var img = btnGo.AddComponent<Image>();
-            img.color = bgColor;
-
-            var btn = btnGo.AddComponent<Button>();
-            btn.targetGraphic = img;
-            btn.onClick.AddListener(onClick);
-
-            var labelGo = new GameObject("Label");
-            labelGo.transform.SetParent(btnGo.transform, false);
-            var labelRect = labelGo.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            var text = labelGo.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = fontSize;
-            text.color = Color.white;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.fontStyle = FontStyle.Bold;
-            text.text = label;
         }
     }
 }

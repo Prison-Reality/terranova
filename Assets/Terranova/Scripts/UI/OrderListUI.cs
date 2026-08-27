@@ -1,35 +1,34 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 using Terranova.Core;
 using Terranova.Orders;
 
 namespace Terranova.UI
 {
     /// <summary>
-    /// Feature 7.6 (v0.4.13): Active-orders list panel.
+    /// Feature 7.6 (v0.4.13): the list of running orders, opened from the
+    /// "Laufende Befehle" button in the Klappbuch header.
     ///
-    /// Scrollable list of all active orders. Each row shows:
-    ///   status icon + sentence + pause (44 px) + delete (44 px)
+    /// Not one of the nine design screens, but it opens straight out of screen 4, so
+    /// it follows the same "Kodex" language: a parchment page in a leather tray, one
+    /// row per order with a pause and a cancel button at the 64 px touch size.
     /// </summary>
     public class OrderListUI : MonoBehaviour
     {
         public static OrderListUI Instance { get; private set; }
 
-        private const float PANEL_WIDTH = 520f;
-        private const float PANEL_HEIGHT = 480f;
-        private const float ROW_HEIGHT = 56f;
-        private const float TOUCH_SIZE = 44f;
-
-        private static readonly Color BG_COLOR = new(0.08f, 0.10f, 0.08f, 0.95f);
-        private static readonly Color ROW_BG = new(0.14f, 0.16f, 0.14f, 0.85f);
-        private static readonly Color STATUS_ACTIVE = new(1f, 0.85f, 0.2f);
-        private static readonly Color STATUS_PAUSED = new(0.6f, 0.6f, 0.6f);
-        private static readonly Color NEGATED_TEXT = new(0.9f, 0.3f, 0.3f);
+        private const float TRAY_W = 900f;
+        private const float TRAY_H = 640f;
+        private const float PAGE_PAD_X = 24f;
+        private const float PAGE_PAD_Y = 20f;
+        private const float ROW_HEIGHT = 96f;
+        private const float ROW_GAP = 10f;
+        private const float BTN = UITheme.TouchMin;
+        private const float BTN_PAD = 10f;
 
         private GameObject _panel;
         private Transform _listContent;
+        private float _innerWidth;
         private bool _isOpen;
         private bool _dirty;
 
@@ -104,78 +103,17 @@ namespace Terranova.UI
         {
             if (_panel != null) Destroy(_panel);
 
-            // Overlay
-            _panel = new GameObject("OrderListPanel");
-            _panel.transform.SetParent(transform, false);
-            _panel.transform.SetAsLastSibling();
-            var overlay = _panel.AddComponent<Image>();
-            overlay.color = new Color(0f, 0f, 0f, 0.5f);
-            var overlayRect = _panel.GetComponent<RectTransform>();
-            overlayRect.anchorMin = Vector2.zero;
-            overlayRect.anchorMax = Vector2.one;
-            overlayRect.offsetMin = Vector2.zero;
-            overlayRect.offsetMax = Vector2.zero;
-            _panel.AddComponent<Button>().onClick.AddListener(Close);
+            var (overlay, body) = UIHelpers.CreateBookOverlay(transform, "OrderListPanel",
+                new Vector2(TRAY_W, TRAY_H), "Laufende Befehle", null, Close);
+            _panel = overlay;
 
-            // Card
-            var card = MakeRect(_panel.transform, "Card", Vector2.zero,
-                new Vector2(PANEL_WIDTH, PANEL_HEIGHT));
-            card.AddComponent<Image>().color = BG_COLOR;
-            card.AddComponent<Button>().onClick.AddListener(() => { }); // block click-through
+            float bodyW = TRAY_W - 2f * UITheme.TrayPad;
+            float bodyH = TRAY_H - 2f * UITheme.TrayPad - UIHelpers.HeaderHeight;
 
-            // Title
-            var titleObj = MakeRect(card.transform, "Title",
-                new Vector2(0, PANEL_HEIGHT / 2 - 24),
-                new Vector2(PANEL_WIDTH - TOUCH_SIZE - 16, 40));
-            var titleText = titleObj.AddComponent<Text>();
-            titleText.font = GetFont();
-            titleText.fontSize = 22;
-            titleText.color = new Color(0.8f, 0.9f, 0.7f);
-            titleText.alignment = TextAnchor.MiddleCenter;
-            titleText.fontStyle = FontStyle.Bold;
-            titleText.text = "ACTIVE ORDERS";
-
-            // Close [X] — 44 × 44 px
-            var closeX = MakeRect(card.transform, "CloseX",
-                new Vector2(PANEL_WIDTH / 2 - TOUCH_SIZE / 2 - 4, PANEL_HEIGHT / 2 - TOUCH_SIZE / 2 - 2),
-                new Vector2(TOUCH_SIZE, TOUCH_SIZE));
-            closeX.AddComponent<Image>().color = new Color(0.5f, 0.2f, 0.2f, 0.8f);
-            closeX.AddComponent<Button>().onClick.AddListener(Close);
-            var closeLabel = MakeRect(closeX.transform, "X", Vector2.zero,
-                new Vector2(TOUCH_SIZE, TOUCH_SIZE));
-            var closeTxt = closeLabel.AddComponent<Text>();
-            closeTxt.font = GetFont();
-            closeTxt.fontSize = 22;
-            closeTxt.color = Color.white;
-            closeTxt.alignment = TextAnchor.MiddleCenter;
-            closeTxt.fontStyle = FontStyle.Bold;
-            closeTxt.text = "X";
-
-            // Scroll area
-            float scrollHeight = PANEL_HEIGHT - 70;
-            var scrollBg = MakeRect(card.transform, "ScrollBg",
-                new Vector2(0, -20), new Vector2(PANEL_WIDTH - 20, scrollHeight));
-            scrollBg.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.06f, 0.6f);
-            scrollBg.AddComponent<RectMask2D>();
-
-            var scrollRect = scrollBg.AddComponent<ScrollRect>();
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
-            scrollRect.movementType = ScrollRect.MovementType.Clamped;
-            scrollRect.scrollSensitivity = 30f;
-
-            // Content — NO layout groups. Manual positioning for full control.
-            var content = new GameObject("Content");
-            content.transform.SetParent(scrollBg.transform, false);
-            var contentRect = content.AddComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0, 1);
-            contentRect.anchorMax = new Vector2(1, 1);
-            contentRect.pivot = new Vector2(0.5f, 1);
-            contentRect.anchoredPosition = Vector2.zero;
-            contentRect.sizeDelta = new Vector2(0, 0);
-
-            scrollRect.content = contentRect;
-            _listContent = content.transform;
+            var (content, innerW) = UIHelpers.CreatePage(body.transform, Vector2.zero,
+                new Vector2(bodyW, bodyH), PAGE_PAD_X, PAGE_PAD_Y);
+            _listContent = content;
+            _innerWidth = innerW;
 
             RebuildList();
         }
@@ -190,208 +128,71 @@ namespace Terranova.UI
             var manager = OrderManager.Instance;
             if (manager == null) return;
 
-            var orders = manager.AllOrders;
-            const float pad = 8f;
-            const float spacing = 4f;
-            float y = -pad;
-            bool hasVisibleOrders = false;
+            float y = -PAGE_PAD_Y;
+            bool any = false;
 
-            foreach (var order in orders)
+            foreach (var order in manager.AllOrders)
             {
                 if (order.Status == OrderStatus.Complete || order.Status == OrderStatus.Failed)
                     continue;
-                hasVisibleOrders = true;
-                CreateOrderRow(order, y);
-                y -= (ROW_HEIGHT + spacing);
+
+                any = true;
+                CreateOrderRow(order, ref y);
             }
 
-            if (!hasVisibleOrders)
+            if (!any)
             {
-                var emptyObj = new GameObject("Empty");
-                emptyObj.transform.SetParent(_listContent, false);
-                var emptyRect = emptyObj.AddComponent<RectTransform>();
-                emptyRect.anchorMin = new Vector2(0, 1);
-                emptyRect.anchorMax = new Vector2(1, 1);
-                emptyRect.pivot = new Vector2(0.5f, 1);
-                emptyRect.anchoredPosition = new Vector2(0, y);
-                emptyRect.sizeDelta = new Vector2(-pad * 2, 60);
-                var emptyText = emptyObj.AddComponent<Text>();
-                emptyText.font = GetFont();
-                emptyText.fontSize = 16;
-                emptyText.color = new Color(0.5f, 0.5f, 0.5f);
-                emptyText.alignment = TextAnchor.MiddleCenter;
-                emptyText.text = "No active orders.";
-                emptyText.horizontalOverflow = HorizontalWrapMode.Wrap;
-                y -= (60 + spacing);
+                y = UIHelpers.AddTextBlock(_listContent, y, "Kein Befehl läuft gerade.",
+                    UITheme.BodyItalic, 22, UITheme.InkMuted, _innerWidth, TextAnchor.UpperCenter);
             }
 
-            y -= pad;
-
-            // Set content height for scrolling
-            var contentRect = _listContent.GetComponent<RectTransform>();
-            contentRect.sizeDelta = new Vector2(0, Mathf.Abs(y));
+            UIHelpers.FinishPage(_listContent, y, PAGE_PAD_Y);
         }
 
         /// <summary>
-        /// Create one order row at absolute y position within the scroll content.
-        /// No layout groups — all children use explicit anchor-based positioning
-        /// so button sizes are guaranteed.
-        ///
-        /// Row layout: [4px][30px icon][4px][...sentence...][4px][44px pause][4px][44px cancel][4px]
+        /// One order row: status edge, the German sentence, pause and cancel.
+        /// A paused order keeps its text but loses the accent edge.
         /// </summary>
-        private void CreateOrderRow(OrderDefinition order, float yPos)
+        private void CreateOrderRow(OrderDefinition order, ref float y)
         {
-            var row = new GameObject($"Order_{order.Id}");
-            row.transform.SetParent(_listContent, false);
-            var rowRect = row.AddComponent<RectTransform>();
-            // Stretch horizontally within content, positioned at yPos from top
-            rowRect.anchorMin = new Vector2(0, 1);
-            rowRect.anchorMax = new Vector2(1, 1);
-            rowRect.pivot = new Vector2(0.5f, 1);
-            rowRect.anchoredPosition = new Vector2(0, yPos);
-            rowRect.sizeDelta = new Vector2(-16, ROW_HEIGHT); // -16 = 8px margin each side
-            row.AddComponent<Image>().color = ROW_BG;
-
-            // All children use pixel offsets from the row edges.
-            // Row width ≈ 484px (500 scroll - 16 margin).
-            // Right section: 4 + 44 + 4 + 44 + 4 = 100px from right edge.
-            const float p = 4f;
-            const float iconW = 30f;
-            float btnW = TOUCH_SIZE; // 44
-
             int orderId = order.Id;
+            bool paused = order.Status == OrderStatus.Paused;
 
-            // ── Status icon: left-aligned, 30px wide ──
-            string icon = order.Status == OrderStatus.Active ? ">>" : "||";
-            Color iconColor = order.Status == OrderStatus.Active ? STATUS_ACTIVE : STATUS_PAUSED;
-            var iconObj = new GameObject("StatusIcon");
-            iconObj.transform.SetParent(row.transform, false);
-            var iconRect = iconObj.AddComponent<RectTransform>();
-            iconRect.anchorMin = new Vector2(0, 0);
-            iconRect.anchorMax = new Vector2(0, 1);
-            iconRect.pivot = new Vector2(0, 0.5f);
-            iconRect.anchoredPosition = new Vector2(p, 0);
-            iconRect.sizeDelta = new Vector2(iconW, 0);
-            var iconText = iconObj.AddComponent<Text>();
-            iconText.font = GetFont();
-            iconText.fontSize = 14;
-            iconText.color = iconColor;
-            iconText.alignment = TextAnchor.MiddleCenter;
-            iconText.fontStyle = FontStyle.Bold;
-            iconText.text = icon;
+            var row = UIHelpers.AddRow(_listContent, ref y, $"Order_{orderId}", ROW_HEIGHT, ROW_GAP);
+            UIKit.Fill(row, UITheme.PaperDeep, blocksTaps: false);
+            UIKit.LeftEdge(row.transform, paused ? UITheme.InkMuted : UITheme.Accent, 6f);
 
-            // ── Sentence: stretches between icon and buttons ──
-            float sentenceLeft = p + iconW + p;             // 38px from left
-            float sentenceRight = p + btnW + p + btnW + p;  // 100px from right
-            var sentenceObj = new GameObject("Sentence");
-            sentenceObj.transform.SetParent(row.transform, false);
-            var sentenceRect = sentenceObj.AddComponent<RectTransform>();
-            sentenceRect.anchorMin = new Vector2(0, 0);
-            sentenceRect.anchorMax = new Vector2(1, 1);
-            sentenceRect.offsetMin = new Vector2(sentenceLeft, p);
-            sentenceRect.offsetMax = new Vector2(-sentenceRight, -p);
-            var sentenceText = sentenceObj.AddComponent<Text>();
-            sentenceText.font = GetFont();
-            sentenceText.fontSize = 14;
-            sentenceText.color = order.Negated ? NEGATED_TEXT : Color.white;
-            sentenceText.alignment = TextAnchor.MiddleLeft;
-            sentenceText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            sentenceText.text = order.BuildSentence();
+            // ── Sentence, between the edge and the two buttons ──
+            float buttonBlock = 2f * BTN + 3f * BTN_PAD;
+            var sentenceGo = UIKit.New(row.transform, "Sentence");
+            var sr = (RectTransform)sentenceGo.transform;
+            sr.anchorMin = Vector2.zero;
+            sr.anchorMax = Vector2.one;
+            sr.offsetMin = new Vector2(26f, 0f);
+            sr.offsetMax = new Vector2(-buttonBlock, 0f);
+            UIKit.Label(sentenceGo, UIStrings.Sentence(order), UITheme.Display, 26,
+                order.Negated ? UITheme.Danger : UITheme.Ink, TextAnchor.MiddleLeft);
 
-            // ── Pause button: 44×44, right-aligned (second from right) ──
-            // Right edge of pause = p + btnW + p = 52px from row's right edge
-            var pauseObj = new GameObject("PauseBtn");
-            pauseObj.transform.SetParent(row.transform, false);
-            var pauseRect = pauseObj.AddComponent<RectTransform>();
-            pauseRect.anchorMin = new Vector2(1, 0.5f);
-            pauseRect.anchorMax = new Vector2(1, 0.5f);
-            pauseRect.pivot = new Vector2(1, 0.5f);
-            pauseRect.anchoredPosition = new Vector2(-(p + btnW + p), 0);
-            pauseRect.sizeDelta = new Vector2(btnW, btnW);
-            var pauseImg = pauseObj.AddComponent<Image>();
-            pauseImg.color = new Color(0.3f, 0.3f, 0.5f, 0.8f);
-            var pauseBtn = pauseObj.AddComponent<Button>();
-            pauseBtn.targetGraphic = pauseImg;
-            pauseBtn.onClick.AddListener(() =>
+            // ── Pause / resume ──
+            var pause = UIKit.Anchored(row.transform, "Pause", new Vector2(1f, 0.5f),
+                new Vector2(-(BTN + 2f * BTN_PAD), 0f), new Vector2(BTN, BTN));
+            UIKit.Surface(pause, UITheme.Paper, () =>
             {
                 OrderManager.Instance?.TogglePause(orderId);
                 _dirty = true;
             });
-            var pauseLabel = new GameObject("PL");
-            pauseLabel.transform.SetParent(pauseObj.transform, false);
-            var plRect = pauseLabel.AddComponent<RectTransform>();
-            plRect.anchorMin = Vector2.zero;
-            plRect.anchorMax = Vector2.one;
-            plRect.offsetMin = Vector2.zero;
-            plRect.offsetMax = Vector2.zero;
-            var plText = pauseLabel.AddComponent<Text>();
-            plText.font = GetFont();
-            plText.fontSize = 16;
-            plText.color = Color.white;
-            plText.alignment = TextAnchor.MiddleCenter;
-            plText.fontStyle = FontStyle.Bold;
-            plText.text = order.Status == OrderStatus.Paused ? ">" : "||";
+            UIKit.FillText(pause.transform, paused ? "▶" : "II", UITheme.Body, 24, UITheme.Ink);
+            UIKit.Border(pause.transform, UITheme.Rule, UITheme.Border);
 
-            // ══ CANCEL BUTTON: 44×44, bright red with white X, rightmost ══
-            // Right edge of cancel = p = 4px from row's right edge
-            var cancelObj = new GameObject("CancelBtn");
-            cancelObj.transform.SetParent(row.transform, false);
-            var cancelRect = cancelObj.AddComponent<RectTransform>();
-            cancelRect.anchorMin = new Vector2(1, 0.5f);
-            cancelRect.anchorMax = new Vector2(1, 0.5f);
-            cancelRect.pivot = new Vector2(1, 0.5f);
-            cancelRect.anchoredPosition = new Vector2(-p, 0);
-            cancelRect.sizeDelta = new Vector2(btnW, btnW);
-            var cancelImg = cancelObj.AddComponent<Image>();
-            cancelImg.color = new Color(0.85f, 0.08f, 0.08f, 1f);
-            var cancelBtn = cancelObj.AddComponent<Button>();
-            cancelBtn.targetGraphic = cancelImg;
-            cancelBtn.onClick.AddListener(() =>
+            // ── Cancel ──
+            var cancel = UIKit.Anchored(row.transform, "Cancel", new Vector2(1f, 0.5f),
+                new Vector2(-BTN_PAD, 0f), new Vector2(BTN, BTN));
+            UIKit.Surface(cancel, UITheme.Danger, () =>
             {
-                Debug.Log($"[OrderListUI] Cancel button clicked for order {orderId}");
                 OrderManager.Instance?.CancelOrder(orderId);
                 _dirty = true;
             });
-            var cancelLabel = new GameObject("CL");
-            cancelLabel.transform.SetParent(cancelObj.transform, false);
-            var clRect = cancelLabel.AddComponent<RectTransform>();
-            clRect.anchorMin = Vector2.zero;
-            clRect.anchorMax = Vector2.one;
-            clRect.offsetMin = Vector2.zero;
-            clRect.offsetMax = Vector2.zero;
-            var clText = cancelLabel.AddComponent<Text>();
-            clText.font = GetFont();
-            clText.fontSize = 22;
-            clText.color = Color.white;
-            clText.alignment = TextAnchor.MiddleCenter;
-            clText.fontStyle = FontStyle.Bold;
-            clText.text = "X";
-            var clOutline = cancelLabel.AddComponent<Outline>();
-            clOutline.effectColor = new Color(0, 0, 0, 0.8f);
-            clOutline.effectDistance = new Vector2(1, -1);
-
-            Debug.Log($"[OrderListUI] Created row for order {orderId}: '{order.BuildSentence()}' with pause({btnW}x{btnW}) + cancel({btnW}x{btnW}) buttons");
-        }
-
-        // ─── Helpers ─────────────────────────────────────────
-
-        private static Font GetFont()
-        {
-            return UIHelpers.GetFont();
-        }
-
-        private static GameObject MakeRect(Transform parent, string name,
-            Vector2 pos, Vector2 size)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            var r = go.AddComponent<RectTransform>();
-            r.anchorMin = new Vector2(0.5f, 0.5f);
-            r.anchorMax = new Vector2(0.5f, 0.5f);
-            r.pivot = new Vector2(0.5f, 0.5f);
-            r.anchoredPosition = pos;
-            r.sizeDelta = size;
-            return go;
+            UIKit.FillText(cancel.transform, "×", UITheme.Body, 32, UITheme.CreamBright);
         }
     }
 }

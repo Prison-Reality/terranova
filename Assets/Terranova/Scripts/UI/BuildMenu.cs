@@ -8,23 +8,26 @@ using Terranova.Discovery;
 namespace Terranova.UI
 {
     /// <summary>
-    /// Build menu UI showing available buildings with costs.
-    /// Player selects a building to enter placement mode.
+    /// The build tray of screen 3 — a leather tray at the bottom centre carrying one
+    /// parchment card per available building.
     ///
-    /// - Grays out buildings the player can't afford
-    /// - Updates live when resources change
-    /// - Hides buildings that haven't been unlocked by discoveries (Feature 3.2)
-    /// - Press B or click the toggle button to open/close
+    /// Costs are spelled out ("20 Holz", "15 Holz  5 Stein") instead of the old
+    /// "20W  5S" shorthand. A card the player cannot pay for dims and swaps its cost
+    /// line for the reason.
     ///
-    /// Story 4.5: Bau-Menü
-    /// Feature 3.2: Discovery-gated buildings
+    /// Opened by the "Bauen" tab in the HUD or the B key. Buildings gated behind a
+    /// discovery stay hidden until it is made (Feature 3.2) — unchanged.
     /// </summary>
     public class BuildMenu : MonoBehaviour
     {
-        private const float BUTTON_WIDTH = 160f;
-        private const float BUTTON_HEIGHT = 70f;
-        private const float SPACING = 8f;
-        private const int FONT_SIZE = 14;
+        private const float CARD_WIDTH = 230f;
+        private const float CARD_HEIGHT = 230f;
+        private const float CARD_PAD = 14f;
+        private const float TRAY_PAD = 14f;
+        private const float CARD_GAP = 14f;
+        private const float IMAGE_HEIGHT = 120f;
+        private const float TRAY_BOTTOM = 124f;
+        private const float DIM_ALPHA = 0.55f;
 
         // Building types that require discovery unlock
         private static readonly HashSet<BuildingType> DISCOVERY_GATED = new()
@@ -34,255 +37,32 @@ namespace Terranova.UI
         };
 
         private GameObject _panel;
-        private List<BuildingButton> _buttons;
+        private List<BuildingCard> _cards;
         private bool _isOpen;
         private bool _panelDirty = true;
 
-        private struct BuildingButton
+        /// <summary>Everything about one building card that changes with affordability.</summary>
+        private struct BuildingCard
         {
             public GameObject Root;
             public Button Button;
-            public Text Label;
             public Image Background;
+            public CanvasGroup Group;
+            public Text CostLabel;
             public BuildingDefinition Definition;
         }
 
-        private void Start()
-        {
-            CreateToggleButton();
-        }
+        /// <summary>Is the tray currently open? Read by the HUD's "Bauen" tab.</summary>
+        public bool IsOpen => _isOpen;
+
+        // ═══════════════════════════════════════════════════════════
+        //  L I F E C Y C L E
+        // ═══════════════════════════════════════════════════════════
 
         private void OnEnable()
         {
             EventBus.Subscribe<ResourceChangedEvent>(OnResourceChanged);
             EventBus.Subscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
-        }
-
-        private void Update()
-        {
-            if (UnityEngine.InputSystem.Keyboard.current != null &&
-                UnityEngine.InputSystem.Keyboard.current.bKey.wasPressedThisFrame)
-            {
-                ToggleMenu();
-            }
-        }
-
-        private void ToggleMenu()
-        {
-            if (_isOpen)
-                CloseMenu();
-            else
-                OpenMenu();
-        }
-
-        private void OpenMenu()
-        {
-            if (_panelDirty || _panel == null)
-                RebuildPanel();
-
-            if (_panel == null) return;
-
-            _panel.SetActive(true);
-            _isOpen = true;
-            RefreshButtons();
-        }
-
-        private void CloseMenu()
-        {
-            if (_panel != null)
-                _panel.SetActive(false);
-            _isOpen = false;
-        }
-
-        private void OnResourceChanged(ResourceChangedEvent evt)
-        {
-            if (_isOpen)
-                RefreshButtons();
-        }
-
-        private void OnDiscoveryMade(DiscoveryMadeEvent evt)
-        {
-            _panelDirty = true;
-            if (_isOpen)
-            {
-                RebuildPanel();
-                _panel.SetActive(true);
-                RefreshButtons();
-            }
-        }
-
-        private void CreateToggleButton()
-        {
-            var canvas = GetComponent<Canvas>();
-            if (canvas == null) return;
-
-            var btnObj = new GameObject("BuildMenuToggle");
-            btnObj.transform.SetParent(transform, false);
-
-            var rect = btnObj.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0, 0);
-            rect.anchorMax = new Vector2(0, 0);
-            rect.pivot = new Vector2(0, 0);
-            rect.anchoredPosition = new Vector2(20, 20);
-            rect.sizeDelta = new Vector2(100, 44);
-
-            var image = btnObj.AddComponent<Image>();
-            image.color = new Color(0.25f, 0.45f, 0.25f, 0.85f);
-
-            var button = btnObj.AddComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(ToggleMenu);
-
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(btnObj.transform, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-
-            var label = labelObj.AddComponent<Text>();
-            label.font = UIHelpers.GetFont();
-            label.fontSize = 18;
-            label.color = Color.white;
-            label.alignment = TextAnchor.MiddleCenter;
-            label.text = "Build [B]";
-        }
-
-        /// <summary>
-        /// Rebuild the panel, filtering out buildings not yet unlocked by discoveries.
-        /// </summary>
-        private void RebuildPanel()
-        {
-            if (_panel != null)
-                Destroy(_panel);
-
-            var registry = BuildingRegistry.Instance;
-            if (registry == null || registry.Definitions == null) return;
-
-            var sm = DiscoveryStateManager.Instance;
-
-            // Filter definitions: show always-available + discovery-unlocked
-            var visibleDefs = new List<BuildingDefinition>();
-            foreach (var def in registry.Definitions)
-            {
-                if (DISCOVERY_GATED.Contains(def.Type))
-                {
-                    if (sm != null && sm.IsBuildingUnlocked(def.Type))
-                        visibleDefs.Add(def);
-                }
-                else
-                {
-                    visibleDefs.Add(def);
-                }
-            }
-
-            if (visibleDefs.Count == 0) return;
-
-            _panel = new GameObject("BuildPanel");
-            _panel.transform.SetParent(transform, false);
-
-            var panelRect = _panel.AddComponent<RectTransform>();
-            float totalWidth = visibleDefs.Count * (BUTTON_WIDTH + SPACING) + SPACING;
-            panelRect.anchorMin = new Vector2(0.5f, 0);
-            panelRect.anchorMax = new Vector2(0.5f, 0);
-            panelRect.pivot = new Vector2(0.5f, 0);
-            panelRect.anchoredPosition = new Vector2(0, 70);
-            panelRect.sizeDelta = new Vector2(totalWidth, BUTTON_HEIGHT + SPACING * 2);
-
-            var panelImage = _panel.AddComponent<Image>();
-            panelImage.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
-
-            _buttons = new List<BuildingButton>();
-
-            for (int i = 0; i < visibleDefs.Count; i++)
-            {
-                var def = visibleDefs[i];
-                int index = i;
-
-                var btnObj = new GameObject($"Btn_{def.DisplayName}");
-                btnObj.transform.SetParent(_panel.transform, false);
-
-                var btnRect = btnObj.AddComponent<RectTransform>();
-                btnRect.anchorMin = new Vector2(0, 0.5f);
-                btnRect.anchorMax = new Vector2(0, 0.5f);
-                btnRect.pivot = new Vector2(0, 0.5f);
-                btnRect.anchoredPosition = new Vector2(SPACING + i * (BUTTON_WIDTH + SPACING), 0);
-                btnRect.sizeDelta = new Vector2(BUTTON_WIDTH, BUTTON_HEIGHT);
-
-                var bg = btnObj.AddComponent<Image>();
-                bg.color = new Color(0.25f, 0.25f, 0.25f, 0.9f);
-
-                var btn = btnObj.AddComponent<Button>();
-                btn.targetGraphic = bg;
-                btn.onClick.AddListener(() => OnBuildingSelected(index));
-
-                var labelObj = new GameObject("Label");
-                labelObj.transform.SetParent(btnObj.transform, false);
-                var labelRect = labelObj.AddComponent<RectTransform>();
-                labelRect.anchorMin = Vector2.zero;
-                labelRect.anchorMax = Vector2.one;
-                labelRect.sizeDelta = Vector2.zero;
-                labelRect.offsetMin = new Vector2(4, 4);
-                labelRect.offsetMax = new Vector2(-4, -4);
-
-                var label = labelObj.AddComponent<Text>();
-                label.font = UIHelpers.GetFont();
-                label.fontSize = FONT_SIZE;
-                label.color = Color.white;
-                label.alignment = TextAnchor.MiddleCenter;
-
-                string costText = def.StoneCost > 0
-                    ? $"{def.DisplayName}\n{def.WoodCost}W  {def.StoneCost}S"
-                    : $"{def.DisplayName}\n{def.WoodCost}W";
-                label.text = costText;
-
-                _buttons.Add(new BuildingButton
-                {
-                    Root = btnObj,
-                    Button = btn,
-                    Label = label,
-                    Background = bg,
-                    Definition = def
-                });
-            }
-
-            _panel.SetActive(false);
-            _panelDirty = false;
-        }
-
-        private void RefreshButtons()
-        {
-            if (_buttons == null) return;
-
-            var rm = ResourceManager.Instance;
-            if (rm == null) return;
-
-            foreach (var btn in _buttons)
-            {
-                bool canAfford = rm.CanAfford(btn.Definition.WoodCost, btn.Definition.StoneCost);
-                btn.Button.interactable = canAfford;
-                btn.Background.color = canAfford
-                    ? new Color(0.25f, 0.25f, 0.25f, 0.9f)
-                    : new Color(0.15f, 0.10f, 0.10f, 0.9f);
-                btn.Label.color = canAfford ? Color.white : new Color(0.5f, 0.3f, 0.3f);
-            }
-        }
-
-        private void OnBuildingSelected(int index)
-        {
-            if (_buttons == null || index >= _buttons.Count) return;
-
-            var def = _buttons[index].Definition;
-            var rm = ResourceManager.Instance;
-            if (rm != null && !rm.CanAfford(def.WoodCost, def.StoneCost))
-                return;
-
-            var placer = FindFirstObjectByType<BuildingPlacer>();
-            if (placer != null)
-            {
-                placer.StartPlacement(def);
-                CloseMenu();
-            }
         }
 
         private void OnDisable()
@@ -295,6 +75,216 @@ namespace Terranova.UI
         {
             EventBus.Unsubscribe<ResourceChangedEvent>(OnResourceChanged);
             EventBus.Unsubscribe<DiscoveryMadeEvent>(OnDiscoveryMade);
+        }
+
+        private void Update()
+        {
+            if (UnityEngine.InputSystem.Keyboard.current != null &&
+                UnityEngine.InputSystem.Keyboard.current.bKey.wasPressedThisFrame)
+            {
+                Toggle();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  O P E N   /   C L O S E
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>Open or close the tray. Wired to the HUD's "Bauen" tab and the B key.</summary>
+        public void Toggle()
+        {
+            if (_isOpen) Close();
+            else Open();
+        }
+
+        /// <summary>Open the tray, rebuilding it first if discoveries changed the list.</summary>
+        public void Open()
+        {
+            if (_panelDirty || _panel == null)
+                RebuildPanel();
+
+            if (_panel == null) return;
+
+            _panel.SetActive(true);
+            _isOpen = true;
+            RefreshCards();
+        }
+
+        /// <summary>Close the tray.</summary>
+        public void Close()
+        {
+            if (_panel != null)
+                _panel.SetActive(false);
+            _isOpen = false;
+        }
+
+        private void OnResourceChanged(ResourceChangedEvent evt)
+        {
+            if (_isOpen) RefreshCards();
+        }
+
+        private void OnDiscoveryMade(DiscoveryMadeEvent evt)
+        {
+            _panelDirty = true;
+            if (!_isOpen) return;
+
+            RebuildPanel();
+            if (_panel != null) _panel.SetActive(true);
+            RefreshCards();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Rebuild the tray, filtering out buildings not yet unlocked by discoveries.
+        /// </summary>
+        private void RebuildPanel()
+        {
+            if (_panel != null)
+                Destroy(_panel);
+
+            var registry = BuildingRegistry.Instance;
+            if (registry == null || registry.Definitions == null) return;
+
+            var visibleDefs = CollectVisibleDefinitions(registry);
+            if (visibleDefs.Count == 0) return;
+
+            float trayW = 2f * TRAY_PAD + visibleDefs.Count * CARD_WIDTH
+                          + (visibleDefs.Count - 1) * CARD_GAP;
+            float trayH = 2f * TRAY_PAD + CARD_HEIGHT;
+
+            _panel = UIKit.Anchored(transform, "BuildTray", new Vector2(0.5f, 0f),
+                new Vector2(0f, TRAY_BOTTOM), new Vector2(trayW, trayH));
+            UIKit.Fill(_panel, UITheme.Leather);
+
+            _cards = new List<BuildingCard>(visibleDefs.Count);
+
+            float startX = -trayW * 0.5f + TRAY_PAD + CARD_WIDTH * 0.5f;
+            for (int i = 0; i < visibleDefs.Count; i++)
+            {
+                int index = i;
+                float x = startX + i * (CARD_WIDTH + CARD_GAP);
+                _cards.Add(BuildCard(visibleDefs[i], x, () => OnBuildingSelected(index)));
+            }
+
+            _panel.SetActive(false);
+            _panelDirty = false;
+        }
+
+        /// <summary>Always-available buildings plus the ones a discovery has unlocked.</summary>
+        private static List<BuildingDefinition> CollectVisibleDefinitions(BuildingRegistry registry)
+        {
+            var stateManager = DiscoveryStateManager.Instance;
+            var visible = new List<BuildingDefinition>();
+
+            foreach (var def in registry.Definitions)
+            {
+                if (DISCOVERY_GATED.Contains(def.Type))
+                {
+                    if (stateManager != null && stateManager.IsBuildingUnlocked(def.Type))
+                        visible.Add(def);
+                }
+                else
+                {
+                    visible.Add(def);
+                }
+            }
+            return visible;
+        }
+
+        /// <summary>One parchment card: render slot, German name, plain-text cost.</summary>
+        private BuildingCard BuildCard(BuildingDefinition def, float x,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            string germanName = UIStrings.Building(def.DisplayName);
+
+            var card = UIKit.Centered(_panel.transform, $"Card_{def.Type}",
+                new Vector2(x, 0f), new Vector2(CARD_WIDTH, CARD_HEIGHT));
+            var button = UIKit.Surface(card, UITheme.Paper, onClick);
+            var group = card.AddComponent<CanvasGroup>();
+
+            float innerW = CARD_WIDTH - 2f * CARD_PAD;
+            float top = CARD_HEIGHT * 0.5f - CARD_PAD;
+
+            UIKit.ImageSlot(card.transform, $"RENDER {germanName.ToUpper()}",
+                new Vector2(0f, top - IMAGE_HEIGHT * 0.5f), new Vector2(innerW, IMAGE_HEIGHT));
+            top -= IMAGE_HEIGHT + 12f;
+
+            UIKit.Heading(card.transform, germanName, 26, UITheme.Ink,
+                new Vector2(0f, top - 17f), new Vector2(innerW, 34f), TextAnchor.MiddleLeft);
+            top -= 34f + 8f;
+
+            var costGo = UIKit.Centered(card.transform, "Cost", new Vector2(0f, top - 14f),
+                new Vector2(innerW, 28f));
+            var costLabel = UIKit.Label(costGo, UIStrings.BuildCost(def.WoodCost, def.StoneCost),
+                UITheme.Body, 22, UITheme.InkMuted, TextAnchor.MiddleLeft);
+
+            return new BuildingCard
+            {
+                Root = card,
+                Button = button,
+                Background = button.targetGraphic as Image,
+                Group = group,
+                CostLabel = costLabel,
+                Definition = def
+            };
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  A F F O R D A B I L I T Y
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Re-style each card against the current stock: affordable cards stay on
+        /// bright parchment, the rest dim and state what is missing.
+        /// </summary>
+        private void RefreshCards()
+        {
+            if (_cards == null) return;
+
+            var rm = ResourceManager.Instance;
+            if (rm == null) return;
+
+            foreach (var card in _cards)
+            {
+                var def = card.Definition;
+                bool canAfford = rm.CanAfford(def.WoodCost, def.StoneCost);
+
+                card.Button.interactable = canAfford;
+                card.Background.color = canAfford ? UITheme.Paper : UITheme.PaperDeep;
+                card.Group.alpha = canAfford ? 1f : DIM_ALPHA;
+
+                if (canAfford)
+                {
+                    card.CostLabel.text = UIStrings.BuildCost(def.WoodCost, def.StoneCost);
+                    card.CostLabel.color = UITheme.InkMuted;
+                }
+                else
+                {
+                    card.CostLabel.text = UIStrings.MissingResources(
+                        def.WoodCost, def.StoneCost, rm.Wood, rm.Stone);
+                    card.CostLabel.color = UITheme.Danger;
+                }
+            }
+        }
+
+        private void OnBuildingSelected(int index)
+        {
+            if (_cards == null || index >= _cards.Count) return;
+
+            var def = _cards[index].Definition;
+            var rm = ResourceManager.Instance;
+            if (rm != null && !rm.CanAfford(def.WoodCost, def.StoneCost))
+                return;
+
+            var placer = FindFirstObjectByType<BuildingPlacer>();
+            if (placer != null)
+            {
+                placer.StartPlacement(def);
+                Close();
+            }
         }
     }
 }

@@ -8,85 +8,79 @@ using Terranova.Terrain;
 namespace Terranova.UI
 {
     /// <summary>
-    /// Displays info panel for selected settlers or buildings.
+    /// Screen 5 of the "Kodex" design — the info card for whatever the player tapped.
     ///
-    /// Story 6.1: Tap on settler -> name, hunger bar, current task.
-    ///            Tap on building -> type, status, assigned worker.
-    /// Story 6.2: Deselect closes panel.
-    /// Story 6.3: Long press shows extended info (all stats).
+    /// A settler shows portrait, name, current activity, trait, need bars, status
+    /// line, tool block and the "Befehl geben" action. Buildings and natural
+    /// shelters reuse the same card with the settler-only blocks hidden.
     ///
-    /// MS4 Changes:
-    ///   Feature 3.4 - Tool info when tapping settler: name, quality badge,
-    ///                 durability bar, capabilities.
-    ///   Feature 4.5 - Full needs panel: thirst, hunger, shelter, health.
+    /// The card sits bottom-left and grows to fit its content: the leather frame and
+    /// the parchment inside are both driven by layout groups, so hiding a block
+    /// shrinks the card instead of leaving a hole.
     ///
-    /// The panel is anchored bottom-left and updates every frame while visible.
+    /// v0.6.0: the old reflection-based property probing is gone — Settler exposes
+    /// ThirstPercent, CurrentShelterState, HealthStatus and the tool fields directly.
     /// </summary>
     public class InfoPanel : MonoBehaviour
     {
-        // ─── Settings ──────────────────────────────────────────
-        private const float PANEL_WIDTH = 300f;
-        private const float PANEL_PADDING = 12f;
-        private const int FONT_SIZE = 18;
-        private const int FONT_SIZE_SMALL = 15;
-        private const int FONT_SIZE_TITLE = 22;
-        private const int FONT_SIZE_TINY = 12;
+        // ─── Layout ────────────────────────────────────────────
+        private const float PANEL_WIDTH = 620f;
+        private const float MARGIN = 32f;
+        private const float PAD_X = 30f;
+        private const float PAD_Y = 26f;
+        private const float BLOCK_GAP = 20f;
+        private const float PORTRAIT = 112f;
+        private const float NEED_ROW_H = 30f;
+        private const float NEED_LABEL_W = 120f;
+        private const float NEED_VALUE_W = 90f;
+        private const float BAR_H = 22f;
 
         // ─── State ─────────────────────────────────────────────
         private GameObject _selectedObject;
         private bool _isDetailView;
         private bool _isVisible;
-
-        // ─── UI References ─────────────────────────────────────
-        private static readonly Color PANEL_COLOR_BASIC = new Color(0.1f, 0.1f, 0.1f, 0.85f);
-        private static readonly Color PANEL_COLOR_DETAIL = new Color(0.08f, 0.12f, 0.2f, 0.92f);
-
-        // Bar colors
-        private static readonly Color THIRST_COLOR = new Color(0.3f, 0.6f, 1f);         // Blue
-        private static readonly Color HUNGER_COLOR = new Color(1f, 0.6f, 0.2f);          // Orange
-        private static readonly Color DURABILITY_GREEN = new Color(0.3f, 0.8f, 0.3f);
-        private static readonly Color DURABILITY_YELLOW = new Color(0.9f, 0.8f, 0.2f);
-        private static readonly Color DURABILITY_RED = new Color(0.9f, 0.2f, 0.2f);
-
-        private GameObject _panelRoot;
-        private Image _panelImage;
-        private Text _titleText;
-        private Text _infoText;
-
-        // Hunger bar (legacy, kept for building worker display)
-        private RectTransform _hungerBarFill;
-        private Image _hungerBarFillImage;
-        private GameObject _hungerBarRoot;
-
-        // Needs panel (Feature 4.5)
-        private GameObject _needsRoot;
-        private RectTransform _thirstBarFill;
-        private Image _thirstBarFillImage;
-        private Text _thirstLabel;
-        private RectTransform _hungerNeedsBarFill;
-        private Image _hungerNeedsBarFillImage;
-        private Text _hungerNeedsLabel;
-        private Text _shelterStatusText;
-        private Text _healthStatusText;
-
-        // Trait display (v0.4.0 bugfix)
-        private Text _traitText;
-        private static readonly Color TRAIT_GOLD = new Color(1f, 0.84f, 0f);
-
-        // Tool info panel (Feature 3.4)
-        private GameObject _toolRoot;
-        private Text _toolNameText;
-        private Text _toolQualityText;
-        private RectTransform _durabilityBarFill;
-        private Image _durabilityBarFillImage;
-        private Text _durabilityLabel;
-        private Text _toolCapabilitiesText;
-
-        // Give Order button (v0.4.12)
-        private GameObject _giveOrderBtnRoot;
         private string _currentSettlerName;
 
-        // ─── Lifecycle ─────────────────────────────────────────
+        // ─── Card ──────────────────────────────────────────────
+        private GameObject _panelRoot;
+
+        // Header
+        private Text _nameText;
+        private Text _activityText;
+        private GameObject _traitChip;
+        private Text _traitText;
+
+        // Needs
+        private GameObject _needsBlock;
+        private Image _thirstFill;
+        private Text _thirstValue;
+        private Image _hungerFill;
+        private Text _hungerValue;
+
+        // Status
+        private GameObject _statusBlock;
+        private Text _shelterText;
+        private Text _healthText;
+
+        // Tool
+        private GameObject _toolBlock;
+        private Text _toolName;
+        private Text _toolQuality;
+        private Text _toolSpeed;
+        private Image _toolConditionFill;
+        private Text _toolConditionValue;
+
+        // Free-form info (buildings, shelters, detail view)
+        private GameObject _infoBlock;
+        private Text _infoText;
+        private LayoutElement _infoLayout;
+
+        // Action
+        private GameObject _orderButton;
+
+        // ═══════════════════════════════════════════════════════════
+        //  L I F E C Y C L E
+        // ═══════════════════════════════════════════════════════════
 
         private void Start()
         {
@@ -107,8 +101,6 @@ namespace Terranova.UI
             EventBus.Unsubscribe<SelectionChangedEvent>(OnSelectionChanged);
         }
 
-        // ─── Event Handler ─────────────────────────────────────
-
         private void OnSelectionChanged(SelectionChangedEvent evt)
         {
             _selectedObject = evt.SelectedObject;
@@ -117,16 +109,29 @@ namespace Terranova.UI
             if (_selectedObject == null)
             {
                 HidePanel();
+                return;
             }
-            else
-            {
-                _panelImage.color = _isDetailView ? PANEL_COLOR_DETAIL : PANEL_COLOR_BASIC;
-                ShowPanel();
-                RefreshContent();
-            }
+
+            ShowPanel();
+            RefreshContent();
         }
 
-        // ─── Content Rendering ──────────────────────────────────
+        private void ShowPanel()
+        {
+            _isVisible = true;
+            if (_panelRoot != null) _panelRoot.SetActive(true);
+        }
+
+        private void HidePanel()
+        {
+            _isVisible = false;
+            _selectedObject = null;
+            if (_panelRoot != null) _panelRoot.SetActive(false);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  C O N T E N T
+        // ═══════════════════════════════════════════════════════════
 
         private void RefreshContent()
         {
@@ -152,873 +157,445 @@ namespace Terranova.UI
 
             var shelter = _selectedObject.GetComponent<NaturalShelter>();
             if (shelter != null)
-            {
                 RefreshShelterInfo(shelter);
-                return;
-            }
         }
 
-        /// <summary>
-        /// Show settler info with MS4 features:
-        ///   - Feature 3.4: Tool info (name, quality badge, durability bar, capabilities)
-        ///   - Feature 4.5: Full needs panel (thirst, hunger, shelter, health)
-        /// Basic view: quick overview. Detail view (long press): comprehensive stats.
-        /// </summary>
+        /// <summary>The full settler card: needs, status, tool and the order action.</summary>
         private void RefreshSettlerInfo(Settler settler)
         {
-            // Show needs panel, hide legacy hunger bar for settlers
-            _hungerBarRoot.SetActive(false);
-            _needsRoot.SetActive(true);
-
-            // Show Give Order button and track settler name (v0.4.12)
             _currentSettlerName = settler.name;
-            if (_giveOrderBtnRoot != null) _giveOrderBtnRoot.SetActive(true);
 
-            // ─── Needs: Thirst bar (blue) ──────────────────────
-            // ThirstPercent: 1.0 = hydrated (full bar), 0.0 = dying (empty bar)
-            float thirstPct = GetSettlerThirstPercent(settler);
-            _thirstBarFill.anchorMax = new Vector2(Mathf.Clamp01(thirstPct), 1f);
-            _thirstBarFillImage.color = THIRST_COLOR;
-            string thirstState = GetSettlerThirstState(settler);
-            _thirstLabel.text = $"Thirst: {thirstState}";
+            SetBlocks(needs: true, status: true, tool: true, order: true);
 
-            // ─── Needs: Hunger bar (orange) ────────────────────
-            // HungerPercent: 1.0 = sated (full bar), 0.0 = starving (empty bar)
-            float hungerPct = settler.HungerPercent;
-            _hungerNeedsBarFill.anchorMax = new Vector2(Mathf.Clamp01(hungerPct), 1f);
+            // ── Header ──
+            _nameText.text = settler.name;
+            _activityText.text = DescribeActivity(settler);
+            _traitChip.SetActive(true);
+            SetTraitChip(UIStrings.Trait(settler.Trait));
 
-            // Color intensity based on hunger severity (low = red, high = green)
-            if (hungerPct < 0.25f)
-                _hungerNeedsBarFillImage.color = DURABILITY_RED;
-            else if (hungerPct < 0.5f)
-                _hungerNeedsBarFillImage.color = HUNGER_COLOR;
-            else
-                _hungerNeedsBarFillImage.color = HUNGER_COLOR;
-            _hungerNeedsLabel.text = $"Hunger: {settler.Hunger:F0}/100";
+            // ── Needs ──
+            // Both percentages read "how full", so a short bar means trouble.
+            float thirst = Mathf.Clamp01(settler.ThirstPercent);
+            UIKit.SetBar(_thirstFill, thirst);
+            _thirstValue.text = Mathf.RoundToInt(thirst * 100f).ToString();
+            _thirstValue.color = thirst < 0.3f ? UITheme.Danger : UITheme.Ink;
 
-            // ─── Needs: Shelter status ─────────────────────────
-            string shelterStatus = GetSettlerShelterStatus(settler);
-            _shelterStatusText.text = $"Shelter: {shelterStatus}";
+            float hunger = Mathf.Clamp01(settler.HungerPercent);
+            UIKit.SetBar(_hungerFill, hunger);
+            _hungerValue.text = Mathf.RoundToInt(hunger * 100f).ToString();
+            _hungerValue.color = hunger < 0.3f ? UITheme.Danger : UITheme.Ink;
 
-            // ─── Needs: Health status ──────────────────────────
-            string healthStatus = GetSettlerHealthStatus(settler);
-            _healthStatusText.text = $"Health: {healthStatus}";
+            // ── Status ──
+            _shelterText.text = $"Unterstand: {DescribeShelter(settler)}";
+            _healthText.text = $"Gesundheit: {UIStrings.Health(settler.HealthStatus)}";
 
-            // ─── Tool Info (Feature 3.4) ───────────────────────
-            RefreshToolInfo(settler);
+            // ── Tool ──
+            RefreshToolBlock(settler);
 
-            // ─── Trait display (gold label) ─────────────────────
-            RefreshTraitInfo(settler);
-
-            // ─── Task & State Info ─────────────────────────────
-            // v0.4.16: Show order sentence if settler has an active order
-            string orderSentence = null;
-            if (OrderQueryBridge.GetActiveOrderSentence != null)
-                orderSentence = OrderQueryBridge.GetActiveOrderSentence(settler.name);
-
-            // v0.5.9 P4: Show player-facing order text, not internal state names
-            string task;
-            if (!string.IsNullOrEmpty(orderSentence))
-                task = orderSentence;
-            else if (settler.HasTask)
-            {
-                var ct = settler.CurrentTask;
-                task = ct != null ? GetFriendlyTaskName(ct.TaskType) : "Eating";
-            }
-            else
-                task = "Free";
-            string state = settler.StateName;
-
+            // ── Detail view adds the raw numbers underneath ──
             if (_isDetailView)
             {
-                _titleText.text = $"-- {settler.name} --";
-
-                string info = $"State: {state}";
-                info += $"\nTask: {task}";
-
-                if (settler.IsStarving)
-                    info += "\nSTARVING!";
-
-                if (settler.CurrentTask != null)
-                {
-                    var taskObj = settler.CurrentTask;
-                    info += $"\n\nTask Details:";
-                    info += $"\n  Type: {taskObj.TaskType}";
-                    info += $"\n  Work Time: {taskObj.WorkDuration:F1}s";
-                    if (taskObj.IsSpecialized)
-                        info += "\n  Specialized: Yes";
-                    info += $"\n  Speed: {taskObj.SpeedMultiplier:F1}x";
-                }
-
-                // Capabilities based on tool
-                info += GetToolCapabilitiesDetail(settler);
-
-                var pos = settler.transform.position;
-                info += $"\n\nPosition: ({pos.x:F0}, {pos.z:F0})";
-
-                _infoText.text = info;
+                ShowInfoText(BuildSettlerDetail(settler));
             }
             else
             {
-                _titleText.text = settler.name;
-                _infoText.text = $"Task: {task}";
+                _infoBlock.SetActive(false);
             }
         }
 
         /// <summary>
-        /// Display the settler's trait with a gold label.
-        /// v0.4.0 bugfix: 5 traits visible in info panel.
+        /// Write the trait chip and shrink it to fit its label — a full-width gold
+        /// bar would read as a banner rather than a chip.
         /// </summary>
-        private void RefreshTraitInfo(Settler settler)
+        private void SetTraitChip(string label)
         {
-            if (_traitText == null) return;
+            _traitText.text = label;
 
-            var traitProp = settler.GetType().GetProperty("Trait");
-            if (traitProp != null)
-            {
-                object val = traitProp.GetValue(settler);
-                if (val != null)
-                {
-                    string traitName = val.ToString();
-                    string traitDesc = traitName switch
-                    {
-                        "Curious" => "+20% XP",
-                        "Cautious" => "Poison resist",
-                        "Skilled" => "+15% work speed",
-                        "Robust" => "Slower decay",
-                        "Enduring" => "Longer grace",
-                        _ => ""
-                    };
-                    _traitText.text = $"\u2605 {traitName} ({traitDesc})";
-                    _traitText.color = TRAIT_GOLD;
-                }
-            }
-            else
-            {
-                _traitText.text = "";
-            }
-
-            // Show XP if available
-            var xpProp = settler.GetType().GetProperty("Experience");
-            if (xpProp != null)
-            {
-                object xpVal = xpProp.GetValue(settler);
-                if (xpVal is float xp && xp > 0f)
-                {
-                    _traitText.text += $"  XP: {xp:F0}";
-                }
-            }
+            var rect = (RectTransform)_traitChip.transform;
+            float width = UIKit.EstimateTextWidth(label, 21) + 28f;
+            rect.sizeDelta = new Vector2(width, rect.sizeDelta.y);
         }
 
-        /// <summary>
-        /// Feature 3.4: Refresh the tool info section for a settler.
-        /// Shows current tool name, quality badge (Q1-Q5 with color),
-        /// durability bar (green -> yellow -> red), and "No tool" state.
-        /// </summary>
-        private void RefreshToolInfo(Settler settler)
+        /// <summary>Order sentence if the settler has one, otherwise the current task.</summary>
+        private static string DescribeActivity(Settler settler)
         {
-            // Try to get tool data from settler via reflection-safe property access.
-            // The EquippedTool property will be added to Settler in the tool system implementation.
-            // For now, use a duck-typing approach: check if the settler has tool fields.
-            ToolDefinition toolDef = null;
-            int durability = 0;
-            int maxDurability = 1;
-
-            // Access tool data if the settler exposes it
-            var settlerType = settler.GetType();
-
-            // Try to read EquippedToolId property
-            var toolIdProp = settlerType.GetProperty("EquippedToolId");
-            if (toolIdProp != null)
+            if (OrderQueryBridge.GetActiveOrderSentence != null)
             {
-                string toolId = toolIdProp.GetValue(settler) as string;
-                if (!string.IsNullOrEmpty(toolId))
-                    toolDef = ToolDatabase.Get(toolId);
+                string sentence = OrderQueryBridge.GetActiveOrderSentence(settler.name);
+                if (!string.IsNullOrEmpty(sentence)) return sentence;
             }
 
-            // Try to read ToolDurability property
-            var durProp = settlerType.GetProperty("ToolDurability");
-            if (durProp != null)
-            {
-                object durVal = durProp.GetValue(settler);
-                if (durVal is int d) durability = d;
-                else if (durVal is float f) durability = (int)f;
-            }
+            if (settler.HasTask && settler.CurrentTask != null)
+                return UIStrings.Activity(settler.CurrentTask.TaskType);
 
-            // Try to read ToolMaxDurability property
-            var maxDurProp = settlerType.GetProperty("ToolMaxDurability");
-            if (maxDurProp != null)
-            {
-                object maxVal = maxDurProp.GetValue(settler);
-                if (maxVal is int m) maxDurability = m;
-                else if (maxVal is float f) maxDurability = (int)f;
-            }
-
-            if (toolDef != null && maxDurability > 0)
-            {
-                _toolRoot.SetActive(true);
-
-                // Tool name
-                _toolNameText.text = toolDef.DisplayName;
-
-                // Quality badge with color
-                _toolQualityText.text = $"Q{toolDef.Quality}";
-                _toolQualityText.color = toolDef.QualityColor;
-
-                // Durability bar
-                float durPct = (float)durability / maxDurability;
-                _durabilityBarFill.anchorMax = new Vector2(Mathf.Clamp01(durPct), 1f);
-
-                // Green -> Yellow -> Red based on remaining durability
-                if (durPct > 0.5f)
-                    _durabilityBarFillImage.color = DURABILITY_GREEN;
-                else if (durPct > 0.2f)
-                    _durabilityBarFillImage.color = DURABILITY_YELLOW;
-                else
-                    _durabilityBarFillImage.color = DURABILITY_RED;
-
-                _durabilityLabel.text = $"{durability}/{maxDurability}";
-
-                // Capabilities text
-                _toolCapabilitiesText.text = $"Speed: x{toolDef.GatherSpeedMultiplier:F1}";
-            }
-            else
-            {
-                // No tool equipped
-                _toolRoot.SetActive(true);
-                _toolNameText.text = "No tool";
-                _toolNameText.color = new Color(0.6f, 0.6f, 0.6f);
-                _toolQualityText.text = "";
-                _durabilityBarFill.anchorMax = new Vector2(0f, 1f);
-                _durabilityBarFillImage.color = DURABILITY_RED;
-                _durabilityLabel.text = "--";
-                _toolCapabilitiesText.text = "Bare hands only";
-            }
+            return UIStrings.StateActivity(settler.StateName);
         }
 
         /// <summary>
-        /// Feature 3.4: Get detailed tool capabilities for detail view.
-        /// Shows what settler CAN do vs CANNOT do with current tool.
+        /// v0.5.9: shelter state only means something at night. During the day the
+        /// line reports what the settler is up to instead.
         /// </summary>
-        private string GetToolCapabilitiesDetail(Settler settler)
-        {
-            var settlerType = settler.GetType();
-            var toolIdProp = settlerType.GetProperty("EquippedToolId");
-            string toolId = toolIdProp?.GetValue(settler) as string;
-            ToolDefinition toolDef = !string.IsNullOrEmpty(toolId) ? ToolDatabase.Get(toolId) : null;
-
-            int toolQuality = toolDef?.Quality ?? 0;
-
-            string capabilities = "\n\nCapabilities:";
-
-            // Check all material types and report which can/cannot be gathered
-            var allMaterials = MaterialDatabase.All;
-            bool canGatherHardwood = false;
-            bool canGatherGranite = false;
-            bool canHunt = false;
-
-            foreach (var kvp in allMaterials)
-            {
-                var mat = kvp.Value;
-                bool canGather = !mat.RequiresTool || toolQuality >= mat.MinToolQuality;
-
-                if (mat.Category == MaterialCategory.Wood && mat.Id == "hardwood")
-                {
-                    canGatherHardwood = canGather;
-                }
-                else if (mat.Category == MaterialCategory.Stone && mat.Id == "granite")
-                {
-                    canGatherGranite = canGather;
-                }
-                else if (mat.Category == MaterialCategory.Animal && mat.Id == "large_meat")
-                {
-                    canHunt = canGather;
-                }
-            }
-
-            capabilities += $"\n  Gather wood: Yes";
-            capabilities += $"\n  Hardwood: {(canGatherHardwood ? "Yes" : "No (Q4+ required)")}";
-            capabilities += $"\n  Gather stone: Yes";
-            capabilities += $"\n  Granite: {(canGatherGranite ? "Yes" : "No (Q3+ required)")}";
-            capabilities += $"\n  Large game: {(canHunt ? "Yes" : "No (Q3+ required)")}";
-
-            return capabilities;
-        }
-
-        // ─── Settler Needs Helpers ──────────────────────────────
-
-        /// <summary>
-        /// Get thirst as a percent (0.0 = hydrated, 1.0 = dying).
-        /// Uses reflection to read ThirstPercent if available, falls back to 0.
-        /// </summary>
-        private float GetSettlerThirstPercent(Settler settler)
-        {
-            var prop = settler.GetType().GetProperty("ThirstPercent");
-            if (prop != null)
-            {
-                object val = prop.GetValue(settler);
-                if (val is float f) return f;
-            }
-            return 0f;
-        }
-
-        /// <summary>
-        /// Get the thirst state label. Uses reflection for ThirstState enum if present.
-        /// </summary>
-        private string GetSettlerThirstState(Settler settler)
-        {
-            var prop = settler.GetType().GetProperty("CurrentThirstState");
-            if (prop != null)
-            {
-                object val = prop.GetValue(settler);
-                if (val != null) return val.ToString();
-            }
-
-            // Fallback: derive from percent
-            float pct = GetSettlerThirstPercent(settler);
-            if (pct > 0.9f) return "Dying";
-            if (pct > 0.6f) return "Dehydrated";
-            if (pct > 0.3f) return "Thirsty";
-            return "Hydrated";
-        }
-
-        /// <summary>
-        /// Get shelter status text. v0.5.9: Only show shelter state at night
-        /// when near campfire or inside shelter. During daytime, show activity.
-        /// </summary>
-        private string GetSettlerShelterStatus(Settler settler)
+        private static string DescribeShelter(Settler settler)
         {
             var cycle = DayNightCycle.Instance;
             bool isNight = cycle != null && cycle.IsNight;
 
-            if (!isNight)
-            {
-                // Daytime: show current activity instead of shelter state
-                string activity = settler.StateName;
-                return activity switch
-                {
-                    "IdlePausing" => "Resting",
-                    "IdleWalking" => "Wandering",
-                    "WalkingToTarget" => "Traveling",
-                    "Working" => "Working",
-                    "ReturningToBase" => "Returning",
-                    "Delivering" => "Delivering",
-                    "WalkingToEat" => "Seeking food",
-                    "Eating" => "Eating",
-                    "WalkingToDrink" => "Seeking water",
-                    "Drinking" => "Drinking",
-                    "SeekingFood" => "Foraging",
-                    "GatheringFood" => "Gathering food",
-                    _ => "Active"
-                };
-            }
-
-            // Nighttime: show actual shelter state
-            var prop = settler.GetType().GetProperty("CurrentShelterState");
-            if (prop != null)
-            {
-                object val = prop.GetValue(settler);
-                if (val != null) return val.ToString();
-            }
-            return "Unknown";
+            return isNight
+                ? UIStrings.Shelter(settler.CurrentShelterState)
+                : "keiner (Tag)";
         }
 
-        /// <summary>
-        /// Get health status text. Uses reflection for HealthStatus if available.
-        /// </summary>
-        private string GetSettlerHealthStatus(Settler settler)
+        /// <summary>Tool name, quality chip, speed and the condition bar.</summary>
+        private void RefreshToolBlock(Settler settler)
         {
-            var prop = settler.GetType().GetProperty("HealthStatus");
-            if (prop != null)
+            var tool = !string.IsNullOrEmpty(settler.EquippedToolId)
+                ? ToolDatabase.Get(settler.EquippedToolId)
+                : null;
+
+            if (tool == null || settler.ToolMaxDurability <= 0)
             {
-                object val = prop.GetValue(settler);
-                if (val != null) return val.ToString();
+                _toolName.text = "bloße Hände";
+                _toolName.color = UITheme.InkMuted;
+                _toolQuality.text = "";
+                _toolSpeed.text = "";
+                UIKit.SetBar(_toolConditionFill, 0f);
+                _toolConditionValue.text = "—";
+                return;
             }
 
-            // Fallback: derive from hunger
-            if (settler.IsStarving) return "Critical";
-            if (settler.HungerPercent > 0.7f) return "Weakened";
-            return "Healthy";
+            _toolName.text = UIStrings.Tool(tool.Id, tool.DisplayName);
+            _toolName.color = UITheme.Ink;
+            _toolQuality.text = $"Güte {tool.Quality}";
+            _toolSpeed.text = $"Tempo ×{tool.GatherSpeedMultiplier:0.0}";
+
+            float condition = (float)settler.ToolDurability / settler.ToolMaxDurability;
+            UIKit.SetBar(_toolConditionFill, condition);
+            _toolConditionValue.text = $"{settler.ToolDurability}/{settler.ToolMaxDurability}";
+            _toolConditionValue.color = condition < 0.2f ? UITheme.Danger : UITheme.Ink;
         }
 
-        /// <summary>
-        /// v0.5.9 P4: Convert internal task type to player-facing text.
-        /// </summary>
-        private static string GetFriendlyTaskName(SettlerTaskType taskType)
+        /// <summary>Long press: the raw numbers behind the card.</summary>
+        private static string BuildSettlerDetail(Settler settler)
         {
-            return taskType switch
-            {
-                SettlerTaskType.GatherWood => "Gathering wood",
-                SettlerTaskType.GatherStone => "Gathering stone",
-                SettlerTaskType.Hunt => "Gathering food",
-                SettlerTaskType.Build => "Building",
-                SettlerTaskType.GatherMaterial => "Gathering",
-                SettlerTaskType.CraftTool => "Crafting",
-                SettlerTaskType.DrinkWater => "Drinking",
-                SettlerTaskType.SeekFood => "Seeking food",
-                SettlerTaskType.SeekShelter => "Seeking shelter",
-                _ => "Working"
-            };
+            var pos = settler.transform.position;
+            string detail = $"Zustand: {settler.StateName}";
+            detail += $"\nDurst: {UIStrings.Thirst(settler.CurrentThirstState)}";
+            detail += $"\nHunger: {settler.Hunger:F0}/100";
+            if (settler.Experience > 0f)
+                detail += $"\nErfahrung: {settler.Experience:F0}";
+            if (settler.IsStarving)
+                detail += "\nverhungert bald";
+            detail += $"\nOrt: ({pos.x:F0}, {pos.z:F0})";
+            return detail;
         }
 
-        // ─── Building Info ──────────────────────────────────────
+        // ─── Buildings ─────────────────────────────────────────
 
-        /// <summary>
-        /// Show building info: type, construction status, worker.
-        /// Story 6.1: Basic info on tap. Story 6.3: Extended info on long press.
-        /// </summary>
         private void RefreshBuildingInfo(Building building)
         {
+            SetBlocks(needs: false, status: false, tool: false, order: false);
+
             string displayName = building.Definition != null
-                ? building.Definition.DisplayName : building.name;
+                ? UIStrings.Building(building.Definition.DisplayName)
+                : building.name;
 
-            // Hide needs, tool, trait, and order button for buildings
-            _hungerBarRoot.SetActive(false);
-            _needsRoot.SetActive(false);
-            _toolRoot.SetActive(false);
-            if (_traitText != null) _traitText.text = "";
-            if (_giveOrderBtnRoot != null) _giveOrderBtnRoot.SetActive(false);
+            _nameText.text = displayName;
+            _traitChip.SetActive(false);
 
-            // Basic status
-            string statusLine;
             if (!building.IsConstructed)
             {
-                float progress = building.ConstructionProgress * 100f;
-                statusLine = $"Under construction: {progress:F0}%";
-                statusLine += building.IsBeingBuilt ? "\nBuilder assigned" : "\nWaiting for builder";
+                _activityText.text = $"im Bau · {building.ConstructionProgress * 100f:F0} %";
             }
             else
             {
-                statusLine = "Operational";
-
-                if (building.HasWorker && building.AssignedWorker != null)
-                {
-                    var worker = building.AssignedWorker.GetComponent<Settler>();
-                    string workerName = worker != null ? worker.name : building.AssignedWorker.name;
-                    statusLine += $"\nWorker: {workerName}";
-                }
-                else if (building.Definition != null
-                         && building.Definition.Type != BuildingType.Campfire
-                         && building.Definition.Type != BuildingType.SimpleHut)
-                {
-                    statusLine += "\nNo worker assigned";
-                }
+                _activityText.text = "fertig";
             }
 
-            if (_isDetailView)
+            string info = building.IsConstructed
+                ? DescribeWorker(building)
+                : (building.IsBeingBuilt ? "Ein Baumeister ist zugeteilt." : "Wartet auf einen Baumeister.");
+
+            if (_isDetailView && building.Definition != null)
             {
-                _titleText.text = $"-- {displayName} --";
-
-                string info = statusLine;
-
-                if (building.Definition != null)
-                {
-                    var def = building.Definition;
-                    info += $"\n\nBuilding Type: {def.Type}";
-                    info += $"\nBuild Cost: {def.WoodCost} Wood, {def.StoneCost} Stone";
-                    info += $"\nFootprint: {def.FootprintSize.x}x{def.FootprintSize.y}";
-                    info += $"\nHeight: {def.VisualHeight:F1}m";
-
-                    if (!building.IsConstructed)
-                    {
-                        float buildTime = building.GetBuildStepDuration();
-                        info += $"\n\nBuild Time: {buildTime:F0}s";
-                        info += $"\nProgress: {building.ConstructionProgress * 100f:F1}%";
-                    }
-                }
-
-                // Worker details
-                if (building.HasWorker && building.AssignedWorker != null)
-                {
-                    var worker = building.AssignedWorker.GetComponent<Settler>();
-                    if (worker != null)
-                    {
-                        info += $"\n\nWorker Details:";
-                        info += $"\n  {worker.name}";
-                        info += $"\n  Hunger: {worker.Hunger:F0}/100";
-                        info += $"\n  State: {worker.StateName}";
-                    }
-                }
-
+                var def = building.Definition;
+                info += $"\nKosten: {UIStrings.BuildCost(def.WoodCost, def.StoneCost)}";
+                info += $"\nGrundfläche: {def.FootprintSize.x} × {def.FootprintSize.y}";
                 var pos = building.transform.position;
-                info += $"\n\nPosition: ({pos.x:F0}, {pos.z:F0})";
+                info += $"\nOrt: ({pos.x:F0}, {pos.z:F0})";
+            }
 
-                _infoText.text = info;
-            }
-            else
-            {
-                _titleText.text = displayName;
-                _infoText.text = statusLine;
-            }
+            ShowInfoText(info);
         }
 
-        // ─── Shelter Info ─────────────────────────────────────────
+        private static string DescribeWorker(Building building)
+        {
+            if (building.HasWorker && building.AssignedWorker != null)
+            {
+                var worker = building.AssignedWorker.GetComponent<Settler>();
+                string workerName = worker != null ? worker.name : building.AssignedWorker.name;
+                return $"Arbeiter: {workerName}";
+            }
 
-        /// <summary>
-        /// v0.5.0: Show natural shelter info when tapped.
-        /// Displays name, type, capacity (occupants/max), and protection value.
-        /// </summary>
+            if (building.Definition != null
+                && building.Definition.Type != BuildingType.Campfire
+                && building.Definition.Type != BuildingType.SimpleHut)
+            {
+                return "Kein Arbeiter zugeteilt.";
+            }
+
+            return "In Betrieb.";
+        }
+
+        // ─── Natural shelters ──────────────────────────────────
+
         private void RefreshShelterInfo(NaturalShelter shelter)
         {
-            // Hide settler-specific panels
-            _hungerBarRoot.SetActive(false);
-            _needsRoot.SetActive(false);
-            _toolRoot.SetActive(false);
-            if (_traitText != null) _traitText.text = "";
-            if (_giveOrderBtnRoot != null) _giveOrderBtnRoot.SetActive(false);
+            SetBlocks(needs: false, status: false, tool: false, order: false);
 
-            _titleText.text = shelter.ShelterName;
+            _nameText.text = shelter.ShelterName;
+            _activityText.text = shelter.HasSpace ? "bietet Platz" : "belegt";
+            _traitChip.SetActive(false);
 
-            string info = $"Type: {shelter.ShelterType}";
-            info += $"\nCapacity: {shelter.Occupants}/{shelter.Capacity}";
-            info += $"\nProtection: {shelter.ProtectionValue * 100f:F0}%";
-
-            if (shelter.HasSpace)
-                info += "\nStatus: Available";
-            else
-                info += "\nStatus: Full";
+            string info = $"Plätze: {shelter.Occupants}/{shelter.Capacity}";
+            info += $"\nSchutz: {shelter.ProtectionValue * 100f:F0} %";
 
             if (_isDetailView)
             {
-                _titleText.text = $"-- {shelter.ShelterName} --";
                 var pos = shelter.transform.position;
-                info += $"\n\nPosition: ({pos.x:F0}, {pos.z:F0})";
+                info += $"\nOrt: ({pos.x:F0}, {pos.z:F0})";
             }
 
-            _infoText.text = info;
+            ShowInfoText(info);
         }
 
-        // ─── Panel Visibility ───────────────────────────────────
+        // ─── Block visibility ──────────────────────────────────
 
-        private void ShowPanel()
+        private void SetBlocks(bool needs, bool status, bool tool, bool order)
         {
-            _isVisible = true;
-            if (_panelRoot != null)
-                _panelRoot.SetActive(true);
+            _needsBlock.SetActive(needs);
+            _statusBlock.SetActive(status);
+            _toolBlock.SetActive(tool);
+            _orderButton.SetActive(order);
         }
-
-        private void HidePanel()
-        {
-            _isVisible = false;
-            _selectedObject = null;
-            if (_panelRoot != null)
-                _panelRoot.SetActive(false);
-        }
-
-        // ─── UI Construction ────────────────────────────────────
 
         /// <summary>
-        /// Build the info panel UI. Anchored to bottom-left of screen.
+        /// Show the free-form info block, sizing it to the text so the card grows
+        /// by exactly the number of lines used.
+        /// </summary>
+        private void ShowInfoText(string text)
+        {
+            _infoBlock.SetActive(true);
+            _infoText.text = text;
+
+            int lines = 1;
+            foreach (char c in text) if (c == '\n') lines++;
+            _infoLayout.preferredHeight = lines * 30f;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        //  C O N S T R U C T I O N
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Build the card once. Blocks are shown or hidden per selection; the two
+        /// nested layout groups keep the leather frame wrapped tightly around
+        /// whatever is visible.
         /// </summary>
         private void CreatePanel()
         {
-            // Panel background
-            _panelRoot = new GameObject("InfoPanel");
-            _panelRoot.transform.SetParent(transform, false);
+            _panelRoot = UIKit.Anchored(transform, "InfoPanel", new Vector2(0f, 0f),
+                new Vector2(MARGIN, MARGIN), new Vector2(PANEL_WIDTH, 0f));
+            UIKit.Fill(_panelRoot, UITheme.Leather);
 
-            var panelRect = _panelRoot.AddComponent<RectTransform>();
-            panelRect.anchorMin = new Vector2(0, 0);
-            panelRect.anchorMax = new Vector2(0, 0);
-            panelRect.pivot = new Vector2(0, 0);
-            panelRect.anchoredPosition = new Vector2(16, 16);
-            panelRect.sizeDelta = new Vector2(PANEL_WIDTH, 160);
+            var frame = _panelRoot.AddComponent<VerticalLayoutGroup>();
+            frame.padding = new RectOffset(
+                (int)UITheme.FrameNarrow, (int)UITheme.FrameNarrow,
+                (int)UITheme.FrameNarrow, (int)UITheme.FrameNarrow);
+            frame.childControlWidth = true;
+            frame.childControlHeight = true;
+            frame.childForceExpandWidth = true;
+            frame.childForceExpandHeight = false;
+            _panelRoot.AddComponent<ContentSizeFitter>().verticalFit =
+                ContentSizeFitter.FitMode.PreferredSize;
 
-            _panelImage = _panelRoot.AddComponent<Image>();
-            _panelImage.color = PANEL_COLOR_BASIC;
+            var paper = UIKit.New(_panelRoot.transform, "Paper");
+            UIKit.Fill(paper, UITheme.Paper);
+            var stack = paper.AddComponent<VerticalLayoutGroup>();
+            stack.padding = new RectOffset((int)PAD_X, (int)PAD_X, (int)PAD_Y, (int)PAD_Y);
+            stack.spacing = BLOCK_GAP;
+            stack.childControlWidth = true;
+            stack.childControlHeight = true;
+            stack.childForceExpandWidth = true;
+            stack.childForceExpandHeight = false;
+            paper.AddComponent<ContentSizeFitter>().verticalFit =
+                ContentSizeFitter.FitMode.PreferredSize;
 
-            // Vertical layout
-            var layout = _panelRoot.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(
-                (int)PANEL_PADDING, (int)PANEL_PADDING,
-                (int)PANEL_PADDING, (int)PANEL_PADDING);
-            layout.spacing = 6f;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
+            float contentW = PANEL_WIDTH - 2f * UITheme.FrameNarrow - 2f * PAD_X;
 
-            var fitter = _panelRoot.AddComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            // Title
-            _titleText = CreateLabel("Title", FONT_SIZE_TITLE, Color.white);
-
-            // Trait label (gold)
-            _traitText = CreateLabel("Trait", FONT_SIZE_SMALL, TRAIT_GOLD);
-            _traitText.fontStyle = FontStyle.Bold;
-            _traitText.text = "";
-
-            // Legacy hunger bar (kept for backward compatibility, used in building worker info)
-            CreateHungerBar();
-
-            // Needs panel (Feature 4.5)
-            CreateNeedsPanel();
-
-            // Tool info panel (Feature 3.4)
-            CreateToolPanel();
-
-            // Info text
-            _infoText = CreateLabel("Info", FONT_SIZE_SMALL, new Color(0.85f, 0.85f, 0.85f));
-
-            // Give Order button (v0.4.12)
-            CreateGiveOrderButton();
+            BuildHeaderBlock(paper.transform, contentW);
+            BuildNeedsBlock(paper.transform, contentW);
+            BuildStatusBlock(paper.transform, contentW);
+            BuildToolBlock(paper.transform, contentW);
+            BuildInfoBlock(paper.transform);
+            BuildOrderButton(paper.transform);
         }
 
-        /// <summary>
-        /// Create the legacy hunger bar (hidden for settlers, used by building worker display).
-        /// </summary>
-        private void CreateHungerBar()
+        /// <summary>Portrait, name, activity and the trait chip.</summary>
+        private void BuildHeaderBlock(Transform parent, float contentW)
         {
-            _hungerBarRoot = new GameObject("HungerBar");
-            _hungerBarRoot.transform.SetParent(_panelRoot.transform, false);
+            var block = UIKit.New(parent, "Header");
+            UIKit.Size(block, 0f, PORTRAIT);
 
-            var barLayout = _hungerBarRoot.AddComponent<LayoutElement>();
-            barLayout.preferredHeight = 14f;
+            UIKit.ImageSlot(block.transform, "PORTRÄT",
+                new Vector2(-contentW * 0.5f + PORTRAIT * 0.5f, 0f),
+                new Vector2(PORTRAIT, PORTRAIT));
 
-            _hungerBarRoot.AddComponent<RectTransform>();
+            float textLeft = PORTRAIT + 20f;
+            float textW = contentW - textLeft;
 
-            var bgImage = _hungerBarRoot.AddComponent<Image>();
-            bgImage.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+            var nameGo = UIKit.Anchored(block.transform, "Name", new Vector2(0f, 1f),
+                new Vector2(textLeft, 0f), new Vector2(textW, 46f));
+            _nameText = UIKit.Label(nameGo, "", UITheme.Display, 38, UITheme.Ink,
+                TextAnchor.MiddleLeft);
 
-            var fillObj = new GameObject("Fill");
-            fillObj.transform.SetParent(_hungerBarRoot.transform, false);
+            var activityGo = UIKit.Anchored(block.transform, "Activity", new Vector2(0f, 1f),
+                new Vector2(textLeft, -46f), new Vector2(textW, 30f));
+            _activityText = UIKit.Label(activityGo, "", UITheme.Body, 24, UITheme.InkMuted,
+                TextAnchor.MiddleLeft);
 
-            _hungerBarFill = fillObj.AddComponent<RectTransform>();
-            _hungerBarFill.anchorMin = Vector2.zero;
-            _hungerBarFill.anchorMax = Vector2.one;
-            _hungerBarFill.sizeDelta = Vector2.zero;
-            _hungerBarFill.offsetMin = Vector2.zero;
-            _hungerBarFill.offsetMax = Vector2.zero;
-
-            _hungerBarFillImage = fillObj.AddComponent<Image>();
-            _hungerBarFillImage.color = new Color(0.3f, 0.8f, 0.3f);
-
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(_hungerBarRoot.transform, false);
-
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            labelRect.offsetMin = new Vector2(4, 0);
-            labelRect.offsetMax = Vector2.zero;
-
-            var label = labelObj.AddComponent<Text>();
-            label.font = UIHelpers.GetFont();
-            label.fontSize = 11;
-            label.color = Color.white;
-            label.alignment = TextAnchor.MiddleLeft;
-            label.text = "Hunger";
-
-            var labelShadow = labelObj.AddComponent<Shadow>();
-            labelShadow.effectColor = new Color(0, 0, 0, 0.8f);
-            labelShadow.effectDistance = new Vector2(1, -1);
+            _traitChip = UIKit.Anchored(block.transform, "TraitChip", new Vector2(0f, 0f),
+                new Vector2(textLeft, 0f), new Vector2(textW, 34f));
+            UIKit.Fill(_traitChip, UITheme.Accent, blocksTaps: false);
+            _traitText = UIKit.FillText(_traitChip.transform, "", UITheme.Body, 21, UITheme.Ink,
+                TextAnchor.MiddleLeft, inset: 14f);
         }
 
-        /// <summary>
-        /// Feature 4.5: Create the full needs panel with thirst bar (blue),
-        /// hunger bar (orange), shelter status, and health status.
-        /// </summary>
-        private void CreateNeedsPanel()
+        /// <summary>Thirst and hunger bars.</summary>
+        private void BuildNeedsBlock(Transform parent, float contentW)
         {
-            _needsRoot = new GameObject("NeedsPanel");
-            _needsRoot.transform.SetParent(_panelRoot.transform, false);
+            _needsBlock = UIKit.New(parent, "Needs");
+            UIKit.Size(_needsBlock, 0f, NEED_ROW_H * 2f + 8f);
 
-            _needsRoot.AddComponent<RectTransform>();
-
-            var needsLayout = _needsRoot.AddComponent<VerticalLayoutGroup>();
-            needsLayout.spacing = 4f;
-            needsLayout.childForceExpandWidth = true;
-            needsLayout.childForceExpandHeight = false;
-            needsLayout.childControlWidth = true;
-            needsLayout.childControlHeight = true;
-
-            var needsFitter = _needsRoot.AddComponent<LayoutElement>();
-            needsFitter.flexibleWidth = 1f;
-
-            // ─── Thirst Bar (Blue) ─────────────────────────────
-            var thirstBarRoot = new GameObject("ThirstBar");
-            thirstBarRoot.transform.SetParent(_needsRoot.transform, false);
-            var thirstBarLayout = thirstBarRoot.AddComponent<LayoutElement>();
-            thirstBarLayout.preferredHeight = 14f;
-            thirstBarRoot.AddComponent<RectTransform>();
-            var thirstBg = thirstBarRoot.AddComponent<Image>();
-            thirstBg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-
-            var thirstFillObj = new GameObject("Fill");
-            thirstFillObj.transform.SetParent(thirstBarRoot.transform, false);
-            _thirstBarFill = thirstFillObj.AddComponent<RectTransform>();
-            _thirstBarFill.anchorMin = Vector2.zero;
-            _thirstBarFill.anchorMax = Vector2.one;
-            _thirstBarFill.sizeDelta = Vector2.zero;
-            _thirstBarFill.offsetMin = Vector2.zero;
-            _thirstBarFill.offsetMax = Vector2.zero;
-            _thirstBarFillImage = thirstFillObj.AddComponent<Image>();
-            _thirstBarFillImage.color = THIRST_COLOR;
-
-            _thirstLabel = CreateBarLabel(thirstBarRoot.transform, "Thirst: Hydrated");
-
-            // ─── Hunger Bar (Orange) ───────────────────────────
-            var hungerBarRoot = new GameObject("HungerNeedsBar");
-            hungerBarRoot.transform.SetParent(_needsRoot.transform, false);
-            var hungerBarLayout = hungerBarRoot.AddComponent<LayoutElement>();
-            hungerBarLayout.preferredHeight = 14f;
-            hungerBarRoot.AddComponent<RectTransform>();
-            var hungerBg = hungerBarRoot.AddComponent<Image>();
-            hungerBg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-
-            var hungerFillObj = new GameObject("Fill");
-            hungerFillObj.transform.SetParent(hungerBarRoot.transform, false);
-            _hungerNeedsBarFill = hungerFillObj.AddComponent<RectTransform>();
-            _hungerNeedsBarFill.anchorMin = Vector2.zero;
-            _hungerNeedsBarFill.anchorMax = Vector2.one;
-            _hungerNeedsBarFill.sizeDelta = Vector2.zero;
-            _hungerNeedsBarFill.offsetMin = Vector2.zero;
-            _hungerNeedsBarFill.offsetMax = Vector2.zero;
-            _hungerNeedsBarFillImage = hungerFillObj.AddComponent<Image>();
-            _hungerNeedsBarFillImage.color = HUNGER_COLOR;
-
-            _hungerNeedsLabel = CreateBarLabel(hungerBarRoot.transform, "Hunger: 0/100");
-
-            // ─── Shelter Status ────────────────────────────────
-            _shelterStatusText = CreateLabel("ShelterStatus", FONT_SIZE_TINY, new Color(0.7f, 0.7f, 0.7f));
-            _shelterStatusText.transform.SetParent(_needsRoot.transform, false);
-            _shelterStatusText.text = "Shelter: Unknown";
-
-            // ─── Health Status ─────────────────────────────────
-            _healthStatusText = CreateLabel("HealthStatus", FONT_SIZE_TINY, new Color(0.7f, 0.7f, 0.7f));
-            _healthStatusText.transform.SetParent(_needsRoot.transform, false);
-            _healthStatusText.text = "Health: Healthy";
+            _thirstFill = BuildNeedRow(_needsBlock.transform, "Durst", UITheme.BarThirst,
+                contentW, NEED_ROW_H * 0.5f + 4f, out _thirstValue);
+            _hungerFill = BuildNeedRow(_needsBlock.transform, "Hunger", UITheme.BarHunger,
+                contentW, -NEED_ROW_H * 0.5f - 4f, out _hungerValue);
         }
 
-        /// <summary>
-        /// Feature 3.4: Create the tool info panel showing tool name,
-        /// quality badge, durability bar, and capabilities.
-        /// </summary>
-        private void CreateToolPanel()
+        /// <summary>Label, bar and right-aligned value on one line.</summary>
+        private Image BuildNeedRow(Transform parent, string label, Color color, float contentW,
+            float y, out Text valueText)
         {
-            _toolRoot = new GameObject("ToolPanel");
-            _toolRoot.transform.SetParent(_panelRoot.transform, false);
+            var row = UIKit.Centered(parent, $"Need_{label}", new Vector2(0f, y),
+                new Vector2(contentW, NEED_ROW_H));
 
-            _toolRoot.AddComponent<RectTransform>();
+            var labelGo = UIKit.Anchored(row.transform, "Label", new Vector2(0f, 0.5f),
+                Vector2.zero, new Vector2(NEED_LABEL_W, NEED_ROW_H));
+            UIKit.Label(labelGo, label, UITheme.Body, 23, UITheme.InkMuted, TextAnchor.MiddleLeft);
 
-            var toolLayout = _toolRoot.AddComponent<VerticalLayoutGroup>();
-            toolLayout.spacing = 3f;
-            toolLayout.childForceExpandWidth = true;
-            toolLayout.childForceExpandHeight = false;
-            toolLayout.childControlWidth = true;
-            toolLayout.childControlHeight = true;
+            float barW = contentW - NEED_LABEL_W - NEED_VALUE_W - 20f;
+            var fill = UIKit.Bar(row.transform,
+                new Vector2(-contentW * 0.5f + NEED_LABEL_W + barW * 0.5f, 0f),
+                new Vector2(barW, BAR_H), color, UITheme.PaperDeep, UITheme.Rule);
 
-            var toolFitter = _toolRoot.AddComponent<LayoutElement>();
-            toolFitter.flexibleWidth = 1f;
+            var valueGo = UIKit.Anchored(row.transform, "Value", new Vector2(1f, 0.5f),
+                Vector2.zero, new Vector2(NEED_VALUE_W, NEED_ROW_H));
+            valueText = UIKit.Label(valueGo, "", UITheme.Body, 23, UITheme.Ink,
+                TextAnchor.MiddleRight);
 
-            // Separator label
-            var sepLabel = CreateLabel("ToolSep", FONT_SIZE_TINY, new Color(0.5f, 0.5f, 0.5f));
-            sepLabel.transform.SetParent(_toolRoot.transform, false);
-            sepLabel.text = "--- Tool ---";
-            sepLabel.alignment = TextAnchor.MiddleCenter;
-
-            // Tool name + quality on same line (we use two separate texts)
-            var toolHeaderObj = new GameObject("ToolHeader");
-            toolHeaderObj.transform.SetParent(_toolRoot.transform, false);
-            toolHeaderObj.AddComponent<RectTransform>();
-            var toolHeaderLayout = toolHeaderObj.AddComponent<LayoutElement>();
-            toolHeaderLayout.preferredHeight = 20f;
-
-            // Tool name (left-aligned)
-            var nameObj = new GameObject("ToolName");
-            nameObj.transform.SetParent(toolHeaderObj.transform, false);
-            var nameRect = nameObj.AddComponent<RectTransform>();
-            nameRect.anchorMin = Vector2.zero;
-            nameRect.anchorMax = new Vector2(0.7f, 1f);
-            nameRect.sizeDelta = Vector2.zero;
-            nameRect.offsetMin = Vector2.zero;
-            nameRect.offsetMax = Vector2.zero;
-            _toolNameText = nameObj.AddComponent<Text>();
-            _toolNameText.font = UIHelpers.GetFont();
-            _toolNameText.fontSize = FONT_SIZE_SMALL;
-            _toolNameText.color = Color.white;
-            _toolNameText.alignment = TextAnchor.MiddleLeft;
-
-            // Quality badge (right-aligned)
-            var qualityObj = new GameObject("ToolQuality");
-            qualityObj.transform.SetParent(toolHeaderObj.transform, false);
-            var qualityRect = qualityObj.AddComponent<RectTransform>();
-            qualityRect.anchorMin = new Vector2(0.7f, 0f);
-            qualityRect.anchorMax = Vector2.one;
-            qualityRect.sizeDelta = Vector2.zero;
-            qualityRect.offsetMin = Vector2.zero;
-            qualityRect.offsetMax = Vector2.zero;
-            _toolQualityText = qualityObj.AddComponent<Text>();
-            _toolQualityText.font = UIHelpers.GetFont();
-            _toolQualityText.fontSize = FONT_SIZE_SMALL;
-            _toolQualityText.color = Color.white;
-            _toolQualityText.alignment = TextAnchor.MiddleRight;
-            _toolQualityText.fontStyle = FontStyle.Bold;
-
-            // Durability bar
-            var durBarRoot = new GameObject("DurabilityBar");
-            durBarRoot.transform.SetParent(_toolRoot.transform, false);
-            var durBarLayout = durBarRoot.AddComponent<LayoutElement>();
-            durBarLayout.preferredHeight = 12f;
-            durBarRoot.AddComponent<RectTransform>();
-            var durBg = durBarRoot.AddComponent<Image>();
-            durBg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-
-            var durFillObj = new GameObject("Fill");
-            durFillObj.transform.SetParent(durBarRoot.transform, false);
-            _durabilityBarFill = durFillObj.AddComponent<RectTransform>();
-            _durabilityBarFill.anchorMin = Vector2.zero;
-            _durabilityBarFill.anchorMax = Vector2.one;
-            _durabilityBarFill.sizeDelta = Vector2.zero;
-            _durabilityBarFill.offsetMin = Vector2.zero;
-            _durabilityBarFill.offsetMax = Vector2.zero;
-            _durabilityBarFillImage = durFillObj.AddComponent<Image>();
-            _durabilityBarFillImage.color = DURABILITY_GREEN;
-
-            _durabilityLabel = CreateBarLabel(durBarRoot.transform, "Durability");
-
-            // Capabilities text
-            _toolCapabilitiesText = CreateLabel("ToolCapabilities", FONT_SIZE_TINY, new Color(0.7f, 0.7f, 0.7f));
-            _toolCapabilitiesText.transform.SetParent(_toolRoot.transform, false);
-            _toolCapabilitiesText.text = "";
+            return fill;
         }
 
-        /// <summary>
-        /// v0.4.12: "Give Order" button at bottom of settler info panel.
-        /// Opens Klappbuch with WHO pre-filled to this settler.
-        /// </summary>
-        private void CreateGiveOrderButton()
+        /// <summary>Shelter and health on one line.</summary>
+        private void BuildStatusBlock(Transform parent, float contentW)
         {
-            _giveOrderBtnRoot = new GameObject("GiveOrderBtn");
-            _giveOrderBtnRoot.transform.SetParent(_panelRoot.transform, false);
-            _giveOrderBtnRoot.AddComponent<RectTransform>();
+            _statusBlock = UIKit.New(parent, "Status");
+            UIKit.Size(_statusBlock, 0f, 30f);
 
-            var btnLayout = _giveOrderBtnRoot.AddComponent<LayoutElement>();
-            btnLayout.preferredHeight = 36f;
+            var shelterGo = UIKit.Anchored(_statusBlock.transform, "Shelter",
+                new Vector2(0f, 0.5f), Vector2.zero, new Vector2(contentW * 0.5f, 30f));
+            _shelterText = UIKit.Label(shelterGo, "", UITheme.Body, 22, UITheme.InkMuted,
+                TextAnchor.MiddleLeft);
 
-            var btnImg = _giveOrderBtnRoot.AddComponent<Image>();
-            btnImg.color = new Color(0.2f, 0.45f, 0.25f, 0.9f);
+            var healthGo = UIKit.Anchored(_statusBlock.transform, "Health",
+                new Vector2(1f, 0.5f), Vector2.zero, new Vector2(contentW * 0.5f - 30f, 30f));
+            _healthText = UIKit.Label(healthGo, "", UITheme.Body, 22, UITheme.InkMuted,
+                TextAnchor.MiddleRight);
+        }
 
-            var btn = _giveOrderBtnRoot.AddComponent<Button>();
-            btn.targetGraphic = btnImg;
-            btn.onClick.AddListener(OnGiveOrderClicked);
+        /// <summary>Tool name, quality chip, speed and the condition bar.</summary>
+        private void BuildToolBlock(Transform parent, float contentW)
+        {
+            _toolBlock = UIKit.New(parent, "Tool");
+            UIKit.Size(_toolBlock, 0f, 100f);
 
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(_giveOrderBtnRoot.transform, false);
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            var labelText = labelObj.AddComponent<Text>();
-            labelText.font = UIHelpers.GetFont();
-            labelText.fontSize = 16;
-            labelText.color = Color.white;
-            labelText.alignment = TextAnchor.MiddleCenter;
-            labelText.fontStyle = FontStyle.Bold;
-            labelText.text = "Give Order";
+            // Separator rule at the very top of the block.
+            var rule = UIKit.New(_toolBlock.transform, "Rule");
+            var rr = (RectTransform)rule.transform;
+            rr.anchorMin = new Vector2(0f, 1f);
+            rr.anchorMax = new Vector2(1f, 1f);
+            rr.pivot = new Vector2(0.5f, 1f);
+            rr.anchoredPosition = Vector2.zero;
+            rr.sizeDelta = new Vector2(0f, UITheme.Border);
+            UIKit.Fill(rule, UITheme.Rule, blocksTaps: false);
 
-            _giveOrderBtnRoot.SetActive(false);
+            // ── Name · quality chip · speed ──
+            var nameGo = UIKit.Anchored(_toolBlock.transform, "ToolName", new Vector2(0f, 1f),
+                new Vector2(0f, -18f), new Vector2(240f, 34f));
+            _toolName = UIKit.Label(nameGo, "", UITheme.Display, 26, UITheme.Ink,
+                TextAnchor.MiddleLeft);
+
+            var qualityGo = UIKit.Anchored(_toolBlock.transform, "Quality", new Vector2(0f, 1f),
+                new Vector2(250f, -18f), new Vector2(130f, 34f));
+            UIKit.Fill(qualityGo, UITheme.PaperDeep, blocksTaps: false);
+            _toolQuality = UIKit.FillText(qualityGo.transform, "", UITheme.Body, UITheme.FontMin,
+                UITheme.Ink);
+            UIKit.Border(qualityGo.transform, UITheme.Rule, UITheme.Border);
+
+            var speedGo = UIKit.Anchored(_toolBlock.transform, "Speed", new Vector2(1f, 1f),
+                new Vector2(0f, -18f), new Vector2(200f, 34f));
+            _toolSpeed = UIKit.Label(speedGo, "", UITheme.Body, 21, UITheme.InkMuted,
+                TextAnchor.MiddleRight);
+
+            // ── Condition bar ──
+            var conditionRow = UIKit.Anchored(_toolBlock.transform, "Condition",
+                new Vector2(0f, 0f), Vector2.zero, new Vector2(contentW, NEED_ROW_H));
+            var labelGo = UIKit.Anchored(conditionRow.transform, "Label", new Vector2(0f, 0.5f),
+                Vector2.zero, new Vector2(NEED_LABEL_W, NEED_ROW_H));
+            UIKit.Label(labelGo, "Zustand", UITheme.Body, 23, UITheme.InkMuted,
+                TextAnchor.MiddleLeft);
+
+            float barW = contentW - NEED_LABEL_W - NEED_VALUE_W - 20f;
+            _toolConditionFill = UIKit.Bar(conditionRow.transform,
+                new Vector2(-contentW * 0.5f + NEED_LABEL_W + barW * 0.5f, 0f),
+                new Vector2(barW, BAR_H), UITheme.Accent, UITheme.PaperDeep, UITheme.Rule);
+
+            var valueGo = UIKit.Anchored(conditionRow.transform, "Value", new Vector2(1f, 0.5f),
+                Vector2.zero, new Vector2(NEED_VALUE_W, NEED_ROW_H));
+            _toolConditionValue = UIKit.Label(valueGo, "", UITheme.Body, 23, UITheme.Ink,
+                TextAnchor.MiddleRight);
+        }
+
+        /// <summary>Free-form lines for buildings, shelters and the detail view.</summary>
+        private void BuildInfoBlock(Transform parent)
+        {
+            _infoBlock = UIKit.New(parent, "Info");
+            _infoLayout = UIKit.Size(_infoBlock, 0f, 30f);
+
+            var textGo = UIKit.Stretch(_infoBlock.transform, "Text");
+            _infoText = UIKit.Label(textGo, "", UITheme.Body, 22, UITheme.InkSoft,
+                TextAnchor.UpperLeft);
+            _infoBlock.SetActive(false);
+        }
+
+        private void BuildOrderButton(Transform parent)
+        {
+            _orderButton = UIKit.New(parent, "GiveOrder");
+            UIKit.Size(_orderButton, 0f, 84f);
+            UIKit.Surface(_orderButton, UITheme.Confirm, OnGiveOrderClicked);
+            UIKit.FillText(_orderButton.transform, "Befehl geben", UITheme.Display, 28,
+                UITheme.CreamBright);
+            _orderButton.SetActive(false);
         }
 
         private void OnGiveOrderClicked()
@@ -1028,60 +605,6 @@ namespace Terranova.UI
             {
                 SettlerName = _currentSettlerName
             });
-        }
-
-        /// <summary>
-        /// Helper to create a label overlaying a bar (for thirst/hunger/durability labels).
-        /// </summary>
-        private Text CreateBarLabel(Transform parent, string defaultText)
-        {
-            var labelObj = new GameObject("Label");
-            labelObj.transform.SetParent(parent, false);
-
-            var labelRect = labelObj.AddComponent<RectTransform>();
-            labelRect.anchorMin = Vector2.zero;
-            labelRect.anchorMax = Vector2.one;
-            labelRect.sizeDelta = Vector2.zero;
-            labelRect.offsetMin = new Vector2(4, 0);
-            labelRect.offsetMax = Vector2.zero;
-
-            var label = labelObj.AddComponent<Text>();
-            label.font = UIHelpers.GetFont();
-            label.fontSize = 11;
-            label.color = Color.white;
-            label.alignment = TextAnchor.MiddleLeft;
-            label.text = defaultText;
-
-            var labelShadow = labelObj.AddComponent<Shadow>();
-            labelShadow.effectColor = new Color(0, 0, 0, 0.8f);
-            labelShadow.effectDistance = new Vector2(1, -1);
-
-            return label;
-        }
-
-        /// <summary>
-        /// Helper to create a Text element as a child of the panel.
-        /// </summary>
-        private Text CreateLabel(string name, int fontSize, Color color)
-        {
-            var obj = new GameObject(name);
-            obj.transform.SetParent(_panelRoot.transform, false);
-
-            obj.AddComponent<RectTransform>();
-
-            var text = obj.AddComponent<Text>();
-            text.font = UIHelpers.GetFont();
-            text.fontSize = fontSize;
-            text.color = color;
-            text.alignment = TextAnchor.UpperLeft;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
-
-            var shadow = obj.AddComponent<Shadow>();
-            shadow.effectColor = new Color(0, 0, 0, 0.6f);
-            shadow.effectDistance = new Vector2(1, -1);
-
-            return text;
         }
     }
 }

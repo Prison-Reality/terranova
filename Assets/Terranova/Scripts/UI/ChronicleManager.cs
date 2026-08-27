@@ -7,12 +7,17 @@ namespace Terranova.UI
     /// <summary>
     /// v0.5.10 Feature 12: Tribal Chronicle.
     ///
-    /// Records the tribe's history as a narrative timeline.
-    /// Each entry has a timestamp (day + season), category icon, and storytelling text.
+    /// Records the tribe's history as a narrative timeline. Each entry knows the day
+    /// and season it happened, its category, an optional title, and the prose.
     /// Events are recorded automatically from EventBus subscriptions.
     ///
-    /// Entries persist across tribe deaths as separate "chapters".
+    /// Entries persist across tribe deaths; the chapter number separates them, and
+    /// the chronicle page turns that into a chapter heading.
     /// Maximum 100 entries stored (oldest drop off).
+    ///
+    /// v0.6.0: entries carry day/season as values instead of a pre-formatted string,
+    /// and the prose is German — this file is part of the UI layer, so the narrative
+    /// belongs in the player's language.
     /// </summary>
     public class ChronicleManager : MonoBehaviour
     {
@@ -28,16 +33,18 @@ namespace Terranova.UI
             Discovery,   // Discoveries and knowledge
             Season,      // First winter, first spring
             Milestone,   // First tool, first building, days survived, etc.
-            Order,       // Significant orders (first explore, first avoid)
-            Chapter      // Chapter dividers
+            Order        // Significant orders (first explore, first avoid)
         }
 
+        /// <summary>One line of the chronicle.</summary>
         public struct ChronicleEntry
         {
-            public string Timestamp;       // "Spring, Day 3"
+            public int Day;                // Total days since this tribe arrived
+            public Core.Season Season;     // Season it happened in
             public EntryCategory Category;
-            public string Text;            // Narrative text
-            public int Chapter;            // Which chapter this belongs to
+            public string Title;           // Optional headline; empty for plain entries
+            public string Text;            // Narrative prose
+            public int Chapter;            // Which tribe generation this belongs to
         }
 
         // ─── State ─────────────────────────────────────────────
@@ -49,7 +56,6 @@ namespace Terranova.UI
         private bool _firstWinterLogged;
         private bool _firstSpringAfterWinterLogged;
         private bool _hadWinter;
-        private bool _firstToolLogged;
         private bool _firstBuildingLogged;
         private bool _firstPoisoningLogged;
         private bool _firstExploreLogged;
@@ -58,7 +64,9 @@ namespace Terranova.UI
         private int _totalResourcesGathered;
         private bool _resource50Logged;
 
+        /// <summary>All entries, newest first.</summary>
         public IReadOnlyList<ChronicleEntry> Entries => _entries;
+
         public int CurrentChapter => _currentChapter;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -106,11 +114,14 @@ namespace Terranova.UI
         /// <summary>Add the game-start entry. Called by GameBootstrapper after settlers spawn.</summary>
         public void RecordGameStart()
         {
-            AddEntry(EntryCategory.Tribe,
-                "A small tribe of five arrived at an unknown land. They lit a campfire and began to explore.");
+            AddEntry(EntryCategory.Tribe, "",
+                "Fünf Menschen erreichten ein unbekanntes Land. Sie entzündeten ein Feuer und begannen zu suchen.");
         }
 
-        /// <summary>Insert a chapter divider when a new tribe arrives.</summary>
+        /// <summary>
+        /// Start a new chapter when a new tribe arrives. The chronicle page turns the
+        /// chapter number into its own heading, so no marker entry is needed.
+        /// </summary>
         public void RecordNewTribe()
         {
             _currentChapter++;
@@ -119,7 +130,6 @@ namespace Terranova.UI
             _firstWinterLogged = false;
             _firstSpringAfterWinterLogged = false;
             _hadWinter = false;
-            _firstToolLogged = false;
             _firstBuildingLogged = false;
             _firstPoisoningLogged = false;
             _firstExploreLogged = false;
@@ -128,79 +138,73 @@ namespace Terranova.UI
             _totalResourcesGathered = 0;
             _resource50Logged = false;
 
-            AddEntry(EntryCategory.Chapter,
-                $"\u2500\u2500 Chapter {_currentChapter}: A New Beginning \u2500\u2500");
-            AddEntry(EntryCategory.Tribe,
-                "A new tribe discovers the remains of an old camp. They settle here.");
+            AddEntry(EntryCategory.Tribe, "",
+                "Ein neuer Stamm findet die Reste eines alten Lagers. Hier bleiben sie.");
         }
 
         // ─── Event Handlers ──────────────────────────────────────
 
         private bool _gameStarted;
-        private int _lastPopulation;
 
         private void OnPopulationChanged(PopulationChangedEvent evt)
         {
             if (!_gameStarted && evt.CurrentPopulation > 0)
             {
                 _gameStarted = true;
-                _lastPopulation = evt.CurrentPopulation;
+                return;
             }
-            else
+
+            if (_gameStarted && evt.CurrentPopulation <= 0)
             {
-                if (_gameStarted && evt.CurrentPopulation <= 0)
-                {
-                    AddEntry(EntryCategory.Tribe,
-                        "The last of the tribe perished. The campfire grows cold.");
-                }
-                _lastPopulation = evt.CurrentPopulation;
+                AddEntry(EntryCategory.Tribe, "",
+                    "Der letzte des Stammes starb. Das Lagerfeuer wird kalt.");
             }
         }
 
         private void OnSettlerDied(SettlerDiedEvent evt)
         {
-            string cause = evt.CauseOfDeath ?? "unknown causes";
+            string cause = evt.CauseOfDeath ?? "";
             string narrative = cause switch
             {
                 "food poisoning" =>
-                    $"{evt.SettlerName} ate something deadly and did not survive. The tribe mourns.",
+                    $"{evt.SettlerName} aß etwas Tödliches und überlebte es nicht. Der Stamm trauert.",
                 "starvation" =>
-                    $"{evt.SettlerName} succumbed to hunger. There was not enough food.",
+                    $"{evt.SettlerName} erlag dem Hunger. Es war nicht genug Nahrung da.",
                 "dehydration" =>
-                    $"{evt.SettlerName} collapsed from thirst. Water was too far away.",
+                    $"{evt.SettlerName} brach vor Durst zusammen. Das Wasser war zu weit.",
                 "cold exposure" =>
-                    $"{evt.SettlerName} froze in the night. The cold took another.",
+                    $"{evt.SettlerName} erfror in der Nacht. Die Kälte holte sich einen weiteren.",
                 _ =>
-                    $"{evt.SettlerName} perished from {cause}. The tribe mourns."
+                    $"{evt.SettlerName} starb {UIStrings.DeathCause(cause)}. Der Stamm trauert."
             };
-            AddEntry(EntryCategory.Tribe, narrative);
+            AddEntry(EntryCategory.Tribe, "", narrative);
         }
 
         private void OnDiscoveryMade(DiscoveryMadeEvent evt)
         {
-            string discoverer = !string.IsNullOrEmpty(evt.Reason) ? evt.Reason : "the tribe";
-            string text;
-
-            // Special narrative for known discoveries
             string name = evt.DiscoveryName ?? "";
+            string german = UIStrings.Discovery(name);
+
+            // Special narrative for the discoveries that change the tribe's life.
+            string text;
             if (name.Contains("Fire"))
             {
-                text = $"Watching sparks fly from struck flint, someone understood: fire can be tamed. A great discovery.";
+                text = "Aus geschlagenem Stein sprangen Funken — und jemand begriff: Feuer lässt sich zähmen.";
             }
             else if (name.Contains("Composite") || name.Contains("Tool"))
             {
-                text = $"The tribe shaped stone and wood into something new. Tools would change everything.";
+                text = "Der Stamm fügte Stein und Holz zu etwas Neuem. Werkzeug würde alles verändern.";
             }
             else if (name.Contains("Plant Knowledge"))
             {
-                text = $"Through bitter loss, the tribe learned which plants bring death. They would not forget.";
+                text = "Durch bitteren Verlust lernte der Stamm, welche Pflanzen den Tod bringen. Sie vergaßen es nicht.";
             }
             else
             {
-                text = $"The tribe made a discovery: {name}. {evt.Description}";
+                text = UIStrings.DiscoveryDescription(name, evt.Description);
             }
 
-            AddEntry(EntryCategory.Discovery, text);
+            AddEntry(EntryCategory.Discovery, german, text);
         }
 
         private void OnSeasonChanged(SeasonNotificationEvent evt)
@@ -211,62 +215,57 @@ namespace Terranova.UI
             {
                 _firstWinterLogged = true;
                 _hadWinter = true;
-                AddEntry(EntryCategory.Season,
-                    "The cold came without warning. Food grew scarce.");
+                AddEntry(EntryCategory.Season, "",
+                    "Die Kälte kam ohne Vorwarnung. Nahrung wurde knapp.");
             }
             else if (msg.Contains("Spring") && _hadWinter && !_firstSpringAfterWinterLogged)
             {
                 _firstSpringAfterWinterLogged = true;
-                AddEntry(EntryCategory.Season,
-                    "The ice melted. Green returned to the land.");
+                AddEntry(EntryCategory.Season, "",
+                    "Das Eis schmolz. Grün kehrte ins Land zurück.");
             }
         }
 
         private void OnDayChanged(DayChangedEvent evt)
         {
-            if (evt.DayCount == 10 && !_day10Logged)
-            {
-                _day10Logged = true;
-                AddEntry(EntryCategory.Milestone,
-                    "Ten days. The tribe endures.");
-            }
+            if (evt.DayCount != 10 || _day10Logged) return;
+
+            _day10Logged = true;
+            AddEntry(EntryCategory.Milestone, "", "Zehn Tage. Der Stamm hält durch.");
         }
 
         private void OnBuildingCompleted(BuildingCompletedEvent evt)
         {
-            if (!_firstBuildingLogged)
-            {
-                _firstBuildingLogged = true;
-                AddEntry(EntryCategory.Milestone,
-                    $"The tribe built their first structure: {evt.BuildingName}. For the first time, they had shelter they built themselves.");
-            }
+            if (_firstBuildingLogged) return;
+
+            _firstBuildingLogged = true;
+            string building = UIStrings.Building(evt.BuildingName);
+            AddEntry(EntryCategory.Milestone, building,
+                "Zum ersten Mal stand ein Dach da, das sie selbst errichtet hatten.");
         }
 
         private void OnResourceDelivered(ResourceDeliveredEvent evt)
         {
             _totalResourcesGathered++;
-            if (_totalResourcesGathered == 50 && !_resource50Logged)
-            {
-                _resource50Logged = true;
-                AddEntry(EntryCategory.Milestone,
-                    "The stockpile grows. The tribe begins to thrive.");
-            }
+            if (_totalResourcesGathered != 50 || _resource50Logged) return;
+
+            _resource50Logged = true;
+            AddEntry(EntryCategory.Milestone, "",
+                "Der Vorrat wächst. Der Stamm beginnt zu gedeihen.");
         }
 
         private void OnSettlerPoisoned(SettlerPoisonedEvent evt)
         {
-            if (!_firstPoisoningLogged)
-            {
-                _firstPoisoningLogged = true;
-                string food = evt.FoodName ?? "something unknown";
-                AddEntry(EntryCategory.Milestone,
-                    $"{evt.SettlerName} learned the hard way: not all {food} are safe.");
-            }
+            if (_firstPoisoningLogged) return;
+
+            _firstPoisoningLogged = true;
+            string food = evt.FoodName ?? "manches";
+            AddEntry(EntryCategory.Milestone, "",
+                $"{evt.SettlerName} lernte es auf die harte Art: nicht alles davon ist sicher ({food}).");
         }
 
         private void OnOrderCreated(OrderCreatedEvent evt)
         {
-            // We need to check the order type. Use OrderManager if available.
             var mgr = Terranova.Orders.OrderManager.Instance;
             if (mgr == null) return;
 
@@ -276,31 +275,36 @@ namespace Terranova.UI
             if (order.Predicate == OrderPredicate.Explore && !_firstExploreLogged)
             {
                 _firstExploreLogged = true;
-                string who = order.SettlerName ?? "someone";
-                if (order.Subject == OrderSubject.All) who = "scouts";
-                AddEntry(EntryCategory.Order,
-                    $"The tribe sent {who} into the unknown.");
+                string who = order.Subject == OrderSubject.All
+                    ? "Späher"
+                    : order.SettlerName ?? "jemanden";
+                AddEntry(EntryCategory.Order, "",
+                    $"Der Stamm schickte {who} ins Unbekannte.");
             }
             else if (order.Predicate == OrderPredicate.Avoid && !_firstAvoidLogged)
             {
                 _firstAvoidLogged = true;
-                string what = "";
-                if (order.Objects.Count > 0)
-                    what = order.Objects[0].DisplayName ?? "certain foods";
-                AddEntry(EntryCategory.Order,
-                    $"After loss, the tribe agreed: no more {what}.");
+                string what = order.Objects.Count > 0
+                    ? UIStrings.OrderObjectName(order.Objects[0].Id, order.Objects[0].DisplayName)
+                    : "bestimmte Nahrung";
+                AddEntry(EntryCategory.Order, "",
+                    $"Nach dem Verlust waren sie sich einig: kein {what} mehr.");
             }
         }
 
         // ─── Internal ────────────────────────────────────────────
 
-        private void AddEntry(EntryCategory category, string text)
+        private void AddEntry(EntryCategory category, string title, string text)
         {
-            string timestamp = GetTimestamp();
+            var season = Terrain.SeasonManager.Instance;
+            var dnc = Terrain.DayNightCycle.Instance;
+
             _entries.Insert(0, new ChronicleEntry
             {
-                Timestamp = timestamp,
+                Day = dnc != null ? dnc.DayCount : GameState.DayCount,
+                Season = season != null ? season.CurrentSeason : Core.Season.Spring,
                 Category = category,
+                Title = title,
                 Text = text,
                 Chapter = _currentChapter
             });
@@ -308,17 +312,6 @@ namespace Terranova.UI
             // Cap at MAX_ENTRIES
             while (_entries.Count > MAX_ENTRIES)
                 _entries.RemoveAt(_entries.Count - 1);
-        }
-
-        private static string GetTimestamp()
-        {
-            var season = Terrain.SeasonManager.Instance;
-            var dnc = Terrain.DayNightCycle.Instance;
-
-            string seasonName = season != null ? season.CurrentSeason.ToString() : "Spring";
-            int day = dnc != null ? dnc.DayCount : GameState.DayCount;
-
-            return $"{seasonName}, Day {day}";
         }
     }
 }
